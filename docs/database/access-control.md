@@ -7,16 +7,16 @@
 ## 📐 Access Control Map
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   PostgreSQL Roles                           │
-├──────────────┬──────────────┬──────────────┬────────────────┤
-│ aegis_admin  │ aegis_price  │ aegis_trade  │ aegis_readonly │
-│ (슈퍼관리자)  │ (PriceSync)  │ (Strategy)   │ (조회 전용)     │
-└──────┬───────┴──────┬───────┴──────┬───────┴────────┬───────┘
-       │              │              │                │
-       ▼              ▼              ▼                ▼
-   ALL ACCESS    market.*      trade.*          SELECT만
-                 (READ/WRITE)  (READ/WRITE)     (모든 테이블)
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                             PostgreSQL Roles                                     │
+├──────────────┬───────────────┬──────────────┬──────────────┬──────────────┬─────┤
+│ aegis_admin  │ aegis_datasync│ aegis_price  │ aegis_router │ aegis_trade  │ ... │
+│ (슈퍼관리자)  │ (종목마스터)   │ (PriceSync)  │ (Pick Router)│ (Exit/Reentry)│    │
+└──────┬───────┴───────┬───────┴──────┬───────┴──────┬───────┴──────┬───────┴─────┘
+       │               │              │              │              │
+       ▼               ▼              ▼              ▼              ▼
+   ALL ACCESS    market.stocks  market.prices* trade.picks    trade.positions
+                 (READ/WRITE)   (READ/WRITE)  (READ/WRITE)   (READ/WRITE)
 ```
 
 ---
@@ -48,23 +48,35 @@ GRANT SELECT ON market.prices_best TO aegis_trade;
 
 ```
 aegis_admin (슈퍼관리자)
+├── aegis_datasync (DataSync 전용)
+│   └── market.stocks (READ/WRITE)
+│
 ├── aegis_price (PriceSync 전용)
-│   ├── market.* (READ/WRITE)
+│   ├── market.prices_*, freshness, sync_jobs, discrepancies (READ/WRITE)
+│   ├── market.stocks (READ ONLY)
 │   └── trade.* (READ ONLY)
+│
+├── aegis_router (Router 전용)
+│   ├── market.* (READ ONLY)
+│   ├── trade.picks (READ/WRITE)
+│   ├── trade.pick_decisions (READ/WRITE)
+│   └── trade.order_intents (READ/WRITE, ENTRY only)
 │
 ├── aegis_trade (Strategy 전용: Exit/Reentry)
 │   ├── market.* (READ ONLY)
-│   ├── trade.positions (READ/WRITE)
+│   ├── trade.positions (READ/WRITE, 일부 컬럼)
 │   ├── trade.position_state (READ/WRITE)
 │   ├── trade.reentry_candidates (READ/WRITE)
-│   └── trade.order_intents (READ/WRITE)
+│   └── trade.order_intents (READ/WRITE, EXIT_*/ENTRY)
 │
 ├── aegis_exec (Execution 전용)
-│   ├── market.* (READ ONLY, 선택)
+│   ├── market.stocks, prices_best (READ ONLY)
 │   ├── trade.order_intents (READ ONLY)
 │   ├── trade.orders (READ/WRITE)
 │   ├── trade.fills (READ/WRITE)
-│   └── trade.positions (UPDATE ONLY, 체결 후 수량 조정)
+│   ├── trade.holdings (READ/WRITE)
+│   ├── trade.exit_events (READ/WRITE)
+│   └── trade.positions (UPDATE ONLY, qty/avg_price 컬럼만)
 │
 └── aegis_readonly (조회 전용)
     └── ALL TABLES (SELECT ONLY)
@@ -100,7 +112,43 @@ COMMENT ON ROLE aegis_admin IS '슈퍼관리자 - 스키마 생성/마이그레�
 
 ---
 
-### 2. aegis_price (PriceSync 모듈)
+### 2. aegis_datasync (DataSync 모듈)
+
+**목적**: 종목 마스터 데이터 동기화 (KIS API → market.stocks)
+
+```sql
+-- Role 생성
+CREATE ROLE aegis_datasync WITH
+    LOGIN
+    PASSWORD 'CHANGE_ME'
+    NOCREATEDB
+    NOCREATEROLE;
+
+COMMENT ON ROLE aegis_datasync IS 'DataSync 모듈 전용 - market.stocks 쓰기 권한';
+
+-- market schema 권한
+GRANT USAGE ON SCHEMA market TO aegis_datasync;
+
+-- market.stocks 전체 권한 (SSOT 소유자)
+GRANT SELECT, INSERT, UPDATE, DELETE ON market.stocks TO aegis_datasync;
+
+-- 기본 권한 설정 (향후 생성되는 테이블 대비)
+ALTER DEFAULT PRIVILEGES IN SCHEMA market
+    GRANT SELECT ON TABLES TO aegis_datasync;
+```
+
+**쓰기 가능 테이블**:
+- ✅ `market.stocks` (종목 마스터 - SSOT)
+
+**중요**:
+- DataSync는 `market.stocks`의 유일한 쓰기 소유자
+- 다른 모든 모듈은 `market.stocks` READ ONLY
+- KIS API 종목 정보를 주기적으로 동기화 (상장/폐지/거래정지 등)
+- is_tradable 플래그 관리 (거래 가능 여부)
+
+---
+
+### 3. aegis_price (PriceSync 모듈)
 
 **목적**: 가격 데이터 수집 및 저장
 
@@ -118,6 +166,9 @@ COMMENT ON ROLE aegis_price IS 'PriceSync 모듈 전용 - market.* 쓰기 권한
 GRANT USAGE ON SCHEMA market TO aegis_price;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA market TO aegis_price;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA market TO aegis_price;
+
+-- market.stocks는 READ ONLY (DataSync 소유)
+REVOKE INSERT, UPDATE, DELETE ON market.stocks FROM aegis_price;
 
 -- trade schema 권한 (READ ONLY)
 GRANT USAGE ON SCHEMA trade TO aegis_price;
@@ -143,7 +194,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA trade
 
 ---
 
-### 3. aegis_router (Router 모듈: Pick 처리)
+### 4. aegis_router (Router 모듈: Pick 처리)
 
 **목적**: 종목 선정 결과 수신 및 ENTRY intent 생성
 
@@ -160,6 +211,9 @@ COMMENT ON ROLE aegis_router IS 'Router 모듈 - picks/pick_decisions/order_inte
 -- market schema 권한 (READ ONLY)
 GRANT USAGE ON SCHEMA market TO aegis_router;
 GRANT SELECT ON ALL TABLES IN SCHEMA market TO aegis_router;
+
+-- market.stocks READ ONLY (신선도 체크, 종목 유효성 검증)
+GRANT SELECT ON market.stocks TO aegis_router;
 
 -- trade schema 권한
 GRANT USAGE ON SCHEMA trade TO aegis_router;
@@ -192,7 +246,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_router;
 
 ---
 
-### 4. aegis_trade (Exit/Reentry 모듈)
+### 5. aegis_trade (Exit/Reentry 모듈)
 
 **목적**: 포지션 관리 및 청산/재진입 로직
 
@@ -209,6 +263,9 @@ COMMENT ON ROLE aegis_trade IS 'Exit/Reentry 모듈 - positions/order_intents(EX
 -- market schema 권한 (READ ONLY)
 GRANT USAGE ON SCHEMA market TO aegis_trade;
 GRANT SELECT ON ALL TABLES IN SCHEMA market TO aegis_trade;
+
+-- market.stocks READ ONLY (종목 유효성 검증)
+GRANT SELECT ON market.stocks TO aegis_trade;
 
 -- trade schema 권한
 GRANT USAGE ON SCHEMA trade TO aegis_trade;
@@ -264,7 +321,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
 
 ---
 
-### 5. aegis_exec (Execution 모듈)
+### 6. aegis_exec (Execution 모듈)
 
 **목적**: 주문 제출 및 체결 관리
 
@@ -281,6 +338,7 @@ COMMENT ON ROLE aegis_exec IS 'Execution 모듈 - 주문/체결 쓰기 권한';
 -- market schema 권한 (READ ONLY, 선택적)
 GRANT USAGE ON SCHEMA market TO aegis_exec;
 GRANT SELECT ON market.prices_best TO aegis_exec;
+GRANT SELECT ON market.stocks TO aegis_exec;
 
 -- trade schema 권한
 GRANT USAGE ON SCHEMA trade TO aegis_exec;
@@ -316,7 +374,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_exec;
 
 ---
 
-### 5. aegis_readonly (조회 전용)
+### 7. aegis_readonly (조회 전용)
 
 **목적**: BFF API 조회, 모니터링, 대시보드
 
@@ -356,29 +414,30 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA trade
 
 ## 🔒 접근 제어 매트릭스
 
-| 테이블 | aegis_admin | aegis_price | aegis_trade | aegis_exec | aegis_readonly |
-|--------|-------------|-------------|-------------|------------|----------------|
-| **market.prices_ticks** | ALL | READ/WRITE | READ | - | READ |
-| **market.prices_best** | ALL | READ/WRITE | READ | READ | READ |
-| **market.freshness** | ALL | READ/WRITE | READ | - | READ |
-| **market.sync_jobs** | ALL | READ/WRITE | - | - | READ |
-| **market.discrepancies** | ALL | READ/WRITE | - | - | READ |
-| **trade.positions** | ALL | READ | READ/WRITE | READ + UPDATE(qty) | READ |
-| **trade.position_state** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.reentry_candidates** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.reentry_control** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.order_intents** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.orders** | ALL | READ | READ | READ/WRITE | READ |
-| **trade.fills** | ALL | READ | READ | READ/WRITE | READ |
-| **trade.exit_signals** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.exit_control** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.exit_profiles** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.symbol_exit_overrides** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.exit_events** | ALL | READ | READ | READ/WRITE | READ |
-| **trade.holdings** | ALL | READ | READ | READ/WRITE | READ |
-| **trade.picks** | ALL | READ | READ/WRITE | READ | READ |
-| **trade.pick_decisions** | ALL | READ | READ/WRITE | READ | READ |
-| **system.process_locks** | ALL | READ/WRITE | READ/WRITE | READ/WRITE | READ |
+| 테이블 | aegis_admin | aegis_datasync | aegis_price | aegis_router | aegis_trade | aegis_exec | aegis_readonly |
+|--------|-------------|----------------|-------------|--------------|-------------|------------|----------------|
+| **market.stocks** | ALL | READ/WRITE | READ | READ | READ | READ | READ |
+| **market.prices_ticks** | ALL | - | READ/WRITE | - | READ | - | READ |
+| **market.prices_best** | ALL | - | READ/WRITE | - | READ | READ | READ |
+| **market.freshness** | ALL | - | READ/WRITE | - | READ | - | READ |
+| **market.sync_jobs** | ALL | - | READ/WRITE | - | - | - | READ |
+| **market.discrepancies** | ALL | - | READ/WRITE | - | - | - | READ |
+| **trade.positions** | ALL | - | - | READ | READ/WRITE(일부) | READ + UPDATE(qty) | READ |
+| **trade.position_state** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.reentry_candidates** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.reentry_control** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.order_intents** | ALL | - | - | READ/WRITE | READ/WRITE | READ | READ |
+| **trade.orders** | ALL | - | - | READ | READ | READ/WRITE | READ |
+| **trade.fills** | ALL | - | - | READ | READ | READ/WRITE | READ |
+| **trade.exit_signals** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.exit_control** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.exit_profiles** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.symbol_exit_overrides** | ALL | - | - | - | READ/WRITE | READ | READ |
+| **trade.exit_events** | ALL | - | - | - | READ | READ/WRITE | READ |
+| **trade.holdings** | ALL | - | - | READ | READ | READ/WRITE | READ |
+| **trade.picks** | ALL | - | - | READ/WRITE | READ | READ | READ |
+| **trade.pick_decisions** | ALL | - | - | READ/WRITE | READ | READ | READ |
+| **system.process_locks** | ALL | - | - | READ/WRITE | READ/WRITE | READ/WRITE | READ |
 
 **범례**:
 - `ALL` = SUPERUSER (모든 권한)

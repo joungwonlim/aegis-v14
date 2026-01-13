@@ -102,7 +102,7 @@ Phase 5: 검증 및 모니터링
 ```sql
 -- 1. stocks 테이블 생성
 CREATE TABLE market.stocks (
-    symbol        VARCHAR(12) PRIMARY KEY,
+    symbol        TEXT PRIMARY KEY,
     name          TEXT        NOT NULL,
     market        TEXT        NOT NULL,
 

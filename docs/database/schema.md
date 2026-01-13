@@ -55,7 +55,7 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 
 ```sql
 CREATE TABLE market.stocks (
-    symbol        VARCHAR(12) PRIMARY KEY,  -- 종목코드 (예: 005930, 069500)
+    symbol        TEXT PRIMARY KEY,  -- 종목코드 (예: 005930, 069500) - 6자리 숫자
     name          TEXT        NOT NULL,     -- 종목명 (예: 삼성전자)
     market        TEXT        NOT NULL,     -- KOSPI | KOSDAQ | KONEX
 
@@ -118,7 +118,8 @@ CREATE TABLE market.prices_ticks (
     ask           NUMERIC,
     volume        BIGINT,
     trade_value   NUMERIC,
-    PRIMARY KEY (symbol, ts, source)
+    PRIMARY KEY (symbol, ts, source),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_prices_ticks_ts ON market.prices_ticks (ts DESC);
@@ -139,7 +140,8 @@ CREATE TABLE market.prices_best (
     ask           NUMERIC,
     freshness_ms  BIGINT      NOT NULL,
     quality_score INT         NOT NULL,
-    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE CASCADE
 );
 ```
 
@@ -156,7 +158,8 @@ CREATE TABLE market.freshness (
     best_ts        TIMESTAMPTZ,
     is_stale       BOOLEAN     NOT NULL DEFAULT false,
     stale_reason   TEXT,
-    updated_ts     TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE CASCADE
 );
 ```
 
@@ -176,7 +179,8 @@ CREATE TABLE market.sync_jobs (
     last_error   TEXT,
     created_ts   TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_ts   TIMESTAMPTZ,
-    completed_ts TIMESTAMPTZ
+    completed_ts TIMESTAMPTZ,
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_sync_jobs_status_priority ON market.sync_jobs (status, priority DESC);
@@ -196,7 +200,8 @@ CREATE TABLE market.discrepancies (
     naver_price  BIGINT NOT NULL,
     diff_pct     FLOAT NOT NULL,
     kis_source   TEXT NOT NULL,  -- KIS_WS | KIS_REST
-    severity     TEXT NOT NULL   -- LOW | MEDIUM | HIGH
+    severity     TEXT NOT NULL,  -- LOW | MEDIUM | HIGH
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_discrepancies_symbol_ts ON market.discrepancies (symbol, ts DESC);
@@ -239,7 +244,8 @@ CREATE TABLE trade.positions (
     exit_mode     TEXT NOT NULL DEFAULT 'DEFAULT',  -- DEFAULT | DISABLED | MANUAL_ONLY | PROFILE:<id>
     exit_profile_id TEXT,  -- NULL이면 resolver로 결정
     version       INT NOT NULL DEFAULT 1,  -- 낙관적 잠금 (평단가 변경 감지)
-    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_positions_open ON trade.positions (account_id, status, symbol)
@@ -301,7 +307,8 @@ CREATE TABLE trade.reentry_candidates (
     reentry_count       INT  NOT NULL DEFAULT 0,
     reentry_profile_id  TEXT,  -- 재진입 시 적용할 profile (NULL이면 resolver)
     last_eval_ts        TIMESTAMPTZ,
-    updated_ts          TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_reentry_state ON trade.reentry_candidates (state, cooldown_until);
@@ -361,7 +368,8 @@ CREATE TABLE trade.order_intents (
     action_key    TEXT NOT NULL,  -- 멱등성 키
     status        TEXT NOT NULL DEFAULT 'NEW',
     created_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE UNIQUE INDEX uq_order_intents_action_key ON trade.order_intents (action_key);
@@ -513,7 +521,8 @@ CREATE TABLE trade.symbol_exit_overrides (
     reason         TEXT,
     created_by     TEXT NOT NULL,
     created_ts     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_ts     TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_symbol_overrides_profile ON trade.symbol_exit_overrides (profile_id);
@@ -539,7 +548,8 @@ CREATE TABLE trade.exit_events (
     exit_profile_id   TEXT,  -- 적용된 profile
     realized_pnl      NUMERIC,
     realized_pnl_pct  FLOAT,
-    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_exit_events_position ON trade.exit_events (position_id, exit_ts DESC);
@@ -568,7 +578,8 @@ CREATE TABLE trade.holdings (
     pnl_pct       FLOAT,
     updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
     raw           JSONB,
-    PRIMARY KEY (account_id, symbol)
+    PRIMARY KEY (account_id, symbol),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 ```
 
@@ -606,7 +617,8 @@ CREATE TABLE trade.picks (
     reject_reason     TEXT,
 
     created_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_picks_run ON trade.picks (run_date, producer_id, run_id);
@@ -660,7 +672,8 @@ CREATE TABLE trade.pick_decisions (
     -- Intent 생성
     intent_id         UUID REFERENCES trade.order_intents(intent_id),
 
-    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (symbol) REFERENCES market.stocks(symbol) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_decisions_date ON trade.pick_decisions (run_date DESC);
