@@ -19,6 +19,8 @@ docs/
 ├── database/                    # 데이터베이스 설계
 ├── api/                         # API 설계
 ├── ui/                          # UI 설계
+├── operations/                  # 운영 가이드
+│   └── exit-engine-playbook.md  # Exit Engine 운영 플레이북
 └── reviews/                     # 설계 검토 기록 (아카이브)
     └── 2026-01-13-ssot-review.md
 ```
@@ -112,27 +114,36 @@ docs/
 
 ---
 
+## 🎮 운영 가이드 (Operations)
+
+| 문서 | 상태 | 설명 |
+|------|------|------|
+| `operations/exit-engine-playbook.md` | ✅ 완료 | Exit Engine 운영 플레이북 (If-Then 시나리오, 긴급 대응, 모니터링) |
+
+---
+
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 11/30 (계획 변경: Quant Runtime + Pick Pipeline)
-진행률: 37%
+총 문서 수: 12/31 (계획 변경: Quant Runtime + Pick Pipeline + Operations)
+진행률: 39%
 
-✅ 완료: 11
+✅ 완료: 12
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
   - modules/price-sync.md
-  - modules/exit-engine.md (Control Gate + Profile System, SSOT 강화)
+  - modules/exit-engine.md (Control Gate + Profile System, SSOT 강화, v10 사고 사례)
   - modules/reentry-engine.md (ExitEvent 기반 디커플링)
   - modules/execution-service.md (ExitEvent 생성 SSOT)
   - modules/external-apis.md (KIS WS TR별 소유권 분리)
   - database/schema.md (21 tables, positions 컬럼별 SSOT 명시)
   - database/access-control.md (컬럼별 권한, DELETE 제거)
+  - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
   - reviews/2026-01-13-ssot-review.md (SSOT 검증 아카이브)
 
 🚧 진행 중: 0
-⬜ TODO: 20
+⬜ TODO: 19
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
@@ -144,6 +155,7 @@ Exit/Reentry 디커플링 완료 (ExitEvent SSOT 기반 아키텍처) ✅
 Exit 표준 룰 완료 (Hybrid % + ATR, 프로파일 3종, HardStop) ✅
 SSOT 검증 및 수정 완료 (문서 간 불일치 5건 해결) ✅
 아키텍처 개선안 작성 완료 (P0~P2 우선순위별 6건) ✅
+Exit Engine 운영 플레이북 작성 완료 (If-Then, 긴급 대응, 조정 우선순위) ✅
 ```
 
 ---

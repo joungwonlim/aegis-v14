@@ -2397,10 +2397,19 @@ Exit Engine은 LISTEN으로 이벤트를 받아 메모리 캐시 갱신.
 
 ## 🔗 관련 문서
 
+### 설계 문서
 - [architecture/system-overview.md](../architecture/system-overview.md) - 전체 시스템
 - [price-sync.md](./price-sync.md) - PriceSync (Exit 의존)
 - [reentry-engine.md](./reentry-engine.md) - Reentry Engine
 - [database/schema.md](../database/schema.md) - DB 스키마
+
+### 운영 가이드
+- [operations/exit-engine-playbook.md](../operations/exit-engine-playbook.md) - **Exit Engine 운영 플레이북**
+  - If-Then 시나리오별 대응 절차
+  - 손실/수익 상황별 조치 가이드
+  - 숫자 조정 규칙 (과도한 튜닝 방지)
+  - 긴급 상황 매뉴얼 (3단계)
+  - 모니터링 지표 및 롤백 절차
 
 ---
 
