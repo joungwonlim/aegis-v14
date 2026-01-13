@@ -20,12 +20,15 @@ CREATE SCHEMA IF NOT EXISTS trade;    -- Strategy/Execution 공유
 | market | prices_ticks | PriceSync | PriceSync만 |
 | market | prices_best | PriceSync | PriceSync만 |
 | market | freshness | PriceSync | PriceSync만 |
+| market | sync_jobs | PriceSync | PriceSync만 |
+| market | discrepancies | PriceSync | PriceSync만 |
 | trade | positions | Exit | Exit, Execution |
 | trade | position_state | Exit | Exit만 |
 | trade | reentry_candidates | Reentry | Reentry만 |
 | trade | order_intents | Strategy | Exit, Reentry만 |
 | trade | orders | Execution | Execution만 |
 | trade | fills | Execution | Execution만 |
+| trade | exit_signals | Exit | Exit만 |
 
 ---
 
@@ -85,6 +88,49 @@ CREATE TABLE market.freshness (
     stale_reason   TEXT,
     updated_ts     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+```
+
+### market.sync_jobs
+
+**목적**: PostgreSQL 기반 job queue (FOR UPDATE SKIP LOCKED)
+
+```sql
+CREATE TABLE market.sync_jobs (
+    id           SERIAL PRIMARY KEY,
+    symbol       TEXT NOT NULL,
+    source       TEXT NOT NULL,  -- KIS_REST | NAVER
+    priority     INT NOT NULL,
+    status       TEXT NOT NULL,  -- PENDING | RUNNING | DONE | FAILED
+    worker_id    TEXT,
+    attempts     INT NOT NULL DEFAULT 0,
+    last_error   TEXT,
+    created_ts   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_ts   TIMESTAMPTZ,
+    completed_ts TIMESTAMPTZ
+);
+
+CREATE INDEX idx_sync_jobs_status_priority ON market.sync_jobs (status, priority DESC);
+CREATE INDEX idx_sync_jobs_symbol ON market.sync_jobs (symbol);
+```
+
+### market.discrepancies
+
+**목적**: KIS vs Naver 가격 차이 모니터링
+
+```sql
+CREATE TABLE market.discrepancies (
+    id           SERIAL PRIMARY KEY,
+    symbol       TEXT NOT NULL,
+    ts           TIMESTAMPTZ NOT NULL,
+    kis_price    BIGINT NOT NULL,
+    naver_price  BIGINT NOT NULL,
+    diff_pct     FLOAT NOT NULL,
+    kis_source   TEXT NOT NULL,  -- KIS_WS | KIS_REST
+    severity     TEXT NOT NULL   -- LOW | MEDIUM | HIGH
+);
+
+CREATE INDEX idx_discrepancies_symbol_ts ON market.discrepancies (symbol, ts DESC);
+CREATE INDEX idx_discrepancies_severity ON market.discrepancies (severity, ts DESC);
 ```
 
 ---
@@ -209,6 +255,30 @@ CREATE TABLE trade.fills (
 );
 
 CREATE INDEX idx_fills_order_ts ON trade.fills (order_id, ts DESC);
+```
+
+### trade.exit_signals
+
+**목적**: Exit 트리거 평가 기록 (디버깅/백테스트)
+
+```sql
+CREATE TABLE trade.exit_signals (
+    signal_id         UUID PRIMARY KEY,
+    position_id       UUID NOT NULL REFERENCES trade.positions(position_id),
+    ts                TIMESTAMPTZ NOT NULL,
+    rule_name         TEXT NOT NULL,  -- HARD_STOP | GAP_DOWN | SCALE_OUT | ATR_TRAIL | BREAK_EVEN | TIME_EXIT | MANUAL
+    triggered         BOOLEAN NOT NULL,
+    reason            TEXT,
+    current_price     NUMERIC NOT NULL,
+    hwm_price         NUMERIC,
+    stop_floor_price  NUMERIC,
+    current_pnl_pct   FLOAT NOT NULL,
+    intent_id         UUID,  -- 생성된 intent (있으면)
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_exit_signals_position_ts ON trade.exit_signals (position_id, ts DESC);
+CREATE INDEX idx_exit_signals_rule ON trade.exit_signals (rule_name, triggered, ts DESC);
 ```
 
 ---

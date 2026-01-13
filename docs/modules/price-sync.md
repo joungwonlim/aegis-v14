@@ -153,6 +153,84 @@ INDEX idx_prices_ticks_symbol_ts (symbol, ts DESC)
 | stale_reason | TEXT | NULL | Stale 사유 |
 | updated_ts | TIMESTAMPTZ | NOT NULL | 마지막 갱신 시각 |
 
+### market.sync_jobs (동기화 작업 큐)
+
+**목적**: PostgreSQL 기반 job queue (동시 처리 안전)
+
+| 컬럼 | 타입 | 제약 | 설명 |
+|------|------|------|------|
+| id | SERIAL | PK | Job ID |
+| symbol | TEXT | NOT NULL | 종목 코드 |
+| source | TEXT | NOT NULL | KIS_REST / NAVER |
+| priority | INT | NOT NULL | 우선순위 (높을수록 먼저) |
+| status | TEXT | NOT NULL | PENDING / RUNNING / DONE / FAILED |
+| worker_id | TEXT | NULL | 처리 중인 워커 ID |
+| attempts | INT | NOT NULL DEFAULT 0 | 재시도 횟수 |
+| last_error | TEXT | NULL | 마지막 에러 메시지 |
+| created_ts | TIMESTAMPTZ | NOT NULL | 생성 시각 |
+| started_ts | TIMESTAMPTZ | NULL | 시작 시각 |
+| completed_ts | TIMESTAMPTZ | NULL | 완료 시각 |
+
+**인덱스:**
+```sql
+PRIMARY KEY (id)
+INDEX idx_sync_jobs_status_priority (status, priority DESC)
+INDEX idx_sync_jobs_symbol (symbol)
+```
+
+**Job 처리 패턴 (FOR UPDATE SKIP LOCKED):**
+```sql
+-- Worker가 job 획득
+BEGIN;
+SELECT id, symbol, source FROM market.sync_jobs
+WHERE status = 'PENDING'
+ORDER BY priority DESC, created_ts ASC
+LIMIT 1
+FOR UPDATE SKIP LOCKED;
+
+-- 획득한 job 상태 변경
+UPDATE market.sync_jobs
+SET status = 'RUNNING', worker_id = ?, started_ts = NOW()
+WHERE id = ?;
+
+COMMIT;
+
+-- 작업 완료 후
+UPDATE market.sync_jobs
+SET status = 'DONE', completed_ts = NOW()
+WHERE id = ?;
+```
+
+### market.discrepancies (가격 불일치 추적)
+
+**목적**: KIS vs Naver 가격 차이 모니터링
+
+| 컬럼 | 타입 | 제약 | 설명 |
+|------|------|------|------|
+| id | SERIAL | PK | ID |
+| symbol | TEXT | NOT NULL | 종목 코드 |
+| ts | TIMESTAMPTZ | NOT NULL | 발생 시각 |
+| kis_price | BIGINT | NOT NULL | KIS 가격 |
+| naver_price | BIGINT | NOT NULL | Naver 가격 |
+| diff_pct | FLOAT | NOT NULL | 차이 % |
+| kis_source | TEXT | NOT NULL | KIS_WS / KIS_REST |
+| severity | TEXT | NOT NULL | LOW / MEDIUM / HIGH |
+
+**인덱스:**
+```sql
+PRIMARY KEY (id)
+INDEX idx_discrepancies_symbol_ts (symbol, ts DESC)
+INDEX idx_discrepancies_severity (severity, ts DESC)
+```
+
+**불일치 기준:**
+
+| Severity | 차이 % | 조치 |
+|----------|--------|------|
+| LOW | 0.1% ~ 0.5% | 로그만 |
+| MEDIUM | 0.5% ~ 1.0% | 경고 + Naver 비활성화 고려 |
+| HIGH | > 1.0% | 경고 + Naver 즉시 비활성화 |
+
 ---
 
 ## 🔄 처리 흐름
@@ -205,19 +283,72 @@ flowchart TD
     E --> G[Unsubscribe Evicted]
 ```
 
-**우선순위 정의:**
+**동적 우선순위 계산 알고리즘:**
 
-| Priority | 대상 | 보호 |
-|----------|------|------|
-| P0 | OPEN/CLOSING 보유 종목 | 절대 보호 |
-| P1 | TRAILING_ACTIVE 포지션 | 절대 보호 |
-| P2 | Reentry WATCH/READY 후보 | 보호 |
-| P3 | 당일 랭킹 상위 N | 해지 가능 |
-| P4 | 수동 Watchlist | 해지 가능 |
+```go
+func calculatePriority(symbol string, portfolio Portfolio, brain BrainState) int {
+    score := 0
+
+    // P0: 보유 포지션 (절대 보호)
+    if portfolio.HasPosition(symbol) {
+        score += 10000
+
+        // 청산 진행 중이면 추가 점수
+        if portfolio.IsClosing(symbol) {
+            score += 5000
+        }
+    }
+
+    // P1: Trailing 활성 (절대 보호)
+    if portfolio.IsTrailingActive(symbol) {
+        score += 8000
+    }
+
+    // P2: Reentry 후보 (보호)
+    if brain.IsReentryCandidate(symbol) {
+        state := brain.GetReentryState(symbol)
+        if state == "READY" {
+            score += 5000  // 진입 준비 완료
+        } else if state == "WATCH" {
+            score += 3000  // 관찰 중
+        }
+    }
+
+    // P3: Brain intent (의도가 높을수록)
+    intent := brain.GetIntent(symbol)
+    if intent != nil {
+        score += int(intent.Score * 30)  // 0~100 → 0~3000
+    }
+
+    // P4: 당일 랭킹 (상위일수록)
+    rank := brain.GetRank(symbol)
+    if rank > 0 && rank <= 200 {
+        score += 200 - rank  // 1위 = 199점, 200위 = 0점
+    }
+
+    return score
+}
+```
+
+**우선순위 등급:**
+
+| Priority | Score Range | 대상 | 보호 |
+|----------|-------------|------|------|
+| P0 | 10000+ | OPEN/CLOSING 보유 종목 | 절대 보호 |
+| P1 | 8000~9999 | TRAILING_ACTIVE 포지션 | 절대 보호 |
+| P2 | 3000~7999 | Reentry WATCH/READY 후보 | 보호 |
+| P3 | 1~2999 | Brain intent 또는 랭킹 상위 | 해지 가능 |
+| P4 | 0 | 기타 | 우선 해지 |
+
+**재계산 트리거:**
+- 포지션 상태 변경 (진입/청산)
+- Reentry 후보 상태 변경 (WATCH/READY)
+- Brain intent 업데이트 (매 분석 사이클)
+- 수동 watchlist 변경
 
 **교체 정책:**
-- 40 초과 시 P4 → P3 → P2 순으로 해지
-- P0/P1은 절대 해지 금지
+- 40 초과 시 score 낮은 순서대로 해지
+- P0/P1 (score 8000+)은 절대 해지 금지
 
 ### 3. REST Poller (Tiering)
 
@@ -345,14 +476,67 @@ flowchart TD
 
 ## 📏 성능 고려사항
 
-### 1. prices_ticks 파티셔닝
+### 1. prices_ticks 파티셔닝 (TimescaleDB)
 
 **문제**: 틱 데이터는 급속 증가 (1일 수백만 행)
 
-**해결**:
-- TimescaleDB hypertable (권장)
-- 또는 일별 파티션 테이블
-- 오래된 데이터(30일 이상)는 압축/아카이브
+**해결**: TimescaleDB hypertable + 자동 압축/retention
+
+```sql
+-- Hypertable 생성 (시계열 최적화)
+SELECT create_hypertable(
+    'market.prices_ticks',
+    'ts',
+    chunk_time_interval => INTERVAL '1 day'
+);
+
+-- 자동 압축 정책 (7일 이후)
+ALTER TABLE market.prices_ticks SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'symbol',
+    timescaledb.compress_orderby = 'ts DESC'
+);
+
+SELECT add_compression_policy(
+    'market.prices_ticks',
+    INTERVAL '7 days'
+);
+
+-- 자동 삭제 정책 (30일 이후)
+SELECT add_retention_policy(
+    'market.prices_ticks',
+    INTERVAL '30 days'
+);
+
+-- Continuous Aggregate (1분 봉)
+CREATE MATERIALIZED VIEW market.prices_1m
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 minute', ts) AS bucket,
+    symbol,
+    source,
+    FIRST(last_price, ts) AS open,
+    MAX(last_price) AS high,
+    MIN(last_price) AS low,
+    LAST(last_price, ts) AS close,
+    SUM(volume) AS volume
+FROM market.prices_ticks
+GROUP BY bucket, symbol, source;
+
+-- Continuous Aggregate 자동 갱신
+SELECT add_continuous_aggregate_policy(
+    'market.prices_1m',
+    start_offset => INTERVAL '1 hour',
+    end_offset => INTERVAL '1 minute',
+    schedule_interval => INTERVAL '1 minute'
+);
+```
+
+**이점:**
+- 쿼리 속도 10~100배 향상 (압축 후)
+- 자동 파티셔닝 (chunk 단위)
+- 자동 데이터 정리 (retention policy)
+- Continuous Aggregate로 실시간 집계
 
 ### 2. prices_best 캐시 전략
 

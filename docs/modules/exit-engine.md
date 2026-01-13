@@ -322,48 +322,331 @@ GROUP BY p.qty;
 
 ---
 
-## 🎲 청산 룰 (예시 설정)
+## 🎲 청산 룰 상세 설정
 
-### SL (Stop Loss)
+### 설정 구조 (ExitRulesConfig)
 
-| 레벨 | 조건 | 수량 | 후속 조치 |
-|------|------|------|----------|
-| **SL1** | 수익률 <= -3% | 50% | StopFloor 유지 |
-| **SL2** | 수익률 <= -5% | 100% | 포지션 종료 |
+```go
+type ExitRulesConfig struct {
+    // 1. HARD_STOP (하드 손절)
+    HardStopPercent    float64  // -3.0% (기본값)
 
-### TP (Take Profit)
+    // 2. GAP_DOWN (갭 하락 손절)
+    GapDownPercent     float64  // -3.0% (장 시작 시 갭 기준)
+    GapDownCheckWindow int      // 30초 (장 시작 후 체크 시간)
 
-| 레벨 | 조건 | 수량 | 후속 조치 |
-|------|------|------|----------|
-| **TP1** | 수익률 >= +7% | 25% | StopFloor = 본전+0.6% |
-| **TP2** | 수익률 >= +11% | 25% | StopFloor 유지 |
-| **TP3** | 수익률 >= +16% | 20% | Trailing 시작 |
+    // 3. SCALE_OUT (단계적 익절)
+    ScaleOutLevels     []ScaleOutLevel
+    // 예: [{+10%, 50%}, {+18%, 20%}]
 
-### Trailing (HWM 기반)
+    // 4. ATR_TRAILING (ATR 기반 트레일링)
+    ATRPeriod          int      // 14일 (ATR 계산 기간)
+    ATRMultiplier      float64  // 2.0배
+    TrailingATRMin     float64  // 5.0% (최소 트레일 거리)
+    TrailingActivation float64  // 10.0% (트레일 시작 수익률)
+
+    // 5. BREAK_EVEN (손익분기점 보호)
+    BreakEvenTrigger   float64  // +3.0% (최고점 도달 조건)
+    BreakEvenBuffer    float64  // +1.0% (보호 수익률)
+
+    // 6. TIME_EXIT (시간 기반 청산)
+    TimeExitDays1      int      // 8일 (1차 기준)
+    TimeExitMinProfit1 float64  // +3.0% (1차 최소 수익)
+    TimeExitDays2      int      // 15일 (2차 기준)
+    TimeExitHWMStale   int      // 3일 (HWM 미갱신 기간)
+
+    // 7. MANUAL (수동 청산)
+    ManualEnabled      bool     // true (수동 청산 허용 여부)
+}
+
+type ScaleOutLevel struct {
+    ProfitPercent float64  // 수익률 조건
+    ExitPercent   float64  // 청산 비율
+}
+```
+
+### 1. HARD_STOP (하드 손절)
+
+**목적**: 급격한 손실 방지
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| HardStopPercent | -3.0% | 손절 수익률 |
 
 **조건:**
-- phase = TRAILING_ACTIVE
-- price <= HWM - max(ATR × k, pct_trail)
-
-**파라미터 (예시):**
-- k = 2.0 (ATR 배수)
-- pct_trail = 4% (최소 트레일)
-
-**계산:**
-
-```
-trail_threshold = HWM - max(ATR * 2.0, HWM * 0.04)
-if current_price <= trail_threshold:
-    trigger TRAIL
+```go
+if current_pnl_pct <= config.HardStopPercent {
+    create_intent("HARD_STOP", qty=remaining_qty, order_type="MKT")
+}
 ```
 
-### Time Exit
+**수량:** 잔량 100%
+**주문 타입:** 시장가 (즉시 체결)
+
+### 2. GAP_DOWN (갭 하락 손절)
+
+**목적**: 장 시작 시 급락 대응
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| GapDownPercent | -3.0% | 갭 하락 비율 |
+| GapDownCheckWindow | 30초 | 장 시작 후 체크 시간 |
 
 **조건:**
-- 보유 기간 >= max_hold_days (예: 10일)
-- 포지션 상태가 OPEN 또는 TP1_DONE 이하
+```go
+if is_market_open() && time_since_open() <= config.GapDownCheckWindow {
+    gap_pct := (current_price - prev_close) / prev_close
+    if gap_pct <= config.GapDownPercent {
+        create_intent("GAP_DOWN", qty=remaining_qty, order_type="MKT")
+    }
+}
+```
 
-**수량:** 잔량 전부
+**수량:** 잔량 100%
+**주문 타입:** 시장가
+**체크 시점:** 장 시작 후 30초 이내
+
+### 3. SCALE_OUT (단계적 익절)
+
+**목적**: 수익 실현 + 추가 상승 기회 유지
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| ScaleOutLevels | [{+10%, 50%}, {+18%, 20%}] | 익절 단계 |
+
+**조건:**
+```go
+for level in config.ScaleOutLevels {
+    if current_pnl_pct >= level.ProfitPercent {
+        exit_qty := original_qty * level.ExitPercent
+        create_intent(f"SCALE_OUT_{level.ProfitPercent}",
+                     qty=exit_qty,
+                     order_type="LMT",
+                     limit_price=current_price * 0.998)  // 0.2% 슬리피지
+    }
+}
+```
+
+**수량 예시:**
+- Level 1 (+10%): 원본 수량의 50%
+- Level 2 (+18%): 원본 수량의 20%
+- 잔량 30%는 트레일링으로 전환
+
+**주문 타입:** 지정가 (0.2% 슬리피지 허용)
+
+### 4. ATR_TRAILING (ATR 기반 트레일링)
+
+**목적**: 추세 유지하며 수익 최대화
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| ATRPeriod | 14일 | ATR 계산 기간 |
+| ATRMultiplier | 2.0배 | ATR 배수 |
+| TrailingATRMin | 5.0% | 최소 트레일 거리 |
+| TrailingActivation | 10.0% | 트레일 시작 수익률 |
+
+**조건:**
+```go
+// 트레일링 활성화 조건
+if current_pnl_pct >= config.TrailingActivation && phase != TRAILING_ACTIVE {
+    phase = TRAILING_ACTIVE
+    hwm_price = current_price
+}
+
+// 트레일링 체크 (TRAILING_ACTIVE 상태에서만)
+if phase == TRAILING_ACTIVE {
+    atr_distance := position_state.atr * config.ATRMultiplier
+    min_distance := hwm_price * (config.TrailingATRMin / 100.0)
+
+    trail_threshold := hwm_price - max(atr_distance, min_distance)
+
+    if current_price <= trail_threshold {
+        create_intent("ATR_TRAIL", qty=remaining_qty, order_type="MKT")
+    }
+
+    // HWM 갱신
+    if current_price > hwm_price {
+        hwm_price = current_price
+        stop_floor_price = trail_threshold
+    }
+}
+```
+
+**수량:** 잔량 100%
+**주문 타입:** 시장가
+**최소 보호:** HWM 대비 5% 하락까지 허용
+
+### 5. BREAK_EVEN (손익분기점 보호)
+
+**목적**: 수익 나왔다가 손실 전환 방지
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| BreakEvenTrigger | +3.0% | 최고점 도달 조건 |
+| BreakEvenBuffer | +1.0% | 보호 수익률 |
+
+**조건:**
+```go
+// HWM이 +3% 도달한 적 있으면
+if hwm_pnl_pct >= config.BreakEvenTrigger {
+    breakeven_threshold := avg_price * (1 + config.BreakEvenBuffer/100.0)
+
+    if current_price <= breakeven_threshold {
+        create_intent("BREAK_EVEN", qty=remaining_qty, order_type="MKT")
+    }
+}
+```
+
+**수량:** 잔량 100%
+**주문 타입:** 시장가
+**시나리오:** 최고점 +3% 도달 → 현재가 +1% 이하로 하락 시 청산
+
+### 6. TIME_EXIT (시간 기반 청산)
+
+**목적**: 장기 체류 방지
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| TimeExitDays1 | 8일 | 1차 시간 기준 |
+| TimeExitMinProfit1 | +3.0% | 1차 최소 수익 |
+| TimeExitDays2 | 15일 | 2차 시간 기준 |
+| TimeExitHWMStale | 3일 | HWM 미갱신 기간 |
+
+**조건 1 (수익 부족):**
+```go
+holding_days := days_since(entry_ts)
+
+if holding_days >= config.TimeExitDays1 && current_pnl_pct < config.TimeExitMinProfit1 {
+    create_intent("TIME_EXIT_PROFIT", qty=remaining_qty, order_type="MKT")
+}
+```
+
+**조건 2 (HWM 정체):**
+```go
+hwm_stale_days := days_since(last_hwm_update_ts)
+
+if holding_days >= config.TimeExitDays2 && hwm_stale_days >= config.TimeExitHWMStale {
+    create_intent("TIME_EXIT_STALE", qty=remaining_qty, order_type="MKT")
+}
+```
+
+**수량:** 잔량 100%
+**주문 타입:** 시장가
+**시나리오:**
+- 8일 보유 + 수익률 3% 미만 → 청산
+- 15일 보유 + 최고점 3일간 미갱신 → 청산
+
+### 7. MANUAL (수동 청산)
+
+**목적**: 사용자 직접 개입
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| ManualEnabled | true | 수동 청산 허용 |
+
+**조건:**
+```go
+// API 또는 UI에서 사용자가 청산 요청
+if user_requests_manual_exit(position_id, qty, reason) {
+    if config.ManualEnabled {
+        create_intent("MANUAL",
+                     qty=min(qty, remaining_qty),
+                     order_type=user_order_type,
+                     limit_price=user_limit_price)
+    }
+}
+```
+
+**수량:** 사용자 지정 (잔량 이하)
+**주문 타입:** 사용자 선택 (MKT/LMT)
+**우선순위:** 자동 룰보다 낮음 (HARD_STOP, GAP_DOWN 우선)
+
+---
+
+### Exit Rules 우선순위 (최종 정리)
+
+**평가 순서 (높음 → 낮음):**
+
+| 순위 | Rule | 조건 | 수량 | 타입 |
+|------|------|------|------|------|
+| 1 | HARD_STOP | <= -3.0% | 100% | MKT |
+| 2 | GAP_DOWN | 장 시작 갭 <= -3.0% | 100% | MKT |
+| 3 | SCALE_OUT (L2) | >= +18.0% | 20% | LMT |
+| 4 | SCALE_OUT (L1) | >= +10.0% | 50% | LMT |
+| 5 | ATR_TRAILING | HWM - ATR×2.0 | 100% | MKT |
+| 6 | BREAK_EVEN | HWM +3% 도달 후 +1% 하락 | 100% | MKT |
+| 7 | TIME_EXIT | 8일 + <3% 또는 15일 + HWM정체 | 100% | MKT |
+| 8 | MANUAL | 사용자 요청 | 가변 | 가변 |
+
+**중요:**
+- 한 평가 사이클에 하나의 rule만 실행
+- 높은 우선순위 rule이 먼저 체크됨
+- Intent 생성 후 다음 사이클까지 대기
+
+---
+
+### Exit Signal 모니터링 (60초 간격)
+
+**목적**: 청산 트리거 감지 및 기록
+
+```sql
+CREATE TABLE IF NOT EXISTS trade.exit_signals (
+    signal_id UUID PRIMARY KEY,
+    position_id UUID NOT NULL REFERENCES trade.positions(position_id),
+    ts TIMESTAMPTZ NOT NULL,
+    rule_name TEXT NOT NULL,  -- HARD_STOP | GAP_DOWN | SCALE_OUT | ...
+    triggered BOOLEAN NOT NULL,
+    reason TEXT,
+    current_price NUMERIC NOT NULL,
+    hwm_price NUMERIC,
+    stop_floor_price NUMERIC,
+    current_pnl_pct FLOAT NOT NULL,
+    intent_id UUID,  -- 생성된 intent (있으면)
+    created_ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_exit_signals_position_ts
+ON trade.exit_signals (position_id, ts DESC);
+```
+
+**모니터링 루프:**
+```go
+func MonitorExitSignals(ctx context.Context) {
+    ticker := time.NewTicker(60 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            positions := loadOpenPositions()
+
+            for _, pos := range positions {
+                // 모든 rule 평가 (우선순위 순서)
+                for _, rule := range exitRules {
+                    triggered, reason := rule.Check(pos)
+
+                    // Signal 기록 (트리거 여부 무관)
+                    insertExitSignal(pos.ID, rule.Name, triggered, reason, ...)
+
+                    // 트리거되면 intent 생성 후 중단
+                    if triggered {
+                        intentID := createIntent(pos.ID, rule.Name, ...)
+                        updateExitSignal(signalID, intentID)
+                        break  // 한 사이클에 하나만
+                    }
+                }
+            }
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+**이점:**
+- 모든 평가 결과 추적 (디버깅)
+- 트리거 직전 상황 분석
+- 백테스트 데이터로 활용
 
 ---
 
