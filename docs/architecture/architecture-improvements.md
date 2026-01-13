@@ -208,88 +208,245 @@ func (e *ExitEngine) PreComputeGapDownCandidates(ctx context.Context) {
 
 ---
 
-### 4. Redis 캐싱으로 DB 읽기 부하 감소
+### 4. Redis 읽기 가속 (신중한 접근)
 
 **문제점**: 고빈도 DB 읽기로 인한 병목
 
 현재 PriceSync, Exit Engine, Execution Service가 PostgreSQL에서 반복적으로 읽기 작업을 수행합니다:
 - `prices_best` 조회 (Strategy 모듈, 1~3초마다)
 - `positions` 조회 (Exit/Reentry, 2초마다)
-- `order_intents` 조회 (Execution, 1~3초마다)
 
-**개선안**: 자주 읽는 Hot Data를 Redis에 캐싱
+**⚠️ SSOT 원칙**: Redis는 SSOT가 아니다
+
+- **SSOT**: PostgreSQL의 사실 테이블 (prices_best, positions, fills)
+- **Redis**: 성능을 위한 파생/복제/뷰(view) 레이어
+- Redis는 "정답"이 아니라 **"빠른 힌트"** 또는 **"읽기 가속"**
+
+**개선안**: 안전한 값만 제한적으로 캐싱
+
+#### A. 적극 권장: prices_best 읽기 가속 (비교적 안전)
+
+**안전한 이유**:
+- 가격은 고빈도/실시간 값이라 "최신 1개만" 의미
+- freshness 게이트로 Fail-Closed 가능
+- 타임스탬프 기반 검증 가능
+
+**패턴 1: 단일 Writer (PriceSync만 갱신)**
 
 ```go
-// prices_best 캐싱 (TTL: 5초)
-type PriceCache struct {
-    redis *redis.Client
-}
-
-func (pc *PriceCache) GetBestPrice(ctx context.Context, symbol string) (*BestPrice, error) {
-    // 1. Redis 조회
-    key := fmt.Sprintf("price:best:%s", symbol)
-    cached, err := pc.redis.Get(ctx, key).Result()
-
-    if err == redis.Nil {
-        // 2. Cache Miss → DB 조회
-        price := pc.db.GetBestPrice(ctx, symbol)
-
-        // 3. Redis 저장 (5초 TTL)
-        pc.redis.Set(ctx, key, marshalPrice(price), 5*time.Second)
-        return price, nil
-    }
-
-    return unmarshalPrice(cached), nil
-}
-
-// PriceSync가 prices_best 업데이트 시 캐시 무효화
+// PriceSync가 prices_best 업데이트 시 Redis 동시 갱신 (단일 Writer)
 func (ps *PriceSync) UpdateBestPrice(ctx context.Context, symbol string, price *BestPrice) error {
-    // 1. DB 업데이트
+    // 1. DB 업데이트 (SSOT)
     ps.db.UpsertBestPrice(ctx, symbol, price)
 
-    // 2. Redis 캐시 업데이트 (즉시 반영)
+    // 2. Redis 캐시 동시 갱신 (타임스탬프 포함!)
     key := fmt.Sprintf("price:best:%s", symbol)
-    ps.redis.Set(ctx, key, marshalPrice(price), 5*time.Second)
+    cacheData := map[string]interface{}{
+        "bid":       price.Bid,
+        "ask":       price.Ask,
+        "best_ts":   price.BestTs.Unix(), // 타임스탬프 필수!
+        "source":    price.Source,
+        "is_stale":  price.IsStale,
+    }
+    ps.redis.HSet(ctx, key, cacheData)
+    ps.redis.Expire(ctx, key, 5*time.Second) // TTL 5초
 
     return nil
 }
 ```
 
-**캐싱 대상 데이터**:
-
-| 데이터 | TTL | 무효화 시점 | 효과 |
-|--------|-----|------------|------|
-| `prices_best` | 5초 | PriceSync 업데이트 시 | DB 읽기 90% 감소 |
-| `positions` (status, qty) | 3초 | Exit/Execution 업데이트 시 | DB 읽기 80% 감소 |
-| `order_intents` (NEW 상태) | 2초 | Execution 처리 시 | DB 읽기 70% 감소 |
-| `exit_profiles` | 1시간 | 설정 변경 시 | DB 읽기 99% 감소 |
-
-**Write-Through vs Write-Behind**:
+**패턴 2: Exit Engine은 읽기만 + 타임스탬프 검증**
 
 ```go
-// Write-Through: DB 쓰기 후 즉시 캐시 업데이트 (권장)
-func (s *ExecutionService) UpdatePositionQty(ctx context.Context, positionID uuid.UUID, qty int64) error {
-    // 1. DB 업데이트 (영속성 보장)
-    s.db.UpdatePosition(ctx, positionID, qty)
+// Exit Engine - Redis에서 가격 조회 (검증 포함)
+func (e *ExitEngine) GetBestPrice(ctx context.Context, symbol string) (*BestPrice, error) {
+    key := fmt.Sprintf("price:best:%s", symbol)
+    cached := e.redis.HGetAll(ctx, key).Val()
 
-    // 2. Redis 캐시 즉시 업데이트
-    key := fmt.Sprintf("position:%s", positionID)
-    s.redis.HSet(ctx, key, "qty", qty)
-    s.redis.Expire(ctx, key, 3*time.Second)
+    if len(cached) == 0 {
+        // Cache Miss → DB 조회 (Fallback)
+        log.Warn("price cache miss, fallback to DB", "symbol", symbol)
+        return e.db.GetBestPrice(ctx, symbol)
+    }
+
+    bestTs := time.Unix(parseInt64(cached["best_ts"]), 0)
+    age := time.Since(bestTs)
+
+    // 검증: 10초 이상 오래되면 stale 판정
+    if age > 10*time.Second || cached["is_stale"] == "true" {
+        log.Warn("stale price detected", "symbol", symbol, "age", age)
+        return nil, ErrStalePrice // Fail-Closed (청산 보류)
+    }
+
+    return &BestPrice{
+        Bid:     parseFloat64(cached["bid"]),
+        Ask:     parseFloat64(cached["ask"]),
+        BestTs:  bestTs,
+        Source:  cached["source"],
+        IsStale: cached["is_stale"] == "true",
+    }, nil
+}
+```
+
+---
+
+#### B. 신중: positions.qty/avg_price 캐싱 (위험도 높음)
+
+**⚠️ 위험한 이유**:
+- qty/avg_price는 **Execution reconcile 기반 SSOT**
+- 부분 체결/정정/취소/수동 매매 시 Redis ↔ DB 불일치 위험
+- Exit Engine이 잘못된 qty로 과다청산 intent 생성 가능
+
+**안전 패턴: Intent 생성 직전 DB 재확인 필수**
+
+```go
+// Exit Engine - 루프에서는 Redis 조회, Intent 생성 직전 DB 재확인
+func (e *ExitEngine) EvaluatePosition(ctx context.Context, positionID uuid.UUID) error {
+    // 1. Redis에서 빠르게 후보 평가 (힌트)
+    cached := e.redis.HGetAll(ctx, fmt.Sprintf("position:%s", positionID)).Val()
+    cachedQty := parseInt64(cached["qty"])
+    cachedVersion := parseInt64(cached["version"])
+
+    if cachedQty <= 0 {
+        return nil // 이미 청산된 것으로 보임 (스킵)
+    }
+
+    // 2. 청산 조건 평가 (Redis 기반)
+    shouldExit := e.evaluateExitCondition(ctx, positionID, cachedQty)
+    if !shouldExit {
+        return nil
+    }
+
+    // 3. ⚠️ Intent 생성 직전: DB에서 사실(SSOT) 재확인!
+    dbPosition := e.db.GetPosition(ctx, positionID)
+
+    // 4. 버전 불일치 또는 수량 변경 감지
+    if dbPosition.Version != cachedVersion {
+        log.Warn("position version mismatch, re-evaluating",
+            "position_id", positionID,
+            "cached_version", cachedVersion,
+            "db_version", dbPosition.Version)
+
+        // Redis 갱신 (Execution이 업데이트했을 가능성)
+        e.refreshPositionCache(ctx, positionID, dbPosition)
+
+        // 이번 tick에서는 스킵 (다음 tick에서 재평가)
+        return nil
+    }
+
+    if dbPosition.Qty != cachedQty {
+        log.Error("position qty mismatch - cache drift detected!",
+            "position_id", positionID,
+            "cached_qty", cachedQty,
+            "db_qty", dbPosition.Qty)
+
+        // 캐시 무효화 및 스킵
+        e.redis.Del(ctx, fmt.Sprintf("position:%s", positionID))
+        return ErrCacheDrift
+    }
+
+    // 5. 검증 통과 → DB 사실 기준으로 Intent 생성
+    return e.createExitIntent(ctx, positionID, dbPosition.Qty, dbPosition.AvgPrice)
+}
+```
+
+**Writer: Execution만 갱신 (holdings reconcile 결과)**
+
+```go
+// Execution Service - holdings reconcile 후 DB + Redis 동시 갱신
+func (s *ExecutionService) ReconcilePosition(ctx context.Context, holding *KISHolding) error {
+    // 1. DB 업데이트 (SSOT, version 증가)
+    s.db.UpdatePosition(ctx, UpdatePositionParams{
+        PositionID: holding.PositionID,
+        Qty:        holding.Qty,
+        AvgPrice:   holding.AvgPrice,
+        // version은 DB에서 자동 증가
+    })
+
+    // 2. Redis 캐시 갱신 (타임스탬프 + 버전 포함)
+    updated := s.db.GetPosition(ctx, holding.PositionID) // version 최신화
+    key := fmt.Sprintf("position:%s", holding.PositionID)
+    s.redis.HSet(ctx, key, map[string]interface{}{
+        "qty":         updated.Qty,
+        "avg_price":   updated.AvgPrice,
+        "version":     updated.Version,    // 버전 필수!
+        "updated_ts":  updated.UpdatedTs.Unix(),
+    })
+    s.redis.Expire(ctx, key, 10*time.Second) // TTL 10초
 
     return nil
 }
 ```
 
-**효과**:
-- DB 읽기 부하: **70~90% 감소**
+---
+
+#### C. 적극 권장: 기타 안전한 캐싱 대상
+
+| 데이터 | 안전도 | TTL | Writer | 효과 |
+|--------|--------|-----|--------|------|
+| `prices_best` + best_ts | ✅ 높음 | 5초 | PriceSync만 | DB 읽기 90% 감소 |
+| `freshness` | ✅ 높음 | 5초 | PriceSync만 | DB 읽기 90% 감소 |
+| OPEN 포지션 리스트 | ✅ 높음 | 10초 | Exit/Execution | DB 읽기 80% 감소 |
+| `exit_profiles` | ✅ 매우높음 | 1시간 | Admin만 | DB 읽기 99% 감소 |
+| `exit_control`, `reentry_control` | ✅ 매우높음 | 10초 | Admin만 | DB 읽기 99% 감소 |
+| `positions.qty/avg_price` + version | ⚠️ 중간 | 10초 | Execution만 | **Intent 직전 DB 재확인 필수** |
+
+---
+
+#### D. 비추천: 사실 로그성 데이터
+
+| 데이터 | 이유 |
+|--------|------|
+| `fills`, `orders` | 정합성 요구 높고, 읽기 패턴 낮음 |
+| `exit_events` | Execution 생성 SSOT, 캐싱 불필요 |
+| `reentry_candidates` | Reentry 생성 SSOT, 캐싱 불필요 |
+
+---
+
+#### E. 안전 원칙 4가지 (필수 준수)
+
+**원칙 1: 단일 Writer 강제**
+- 가격 캐시: PriceSync만 Redis 갱신
+- 포지션 캐시: Execution만 Redis 갱신 (holdings reconcile 결과로만)
+- Exit Engine은 읽기만 (그리고 결정 직전에 DB로 재확인)
+
+**원칙 2: 캐시는 반드시 버전/타임스탬프 동반**
+- `best_price`, `best_ts`, `source`, `is_stale`
+- `pos_qty`, `pos_avg_price`, `pos_version`, `updated_ts`
+- Exit Engine은 `best_ts`/`pos_version`이 충분히 최신인지 확인 후 사용
+
+**원칙 3: 결정 직전 "DB 사실 재확인" 최소 1회**
+- 루프에서 Redis로 빠르게 후보 평가
+- **Intent 생성 직전에만 DB에서 positions.qty/avg_price/version 재조회**
+- Mismatch면 이번 tick에서 스킵하거나 재평가
+
+**원칙 4: TTL/Fail-Closed**
+- 가격 캐시 TTL: 5초 (또는 best_ts 기반 stale 판정)
+- 포지션 캐시 TTL: 10초 (또는 version 기반)
+- TTL 초과/검증 실패 시 Fail-Closed (청산 생성 보류)
+
+---
+
+#### F. 효과 및 주의사항
+
+**효과** (안전한 패턴 준수 시):
+- DB 읽기 부하: **60~80% 감소** (prices_best, freshness, profiles 중심)
 - 응답 속도: PostgreSQL 1~3ms → Redis 0.1~0.3ms (10배 향상)
 - DB max_connections 여유 확보
 
-**주의사항**:
-- **영속성은 PostgreSQL에서 보장** (Redis는 캐시 레이어만)
+**⚠️ 주의사항**:
+- **SSOT는 PostgreSQL** (Redis는 파생/복제/뷰 레이어)
+- **qty/avg_price 캐싱은 신중** (Intent 직전 DB 재확인 필수)
 - **TTL 설정 필수** (stale data 방지)
-- **Write-Through 패턴 사용** (DB와 Redis 불일치 방지)
+- **단일 Writer 패턴** (레이스/드리프트 방지)
+- **타임스탬프/버전 없이 캐싱 금지** (최신성 검증 불가능)
+
+**오류 확률을 올리는 금지 패턴**:
+- ❌ Exit Engine이 Redis의 qty/avg_price를 사실로 믿고 계산
+- ❌ DB보다 Redis가 앞서는 구조
+- ❌ 여러 곳에서 동일 캐시 갱신 (레이스 발생)
+- ❌ TTL 없는 캐시 (죽은 값 영구 보존)
+- ❌ 타임스탬프/버전 없는 값만 캐시 (stale 판단 불가)
 
 ---
 
@@ -471,15 +628,15 @@ reserve_pool_size = 5    # 예비 연결
 
 ## 📊 우선순위 요약
 
-| 순위 | 개선점 | 예상 공수 | 효과 |
-|------|--------|----------|------|
-| **P0** | Locked Qty 계산 로직 | 1일 | 중복 주문 방지 (Critical) |
-| **P1** | NOTIFY/LISTEN 이벤트 | 2일 | Latency 90% 감소 |
-| **P1** | Morning Rush Mode | 1일 | 시가 급변동 대응 |
-| **P1** | Redis 캐싱 (DB 부하 감소) | 2일 | DB 읽기 70~90% 감소 |
-| **P1** | Event-Driven Router | 1일 | 뉴스 전략 즉시 반응 |
-| **P2** | Circuit Breaker | 2일 | API 장애 대응 |
-| **P2** | PgBouncer 도입 | 1일 | 향후 스케일링 대비 |
+| 순위 | 개선점 | 예상 공수 | 효과 | 주의사항 |
+|------|--------|----------|------|----------|
+| **P0** | Locked Qty 계산 로직 | 1일 | 중복 주문 방지 (Critical) | - |
+| **P1** | NOTIFY/LISTEN 이벤트 | 2일 | Latency 90% 감소 | PostgreSQL 트리거 |
+| **P1** | Morning Rush Mode | 1일 | 시가 급변동 대응 | 10분간 CPU 증가 |
+| **P1** | Redis 읽기 가속 (신중) | 3일 | DB 읽기 60~80% 감소 | **SSOT 원칙 준수, Intent 직전 DB 재확인 필수** |
+| **P1** | Event-Driven Router | 1일 | 뉴스 전략 즉시 반응 | Fallback 필요 |
+| **P2** | Circuit Breaker | 2일 | API 장애 대응 | 알람 필수 |
+| **P2** | PgBouncer 도입 | 1일 | 향후 스케일링 대비 | Transaction Pool Mode |
 
 ---
 
