@@ -18,6 +18,7 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 
 | Schema | 테이블 | 소유자 | 쓰기 허용 |
 |--------|--------|--------|----------|
+| market | stocks | DataSync | DataSync만 |
 | market | prices_ticks | PriceSync | PriceSync만 |
 | market | prices_best | PriceSync | PriceSync만 |
 | market | freshness | PriceSync | PriceSync만 |
@@ -42,7 +43,66 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 
 ---
 
-## 🗃️ Market Schema (PriceSync)
+## 🗃️ Market Schema
+
+### market.stocks (종목 마스터 - SSOT)
+
+**목적**: 종목 기본 정보 및 거래 가능 여부 관리
+
+**소유자**: DataSync (종목 정보 동기화 전담 모듈)
+
+**FK 참조**: 모든 symbol 컬럼이 이 테이블을 참조해야 함
+
+```sql
+CREATE TABLE market.stocks (
+    symbol        VARCHAR(12) PRIMARY KEY,  -- 종목코드 (예: 005930, 069500)
+    name          TEXT        NOT NULL,     -- 종목명 (예: 삼성전자)
+    market        TEXT        NOT NULL,     -- KOSPI | KOSDAQ | KONEX
+
+    -- 종목 상태
+    status        TEXT        NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE | SUSPENDED | DELISTED
+    listing_date  DATE,                     -- 상장일
+    delisting_date DATE,                    -- 상장폐지일
+
+    -- 메타 정보
+    sector        TEXT,                     -- 섹터 (예: 전기전자)
+    industry      TEXT,                     -- 업종 (예: 반도체)
+    market_cap    BIGINT,                   -- 시가총액 (원)
+
+    -- 거래 제약
+    is_tradable   BOOLEAN     NOT NULL DEFAULT true,  -- 현재 거래 가능 여부
+    trade_halt_reason TEXT,                -- 거래정지 사유
+
+    -- 감사
+    created_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_market CHECK (market IN ('KOSPI', 'KOSDAQ', 'KONEX')),
+    CONSTRAINT chk_status CHECK (status IN ('ACTIVE', 'SUSPENDED', 'DELISTED')),
+    CONSTRAINT chk_symbol_format CHECK (symbol ~ '^\d{6}$')  -- 6자리 숫자 검증
+);
+
+CREATE INDEX idx_stocks_market ON market.stocks (market);
+CREATE INDEX idx_stocks_status ON market.stocks (status);
+CREATE INDEX idx_stocks_tradable ON market.stocks (is_tradable) WHERE is_tradable = true;
+CREATE INDEX idx_stocks_name ON market.stocks (name);  -- 종목명 검색용
+```
+
+**종목코드 표준**:
+- 형식: 6자리 숫자 (`005930`, `069500`)
+- KIS API와 동일 형식 사용
+- 모든 주문/포지션/가격 데이터는 이 코드를 사용
+
+**거래 가능 여부 규칙**:
+- `is_tradable = false`: 거래정지, 상장폐지 등
+- Exit Engine: HardStop 제외한 모든 청산 차단
+- Router: 신규 진입 차단
+
+**권한**:
+- SELECT: aegis_trade, aegis_exec, aegis_router (읽기 전용)
+- INSERT/UPDATE/DELETE: aegis_datasync만
+
+---
 
 ### market.prices_ticks
 

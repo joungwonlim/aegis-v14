@@ -74,11 +74,11 @@ docs/
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
-| `database/schema.md` | ✅ 완료 | 전체 테이블 스키마 정의 (market, trade, system schema) |
+| `database/schema.md` | ✅ 완료 | 전체 테이블 스키마 정의 (market, trade, system schema, **stocks 추가**) |
 | `database/access-control.md` | ✅ 완료 | PostgreSQL RBAC 설계 (role 기반 접근 제어) |
+| `database/migration-stocks.md` | ✅ 완료 | market.stocks 테이블 마이그레이션 계획 (Phase 1~5, FK 제약조건) |
 | `database/erd.md` | ⬜ TODO | ERD 상세 (schema.md에 포함되어 있음) |
 | `database/indexes.md` | ⬜ TODO | 인덱스 최적화 전략 (schema.md에 일부 포함) |
-| `database/migration-plan.md` | ⬜ TODO | 마이그레이션 계획 |
 
 ---
 
@@ -125,10 +125,10 @@ docs/
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 12/31 (계획 변경: Quant Runtime + Pick Pipeline + Operations)
-진행률: 39%
+총 문서 수: 13/31 (계획 변경: Quant Runtime + Pick Pipeline + Operations)
+진행률: 42%
 
-✅ 완료: 12
+✅ 완료: 13
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -137,17 +137,19 @@ docs/
   - modules/reentry-engine.md (ExitEvent 기반 디커플링)
   - modules/execution-service.md (ExitEvent 생성 SSOT)
   - modules/external-apis.md (KIS WS TR별 소유권 분리)
-  - database/schema.md (21 tables, positions 컬럼별 SSOT 명시)
+  - database/schema.md (22 tables, market.stocks 추가, 컬럼별 SSOT 명시)
   - database/access-control.md (컬럼별 권한, DELETE 제거)
+  - database/migration-stocks.md (stocks 테이블 마이그레이션 Phase 1~5, FK 제약조건)
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
   - reviews/2026-01-13-ssot-review.md (SSOT 검증 아카이브)
 
 🚧 진행 중: 0
-⬜ TODO: 19
+⬜ TODO: 18
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
 데이터베이스 접근 제어 설계 완료 (PostgreSQL RBAC, 컬럼별 권한) ✅
+종목 마스터 SSOT 설계 완료 (market.stocks, FK 제약조건, 마이그레이션 계획) ✅
 v10 운영 이슈 해결 설계 완료 (중복 실행, 평단가 변경, Price Sync 장애) ✅
 Pick-to-Execution Pipeline 설계 완료 (다중 선정 → 단일 실행) ✅
 Exit/Reentry 제어 시스템 완료 (Kill Switch, Profile, Symbol Override) ✅
