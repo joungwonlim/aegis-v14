@@ -30,30 +30,36 @@
 
 ✅ **데이터:**
 - `trade.reentry_candidates` - 재진입 후보 FSM
+- `trade.reentry_control` - 전역 제어
 - `trade.order_intents` (ENTRY 타입) - 재진입 주문 의도
 
 ✅ **로직:**
+- **ExitEvent 소비** (SSOT 입력)
 - Reentry Candidate FSM 전이
 - 쿨다운 관리
 - 재진입 게이트 (리스크/횟수/신선도)
 - 재진입 트리거 판정
 - 포지션 사이징
+- **Control Gate** (전역 제어 체크)
 
 ### 다른 모듈과의 경계
 
 ❌ **Reentry Engine이 하지 않는 것:**
 - 현재가 결정 → PriceSync
 - 청산 로직 → Exit Engine
+- **ExitEvent 생성** → Execution (holdings 확정 후)
 - 주문 제출 → Execution
 
 ❌ **Reentry Engine이 접근하지 않는 것:**
 - `market.*` 테이블 쓰기 (읽기만)
 - `trade.positions/position_state` 쓰기 (읽기만)
+- `trade.exit_events` 쓰기 (읽기만) **← 중요: Execution만 생성**
 
 ✅ **Reentry Engine이 읽을 수 있는 것:**
 - `market.prices_best` (현재가)
 - `market.freshness` (안전 게이트)
 - `trade.positions` (포트 익스포저)
+- **`trade.exit_events` (재진입 후보 생성 트리거) ← SSOT 입력**
 
 ---
 
@@ -87,14 +93,21 @@ INSERT INTO trade.order_intents (
 
 ### 2. 외부 의존 인터페이스
 
-#### Input: reentry_candidates (Exit Engine에서 생성)
+#### Input: exit_events (Execution에서 생성, SSOT)
 
 ```sql
--- Exit Engine이 생성한 후보 읽기
-SELECT * FROM trade.reentry_candidates
-WHERE state IN ('COOLDOWN', 'WATCH', 'READY')
-ORDER BY cooldown_until;
+-- Execution이 생성한 ExitEvent 읽기 (재진입 후보 생성 트리거)
+SELECT * FROM trade.exit_events
+WHERE exit_ts >= now() - INTERVAL '24 hours'
+  AND exit_reason_code IN ('SL1', 'SL2', 'TRAIL', 'TP1', 'TP2', 'TP3')
+ORDER BY exit_ts DESC;
 ```
+
+**계약:**
+- ExitEvent는 Execution만 생성 (holdings qty=0 확인 후)
+- `exit_event_id`는 unique (멱등성 보장)
+- `exit_reason_code`로 재진입 전략 분기
+- `source` 필드로 자동/수동/브로커 구분
 
 ---
 
@@ -105,17 +118,41 @@ ORDER BY cooldown_until;
 | 컬럼 | 타입 | 제약 | 설명 |
 |------|------|------|------|
 | candidate_id | UUID | PK | 후보 고유 ID |
+| exit_event_id | UUID | UNIQUE, FK | ExitEvent 참조 (SSOT) |
 | symbol | TEXT | NOT NULL | 종목 코드 |
 | origin_position_id | UUID | NOT NULL | 원 포지션 ID |
-| exit_reason | TEXT | NOT NULL | SL1/SL2/TRAIL/TP/TIME |
+| exit_reason_code | TEXT | NOT NULL | SL1/SL2/TRAIL/TP/TIME |
 | exit_ts | TIMESTAMPTZ | NOT NULL | 청산 시각 |
 | exit_price | NUMERIC | NOT NULL | 청산 가격 |
+| exit_profile_id | TEXT | NULL | 적용된 Exit 프로파일 |
 | cooldown_until | TIMESTAMPTZ | NOT NULL | 쿨다운 종료 시각 |
 | state | TEXT | NOT NULL | FSM 상태 |
 | max_reentries | INT | NOT NULL | 최대 재진입 횟수 |
 | reentry_count | INT | NOT NULL | 현재 재진입 횟수 |
+| reentry_profile_id | TEXT | NULL | 재진입 프로파일 |
 | last_eval_ts | TIMESTAMPTZ | NULL | 마지막 평가 시각 |
 | updated_ts | TIMESTAMPTZ | NOT NULL | 마지막 갱신 |
+
+**멱등성 보장:**
+- `exit_event_id` UNIQUE 제약으로 동일 ExitEvent에서 중복 후보 생성 방지
+
+### trade.reentry_control (전역 제어)
+
+| 컬럼 | 타입 | 제약 | 설명 |
+|------|------|------|------|
+| id | INT | PK, CHECK(id=1) | 단일 행 보장 |
+| mode | TEXT | NOT NULL | RUNNING / PAUSE_ENTRY / PAUSE_ALL |
+| reason | TEXT | NULL | 제어 사유 |
+| updated_by | TEXT | NOT NULL | 변경자 |
+| updated_ts | TIMESTAMPTZ | NOT NULL | 변경 시각 |
+
+**제어 모드:**
+
+| Mode | Candidate 생성 | ENTRY Intent 생성 | 설명 |
+|------|----------------|-------------------|------|
+| RUNNING | ✅ Allowed | ✅ Allowed | 정상 작동 |
+| PAUSE_ENTRY | ✅ Allowed | ❌ Blocked | Candidate 추적만 (진입 차단) |
+| PAUSE_ALL | ❌ Blocked | ❌ Blocked | 완전 정지 (긴급) |
 
 **FSM 상태:**
 
@@ -137,22 +174,49 @@ stateDiagram-v2
 
 ## 🔄 처리 흐름
 
-### 1. 평가 루프
+### 0. Candidate 생성 (ExitEvent 기반)
 
 ```mermaid
 flowchart TD
-    A[Load candidates] --> B{cooldown passed?}
+    START[ExitEvent 감지] --> CHK_CONTROL{reentry_control.mode}
+    CHK_CONTROL -->|PAUSE_ALL| SKIP[Skip candidate creation]
+    CHK_CONTROL -->|RUNNING/PAUSE_ENTRY| CHK_REASON{exit_reason_code<br/>재진입 가능?}
+    CHK_REASON -->|no| SKIP
+    CHK_REASON -->|yes| CHK_DUP{exit_event_id<br/>already exists?}
+    CHK_DUP -->|yes| SKIP
+    CHK_DUP -->|no| CREATE[Create candidate<br/>state=COOLDOWN]
+    CREATE --> CALC[Calculate cooldown_until<br/>based on exit_reason]
+    CALC --> NOTIFY[NOTIFY reentry_candidate_created]
+```
+
+**트리거:**
+- PostgreSQL LISTEN/NOTIFY on `exit_event_created` 채널
+- 또는 주기적 폴링 (fallback)
+
+### 1. 평가 루프 (Control Gate 포함)
+
+```mermaid
+flowchart TD
+    START[Start Evaluation Cycle] --> GATE1[Load reentry_control.mode]
+    GATE1 --> GATE2{mode == PAUSE_ALL?}
+    GATE2 -->|yes| SKIP[Skip all processing]
+    GATE2 -->|no| LOAD[Load candidates<br/>state IN (COOLDOWN,WATCH,READY)]
+
+    LOAD --> LOOP[For each candidate]
+    LOOP --> B{cooldown passed?}
     B -->|no| C[Skip]
     B -->|yes| D[Gate 1: reentry limit]
-    D -->|fail| E[BLOCKED]
+    D -->|fail| E[state=BLOCKED]
     D -->|pass| F[Gate 2: risk exposure]
     F -->|fail| E
     F -->|pass| G[Gate 3: price fresh]
     G -->|fail| E
     G -->|pass| H{Trigger satisfied?}
     H -->|no| I[state=WATCH]
-    H -->|yes| J[state=READY]
-    J --> K[Create ENTRY intent]
+    H -->|yes| J{reentry_control.mode<br/>== PAUSE_ENTRY?}
+    J -->|yes| WATCH[state=READY<br/>but no intent]
+    J -->|no| READY[state=READY]
+    READY --> K[Create ENTRY intent]
 ```
 
 ### 2. 재진입 게이트 (Risk Gates)
@@ -251,6 +315,90 @@ flowchart TD
 
 ---
 
+## 🎛️ Reentry Control (전역 제어)
+
+### 제어 모드 상세
+
+| Mode | 동작 | 사용 시점 |
+|------|------|----------|
+| **RUNNING** | 정상 작동 | 일반 운영 |
+| **PAUSE_ENTRY** | Candidate 생성 O, Intent 생성 X | 단기 시장 불안정 시 관찰만 |
+| **PAUSE_ALL** | 모든 작업 정지 | 긴급 상황 또는 시스템 점검 |
+
+### 운영 시나리오
+
+#### 시나리오 1: 시장 급변동 시 재진입 일시 정지
+
+```
+상황: VIX 급등, 시장 변동성 과도
+조치: mode = PAUSE_ENTRY
+효과: 청산된 포지션은 추적하되 신규 재진입은 차단
+복구: 변동성 안정 후 mode = RUNNING
+```
+
+#### 시나리오 2: 시스템 점검
+
+```
+상황: DB 백업, 인프라 점검
+조치: mode = PAUSE_ALL
+효과: 모든 Reentry 로직 정지
+복구: 점검 완료 후 mode = RUNNING
+```
+
+#### 시나리오 3: Exit는 정지, Reentry는 작동
+
+```
+상황: Exit Engine PAUSE_ALL, 하지만 수동 청산은 발생
+효과:
+  - Exit Engine: 자동 청산 정지
+  - Execution: 수동 청산 시 ExitEvent 생성
+  - Reentry Engine: ExitEvent 기반으로 정상 작동
+결과: Exit 정지 중에도 수동 청산 후 재진입 가능
+```
+
+### API 설계 (예시)
+
+```
+GET  /api/v1/reentry/control
+  → 현재 제어 상태 조회
+
+POST /api/v1/reentry/control
+  Body: {
+    "mode": "PAUSE_ENTRY",
+    "reason": "High market volatility"
+  }
+  → 제어 모드 변경
+
+GET  /api/v1/reentry/candidates
+  Query: state, symbol, limit
+  → Candidate 목록 조회
+
+GET  /api/v1/reentry/candidates/{candidate_id}
+  → 특정 Candidate 상세 조회
+
+POST /api/v1/reentry/candidates/{candidate_id}/force-expire
+  → Candidate 강제 만료 (관리자 기능)
+```
+
+### 실시간 전파 (LISTEN/NOTIFY)
+
+```sql
+-- Control 변경 시
+NOTIFY reentry_control_changed, '{"mode":"PAUSE_ENTRY","updated_by":"admin"}';
+
+-- ExitEvent 생성 시 (Execution에서)
+NOTIFY exit_event_created, '{"exit_event_id":"...","symbol":"..."}';
+
+-- Candidate 생성 시
+NOTIFY reentry_candidate_created, '{"candidate_id":"...","symbol":"..."}';
+```
+
+**Reentry Engine은 다음 채널을 구독:**
+- `exit_event_created` (Candidate 생성 트리거)
+- `reentry_control_changed` (즉시 모드 변경 반영)
+
+---
+
 ## 🔒 SSOT 규칙 (금지 패턴)
 
 ### ❌ 절대 금지
@@ -274,12 +422,16 @@ flowchart TD
 
 ## 📊 설계 완료 기준
 
-- [ ] FSM 상태 전이 정의
-- [ ] 재진입 게이트 정의
-- [ ] 트리거 조건 정의 (Exit Reason별)
-- [ ] 멱등성 규칙 정의
-- [ ] 포지션 사이징 정의
-- [ ] SSOT 규칙 명시
+- [x] FSM 상태 전이 정의
+- [x] ExitEvent 기반 입력 정의 (Execution SSOT)
+- [x] Reentry Control 전역 제어 정의
+- [x] Control Gate 추가 (PAUSE_ENTRY, PAUSE_ALL)
+- [x] 재진입 게이트 정의
+- [x] 트리거 조건 정의 (Exit Reason별)
+- [x] 멱등성 규칙 정의 (exit_event_id UNIQUE)
+- [x] 포지션 사이징 정의
+- [x] SSOT 규칙 명시
+- [x] Exit/Reentry 디커플링 완료
 
 ---
 

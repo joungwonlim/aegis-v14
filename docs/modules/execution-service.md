@@ -31,6 +31,7 @@
 - `trade.orders` - 브로커 주문 상태
 - `trade.fills` - 체결 내역
 - `trade.holdings` - 보유종목 (KIS 보유 현황)
+- **`trade.exit_events` - 포지션 청산 이벤트 (SSOT, 유일한 생성자)**
 
 ✅ **로직:**
 - order_intents → KIS API 주문 변환
@@ -39,6 +40,7 @@
 - **미체결 조회 및 동기화** (Unfilled Orders)
 - **부분체결 추적** (Partial Fills)
 - **보유종목 동기화** (Holdings = 최종 진실)
+- **ExitEvent 생성** (holdings qty=0 감지 시, 유일한 생성자)
 - 주문 상태 동기화 (Reconciliation)
 - 주문 실패 재시도
 - **재시작 복구** (Bootstrap from KIS)
@@ -54,6 +56,7 @@
 - `market.*` 테이블 쓰기 (읽기만)
 - `trade.position_state` 쓰기 (읽기만)
 - `trade.reentry_candidates` 쓰기 (읽기만)
+- `trade.exit_control`, `trade.exit_profiles` 쓰기 (읽기만)
 
 ✅ **Execution이 읽을 수 있는 것:**
 - `trade.order_intents` (주문 의도)
@@ -686,7 +689,186 @@ func (s *ExecutionService) SyncHoldings(ctx context.Context) error {
 
 ---
 
-### 5.5 재시작 복구 (Bootstrap)
+### 5.5 ExitEvent 생성 (포지션 청산 감지)
+
+**목적**: holdings qty=0 감지 시 ExitEvent 생성 → Reentry Engine 트리거
+
+```mermaid
+flowchart TD
+    A[Holdings Sync 완료] --> B[Compare with prev holdings]
+    B --> C{qty: N → 0?}
+    C -->|no| D[Skip]
+    C -->|yes| E[Load position by symbol]
+    E --> F{position exists?}
+    F -->|no| G[Log orphan holding clear]
+    F -->|yes| H[Determine exit_reason_code]
+    H --> I{exit_reason known?}
+    I -->|yes EXIT intent| J[Create ExitEvent<br/>source=AUTO_EXIT]
+    I -->|no intent found| K[Create ExitEvent<br/>source=MANUAL or BROKER]
+    J --> L[Insert exit_events]
+    K --> L
+    L --> M[NOTIFY exit_event_created]
+    M --> N[Link position to ExitEvent]
+```
+
+**처리 로직**:
+
+```go
+func (s *ExecutionService) DetectAndCreateExitEvents(ctx context.Context,
+    prevHoldings, currHoldings []Holding) error {
+
+    prevMap := makeMap(prevHoldings, func(h Holding) string { return h.Symbol })
+
+    for _, curr := range currHoldings {
+        prev, existed := prevMap[curr.Symbol]
+
+        // Case 1: qty: N → 0 (position closed)
+        if existed && prev.Qty > 0 && curr.Qty == 0 {
+            // Load position
+            position, err := s.store.LoadPositionBySymbol(ctx, curr.Symbol, "OPEN")
+            if err != nil {
+                log.Warn("position not found for cleared holding", "symbol", curr.Symbol)
+                continue
+            }
+
+            // Determine exit reason and source
+            exitReason, source, intentID := s.determineExitReason(ctx, position.PositionID)
+
+            // Calculate realized PnL
+            exitAvgPrice := s.calculateExitAvgPrice(ctx, position.PositionID)
+            realizedPnl := (exitAvgPrice - position.EntryPrice) * float64(position.Qty)
+            realizedPnlPct := realizedPnl / (position.EntryPrice * float64(position.Qty)) * 100
+
+            // Create ExitEvent
+            exitEvent := ExitEvent{
+                ExitEventID:     uuid.New(),
+                PositionID:      position.PositionID,
+                AccountID:       curr.AccountID,
+                Symbol:          curr.Symbol,
+                ExitTs:          time.Now(),
+                ExitQty:         position.Qty,  // Original position qty
+                ExitAvgPrice:    exitAvgPrice,
+                ExitReasonCode:  exitReason,
+                Source:          source,
+                IntentID:        intentID,
+                ExitProfileID:   position.ExitProfileID,
+                RealizedPnl:     realizedPnl,
+                RealizedPnlPct:  realizedPnlPct,
+                CreatedTs:       time.Now(),
+            }
+
+            err = s.store.InsertExitEvent(ctx, exitEvent)
+            if err != nil {
+                log.Error("failed to create exit event", "position_id", position.PositionID, "error", err)
+                continue
+            }
+
+            // Notify Reentry Engine
+            err = s.notify(ctx, "exit_event_created", exitEvent)
+            if err != nil {
+                log.Warn("notify exit_event_created failed", "exit_event_id", exitEvent.ExitEventID)
+            }
+
+            log.Info("exit event created",
+                "exit_event_id", exitEvent.ExitEventID,
+                "position_id", position.PositionID,
+                "symbol", curr.Symbol,
+                "exit_reason", exitReason,
+                "source", source,
+                "realized_pnl", realizedPnl)
+        }
+    }
+
+    return nil
+}
+
+func (s *ExecutionService) determineExitReason(ctx context.Context,
+    positionID uuid.UUID) (exitReasonCode string, source string, intentID *uuid.UUID) {
+
+    // 1. Find recent EXIT intents for this position
+    intents, err := s.store.LoadIntents(ctx, IntentFilter{
+        PositionID: positionID,
+        Type:       []string{"EXIT_PARTIAL", "EXIT_FULL"},
+        Status:     []string{"SUBMITTED", "FILLED"},
+        Since:      time.Now().Add(-1 * time.Hour),  // Recent only
+    })
+    if err != nil || len(intents) == 0 {
+        // No EXIT intent found → MANUAL or BROKER
+        return "MANUAL", "MANUAL", nil
+    }
+
+    // 2. Take most recent EXIT intent
+    lastIntent := intents[0]  // Ordered by created_ts DESC
+
+    // 3. Map intent reason_code to exit_reason_code
+    source = "AUTO_EXIT"
+    exitReasonCode = lastIntent.ReasonCode  // SL1, SL2, TP1, TP2, TRAIL, TIME
+    intentID = &lastIntent.IntentID
+
+    return exitReasonCode, source, intentID
+}
+
+func (s *ExecutionService) calculateExitAvgPrice(ctx context.Context,
+    positionID uuid.UUID) decimal.Decimal {
+
+    // Load all EXIT fills for this position
+    fills, err := s.store.LoadFillsForPosition(ctx, positionID, "EXIT")
+    if err != nil || len(fills) == 0 {
+        log.Warn("no exit fills found for position", "position_id", positionID)
+        return decimal.Zero
+    }
+
+    // Calculate weighted average
+    totalValue := decimal.Zero
+    totalQty := int64(0)
+    for _, fill := range fills {
+        totalValue = totalValue.Add(fill.Price.Mul(decimal.NewFromInt(fill.Qty)))
+        totalQty += fill.Qty
+    }
+
+    if totalQty == 0 {
+        return decimal.Zero
+    }
+
+    return totalValue.Div(decimal.NewFromInt(totalQty))
+}
+```
+
+**Exit Reason 결정 로직**:
+
+| 조건 | exit_reason_code | source | intent_id |
+|------|------------------|--------|-----------|
+| EXIT intent 있음 | intent.reason_code 사용 | AUTO_EXIT | intent.intent_id |
+| EXIT intent 없음, 수동 청산 | MANUAL | MANUAL | NULL |
+| EXIT intent 없음, 브로커 강제청산 | BROKER | BROKER | NULL |
+| 판단 불가 | UNKNOWN | UNKNOWN | NULL |
+
+**멱등성 보장**:
+- `position_id`별 ExitEvent는 1회만 생성
+- Holdings sync 시 이전 상태와 비교하여 중복 방지
+- ExitEvent INSERT 전 중복 체크
+
+```sql
+-- Optional: Unique constraint
+CREATE UNIQUE INDEX uq_exit_events_position ON trade.exit_events (position_id);
+```
+
+**NOTIFY 채널**:
+
+```sql
+-- ExitEvent 생성 시
+NOTIFY exit_event_created, '{
+  "exit_event_id": "...",
+  "position_id": "...",
+  "symbol": "005930",
+  "exit_reason_code": "SL1",
+  "source": "AUTO_EXIT"
+}';
+```
+
+---
+
+### 5.6 재시작 복구 (Bootstrap)
 
 **목적**: 프로세스 재시작 시 KIS로부터 전체 상태 복구
 
@@ -758,7 +940,7 @@ func (s *ExecutionService) Bootstrap(ctx context.Context) error {
 
 ---
 
-### 5.6 동시성/트랜잭션 전략
+### 5.7 동시성/트랜잭션 전략
 
 **원칙**: `order_id` 단위 직렬화 (동일 주문에 대한 동시 쓰기 방지)
 
@@ -1259,14 +1441,17 @@ panels:
 
 ## 📊 설계 완료 기준
 
-- [ ] 입력/출력 인터페이스 명확히 정의
-- [ ] 데이터 모델 (orders, fills) 완성
-- [ ] 주문 제출 흐름 정의
-- [ ] 체결 수신 흐름 정의
-- [ ] Reconciliation 정책 정의
-- [ ] 에러 처리 시나리오 정의
-- [ ] SSOT 규칙 (소유권/금지) 명시
-- [ ] 성능 고려사항 검토
+- [x] 입력/출력 인터페이스 명확히 정의
+- [x] 데이터 모델 (orders, fills, holdings, exit_events) 완성
+- [x] 주문 제출 흐름 정의
+- [x] 체결 수신 흐름 정의
+- [x] Reconciliation 정책 정의
+- [x] **ExitEvent 생성 로직 정의 (holdings qty=0 감지)**
+- [x] **Exit Reason 결정 로직 정의 (AUTO_EXIT, MANUAL, BROKER)**
+- [x] **ExitEvent NOTIFY 채널 정의 (Reentry 트리거)**
+- [x] 에러 처리 시나리오 정의
+- [x] SSOT 규칙 (소유권/금지) 명시
+- [x] 성능 고려사항 검토
 
 ---
 

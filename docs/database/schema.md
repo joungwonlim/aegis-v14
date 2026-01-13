@@ -25,11 +25,16 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 | market | discrepancies | PriceSync | PriceSync만 |
 | trade | positions | Exit | Exit, Execution |
 | trade | position_state | Exit | Exit만 |
+| trade | exit_control | Exit | Exit만 (단일 row) |
+| trade | exit_profiles | Exit | Exit만 |
+| trade | symbol_exit_overrides | Exit | Exit만 |
+| trade | exit_events | Execution | Execution만 |
+| trade | exit_signals | Exit | Exit만 |
 | trade | reentry_candidates | Reentry | Reentry만 |
-| trade | order_intents | Strategy | Exit, Reentry만 |
+| trade | reentry_control | Reentry | Reentry만 (단일 row) |
+| trade | order_intents | Strategy | Exit, Reentry, Router만 |
 | trade | orders | Execution | Execution만 |
 | trade | fills | Execution | Execution만 |
-| trade | exit_signals | Exit | Exit만 |
 | trade | holdings | Execution | Execution만 |
 | trade | picks | Router | Router만 |
 | trade | pick_decisions | Router | Router만 |
@@ -144,7 +149,21 @@ CREATE INDEX idx_discrepancies_severity ON market.discrepancies (severity, ts DE
 
 ### trade.positions
 
-**목적**: 포지션 마스터 (Exit 소유)
+**목적**: 포지션 마스터
+
+**컬럼별 소유권 (Column-Level SSOT)**:
+
+| 컬럼 | 쓰기 권한 | 비고 |
+|------|----------|------|
+| position_id, account_id, symbol, side, entry_ts, strategy_id | Exit | 포지션 생성 시 |
+| status, exit_mode, exit_profile_id | Exit | 전략 상태 관리 |
+| qty, avg_price | Execution | 체결 동기화 (KIS holdings 기준) |
+| version, updated_ts | 자동 트리거 | 낙관적 잠금 |
+
+**규칙**:
+- Exit: 포지션 전략 상태(status, exit_mode, exit_profile_id) 소유
+- Execution: 실제 체결 수량/평단가(qty, avg_price) 소유
+- 두 모듈은 서로의 컬럼을 변경하지 않음
 
 ```sql
 CREATE TABLE trade.positions (
@@ -157,6 +176,8 @@ CREATE TABLE trade.positions (
     entry_ts      TIMESTAMPTZ NOT NULL,
     status        TEXT NOT NULL,  -- OPEN | CLOSING | CLOSED
     strategy_id   TEXT,
+    exit_mode     TEXT NOT NULL DEFAULT 'DEFAULT',  -- DEFAULT | DISABLED | MANUAL_ONLY | PROFILE:<id>
+    exit_profile_id TEXT,  -- NULL이면 resolver로 결정
     version       INT NOT NULL DEFAULT 1,  -- 낙관적 잠금 (평단가 변경 감지)
     updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -186,6 +207,8 @@ EXECUTE FUNCTION increment_position_version();
 
 **목적**: Exit FSM 상태 (Exit 소유)
 
+**중요**: `cooldown_until`은 제거됨 (Reentry가 reentry_candidates.cooldown_until 사용)
+
 ```sql
 CREATE TABLE trade.position_state (
     position_id        UUID PRIMARY KEY REFERENCES trade.positions(position_id),
@@ -193,7 +216,6 @@ CREATE TABLE trade.position_state (
     hwm_price          NUMERIC,
     stop_floor_price   NUMERIC,
     atr                NUMERIC,
-    cooldown_until     TIMESTAMPTZ,
     last_eval_ts       TIMESTAMPTZ,
     updated_ts         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -206,20 +228,59 @@ CREATE TABLE trade.position_state (
 ```sql
 CREATE TABLE trade.reentry_candidates (
     candidate_id        UUID PRIMARY KEY,
+    exit_event_id       UUID NOT NULL UNIQUE REFERENCES trade.exit_events(exit_event_id),
     symbol              TEXT NOT NULL,
     origin_position_id  UUID NOT NULL,
-    exit_reason         TEXT NOT NULL,
+    exit_reason_code    TEXT NOT NULL,
     exit_ts             TIMESTAMPTZ NOT NULL,
     exit_price          NUMERIC NOT NULL,
+    exit_profile_id     TEXT,  -- 청산 시 적용된 profile
     cooldown_until      TIMESTAMPTZ NOT NULL,
-    state               TEXT NOT NULL,
+    state               TEXT NOT NULL,  -- COOLDOWN | WATCHING | TRIGGERED | ENTERED | EXHAUSTED
     max_reentries       INT  NOT NULL DEFAULT 2,
     reentry_count       INT  NOT NULL DEFAULT 0,
+    reentry_profile_id  TEXT,  -- 재진입 시 적용할 profile (NULL이면 resolver)
     last_eval_ts        TIMESTAMPTZ,
     updated_ts          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_reentry_state ON trade.reentry_candidates (state, cooldown_until);
+CREATE INDEX idx_reentry_symbol ON trade.reentry_candidates (symbol, exit_ts DESC);
+CREATE UNIQUE INDEX uq_reentry_exit_event ON trade.reentry_candidates (exit_event_id);
+```
+
+**중요**:
+- `exit_event_id`: ExitEvent를 SSOT로 참조 (멱등성 보장)
+- `exit_reason_code`: exit_event에서 복사 (SL1/TP/TRAIL 등)
+- `exit_profile_id`: 청산 시 적용된 Exit 프로파일 (재진입 판단에 영향)
+
+### trade.reentry_control
+
+**목적**: Reentry Engine 전역 제어
+
+```sql
+CREATE TABLE trade.reentry_control (
+    id                INT PRIMARY KEY DEFAULT 1,  -- 단일 row 강제
+    mode              TEXT NOT NULL,  -- RUNNING | PAUSE_ENTRY | PAUSE_ALL
+    reason            TEXT,
+    updated_by        TEXT NOT NULL,
+    updated_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_reentry_control_single_row CHECK (id = 1),
+    CONSTRAINT chk_reentry_mode CHECK (mode IN ('RUNNING', 'PAUSE_ENTRY', 'PAUSE_ALL'))
+);
+
+-- 초기값 INSERT
+INSERT INTO trade.reentry_control (id, mode, updated_by, reason)
+VALUES (1, 'RUNNING', 'system', 'Initial setup')
+ON CONFLICT (id) DO NOTHING;
+
+CREATE INDEX idx_reentry_control_mode ON trade.reentry_control (mode);
+```
+
+**모드 설명**:
+- `RUNNING`: 정상 동작 (기본)
+- `PAUSE_ENTRY`: 후보 생성/평가는 하되 ENTRY intent 생성만 금지 (안전한 일시정지)
+- `PAUSE_ALL`: 후보 생성/평가 자체도 중단
 ```
 
 ### trade.order_intents
@@ -303,6 +364,134 @@ CREATE TABLE trade.exit_signals (
 CREATE INDEX idx_exit_signals_position_ts ON trade.exit_signals (position_id, ts DESC);
 CREATE INDEX idx_exit_signals_rule ON trade.exit_signals (rule_name, triggered, ts DESC);
 ```
+
+### trade.exit_control
+
+**목적**: Exit Engine 전역 제어 (킬 스위치)
+
+```sql
+CREATE TABLE trade.exit_control (
+    id                INT PRIMARY KEY DEFAULT 1,  -- 단일 row 강제
+    mode              TEXT NOT NULL,  -- RUNNING | PAUSE_PROFIT | PAUSE_ALL | EMERGENCY_FLATTEN
+    reason            TEXT,
+    updated_by        TEXT NOT NULL,
+    updated_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_exit_control_single_row CHECK (id = 1),
+    CONSTRAINT chk_exit_mode CHECK (mode IN ('RUNNING', 'PAUSE_PROFIT', 'PAUSE_ALL', 'EMERGENCY_FLATTEN'))
+);
+
+-- 초기값 INSERT
+INSERT INTO trade.exit_control (id, mode, updated_by, reason)
+VALUES (1, 'RUNNING', 'system', 'Initial setup')
+ON CONFLICT (id) DO NOTHING;
+
+CREATE INDEX idx_exit_control_mode ON trade.exit_control (mode);
+```
+
+**모드 설명**:
+- `RUNNING`: 정상 동작 (기본)
+- `PAUSE_PROFIT`: 익절/트레일만 멈춤, 손절(SL)은 계속 (가장 안전한 일시정지)
+- `PAUSE_ALL`: 모든 자동청산 멈춤 (단기 사용 권장)
+- `EMERGENCY_FLATTEN`: 비상 전량 청산 (선택적 구현)
+
+### trade.exit_profiles
+
+**목적**: Exit 룰 프로파일 (재사용 가능한 설정 묶음)
+
+```sql
+CREATE TABLE trade.exit_profiles (
+    profile_id    TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    description   TEXT,
+    config        JSONB NOT NULL,  -- SL/TP/Trailing/TimeExit 전체 파라미터
+    version       INT NOT NULL DEFAULT 1,
+    is_active     BOOLEAN NOT NULL DEFAULT true,
+    created_by    TEXT NOT NULL,
+    created_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 기본 프로파일
+INSERT INTO trade.exit_profiles (profile_id, name, description, config, created_by) VALUES
+('default_v1', 'Default ATR Strategy', '기본 ATR 기반 손절/익절',
+ '{"sl1_pct": -3.0, "sl2_pct": -8.0, "tp1_pct": 5.0, "tp2_pct": 10.0, "tp3_pct": 20.0, "atr_trail_enabled": true, "time_exit_hours": 168}'::jsonb,
+ 'system')
+ON CONFLICT (profile_id) DO NOTHING;
+
+CREATE INDEX idx_exit_profiles_active ON trade.exit_profiles (is_active, profile_id);
+```
+
+**config JSONB 스키마**:
+```json
+{
+  "sl1_pct": -3.0,
+  "sl2_pct": -8.0,
+  "tp1_pct": 5.0,
+  "tp1_qty_pct": 30.0,
+  "tp2_pct": 10.0,
+  "tp2_qty_pct": 30.0,
+  "tp3_pct": 20.0,
+  "tp3_qty_pct": 40.0,
+  "atr_trail_enabled": true,
+  "atr_trail_multiplier": 2.0,
+  "break_even_trigger_pct": 2.0,
+  "gap_down_threshold_pct": -5.0,
+  "time_exit_hours": 168
+}
+```
+
+### trade.symbol_exit_overrides
+
+**목적**: 종목별 Exit 설정 오버라이드
+
+```sql
+CREATE TABLE trade.symbol_exit_overrides (
+    symbol         TEXT PRIMARY KEY,
+    profile_id     TEXT NOT NULL REFERENCES trade.exit_profiles(profile_id),
+    enabled        BOOLEAN NOT NULL DEFAULT true,
+    effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+    reason         TEXT,
+    created_by     TEXT NOT NULL,
+    created_ts     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_ts     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_symbol_overrides_profile ON trade.symbol_exit_overrides (profile_id);
+CREATE INDEX idx_symbol_overrides_enabled ON trade.symbol_exit_overrides (enabled, effective_from);
+```
+
+### trade.exit_events
+
+**목적**: 청산 확정 이벤트 (SSOT) - Execution이 생성
+
+```sql
+CREATE TABLE trade.exit_events (
+    exit_event_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    position_id       UUID NOT NULL REFERENCES trade.positions(position_id),
+    account_id        TEXT NOT NULL,
+    symbol            TEXT NOT NULL,
+    exit_ts           TIMESTAMPTZ NOT NULL,
+    exit_qty          BIGINT NOT NULL,
+    exit_avg_price    NUMERIC NOT NULL,
+    exit_reason_code  TEXT NOT NULL,  -- SL1 | SL2 | TP1 | TP2 | TP3 | TRAIL | TIME | MANUAL | BROKER | UNKNOWN
+    source            TEXT NOT NULL,  -- AUTO_EXIT | MANUAL | BROKER
+    intent_id         UUID REFERENCES trade.order_intents(intent_id),
+    exit_profile_id   TEXT,  -- 적용된 profile
+    realized_pnl      NUMERIC,
+    realized_pnl_pct  FLOAT,
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_exit_events_position ON trade.exit_events (position_id, exit_ts DESC);
+CREATE INDEX idx_exit_events_symbol ON trade.exit_events (symbol, exit_ts DESC);
+CREATE INDEX idx_exit_events_reason ON trade.exit_events (exit_reason_code, exit_ts DESC);
+CREATE UNIQUE INDEX uq_exit_events_position_ts ON trade.exit_events (position_id, exit_ts);
+```
+
+**중요**:
+- ExitEvent는 **holdings에서 qty=0 확정** 또는 **fills 누적 완료 확정** 시점에 Execution이 생성
+- Exit Engine은 ExitEvent를 생성하지 않음 (order_intent만 생성)
+- Reentry Engine의 입력 소스는 ExitEvent (SSOT)
 
 ### trade.holdings
 

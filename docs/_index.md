@@ -10,12 +10,17 @@
 
 ```
 docs/
-├── _index.md              # 이 파일 (문서 등록부)
-├── architecture/          # 시스템 아키텍처 설계
-├── modules/               # 모듈별 설계
-├── database/              # 데이터베이스 설계
-├── api/                   # API 설계
-└── ui/                    # UI 설계
+├── _index.md                    # 이 파일 (문서 등록부)
+├── architecture/                # 시스템 아키텍처 설계
+│   ├── system-overview.md       # 전체 시스템 개요
+│   ├── pick-to-execution-pipeline.md
+│   └── architecture-improvements.md  # 성능/안정성 개선안
+├── modules/                     # 모듈별 설계
+├── database/                    # 데이터베이스 설계
+├── api/                         # API 설계
+├── ui/                          # UI 설계
+└── reviews/                     # 설계 검토 기록 (아카이브)
+    └── 2026-01-13-ssot-review.md
 ```
 
 ---
@@ -26,6 +31,7 @@ docs/
 |------|------|------|
 | `architecture/system-overview.md` | ✅ 완료 | 전체 시스템 개요 (SSOT, 모듈 독립성, 멱등성) |
 | `architecture/pick-to-execution-pipeline.md` | ✅ 완료 | 다중 선정 모듈 → 단일 실행 시스템 파이프라인 |
+| `architecture/architecture-improvements.md` | ✅ 완료 | 성능 및 안정성 개선안 (P0~P2 우선순위) |
 | `architecture/data-flow.md` | ⬜ TODO | 데이터 흐름 다이어그램 |
 | `architecture/layer-design.md` | ⬜ TODO | 레이어 구조 설계 |
 | `architecture/tech-stack.md` | ⬜ TODO | 기술 스택 선정 및 근거 |
@@ -39,9 +45,9 @@ docs/
 | 모듈 | 문서 | 상태 | 설명 |
 |------|------|------|------|
 | PriceSync | `modules/price-sync.md` | ✅ 완료 | 현재가 동기화 (KIS WS/REST, Naver) |
-| Exit Engine | `modules/exit-engine.md` | ✅ 완료 | 자동 청산 (손절/익절/트레일링) |
-| Reentry Engine | `modules/reentry-engine.md` | ✅ 완료 | 재진입 전략 (쿨다운/게이트/트리거) |
-| Execution | `modules/execution-service.md` | ✅ 완료 | 주문 제출/체결 관리 (KIS API 연동) |
+| Exit Engine | `modules/exit-engine.md` | ✅ 완료 | 자동 청산 (Hybrid % + ATR 표준, Control Gate, Profile System) |
+| Reentry Engine | `modules/reentry-engine.md` | ✅ 완료 | 재진입 전략 (ExitEvent 기반, Control Gate) |
+| Execution | `modules/execution-service.md` | ✅ 완료 | 주문 제출/체결 관리 (ExitEvent 생성 SSOT) |
 
 ### 전략 모듈 (향후 확장)
 
@@ -98,31 +104,46 @@ docs/
 
 ---
 
+## 📝 설계 검토 (Reviews)
+
+| 문서 | 상태 | 설명 |
+|------|------|------|
+| `reviews/2026-01-13-ssot-review.md` | ✅ 완료 | SSOT 불일치 검증 및 수정 완료 (아카이브) |
+
+---
+
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 9/30 (계획 변경: Quant Runtime + Pick Pipeline)
-진행률: 30%
+총 문서 수: 11/30 (계획 변경: Quant Runtime + Pick Pipeline)
+진행률: 37%
 
-✅ 완료: 9
-  - architecture/system-overview.md
+✅ 완료: 11
+  - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
+  - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
   - modules/price-sync.md
-  - modules/exit-engine.md
-  - modules/reentry-engine.md
-  - modules/execution-service.md
-  - modules/external-apis.md
-  - database/schema.md
-  - database/access-control.md
+  - modules/exit-engine.md (Control Gate + Profile System, SSOT 강화)
+  - modules/reentry-engine.md (ExitEvent 기반 디커플링)
+  - modules/execution-service.md (ExitEvent 생성 SSOT)
+  - modules/external-apis.md (KIS WS TR별 소유권 분리)
+  - database/schema.md (21 tables, positions 컬럼별 SSOT 명시)
+  - database/access-control.md (컬럼별 권한, DELETE 제거)
+  - reviews/2026-01-13-ssot-review.md (SSOT 검증 아카이브)
 
 🚧 진행 중: 0
-⬜ TODO: 21
+⬜ TODO: 20
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
-데이터베이스 접근 제어 설계 완료 (PostgreSQL RBAC) ✅
+데이터베이스 접근 제어 설계 완료 (PostgreSQL RBAC, 컬럼별 권한) ✅
 v10 운영 이슈 해결 설계 완료 (중복 실행, 평단가 변경, Price Sync 장애) ✅
 Pick-to-Execution Pipeline 설계 완료 (다중 선정 → 단일 실행) ✅
+Exit/Reentry 제어 시스템 완료 (Kill Switch, Profile, Symbol Override) ✅
+Exit/Reentry 디커플링 완료 (ExitEvent SSOT 기반 아키텍처) ✅
+Exit 표준 룰 완료 (Hybrid % + ATR, 프로파일 3종, HardStop) ✅
+SSOT 검증 및 수정 완료 (문서 간 불일치 5건 해결) ✅
+아키텍처 개선안 작성 완료 (P0~P2 우선순위별 6건) ✅
 ```
 
 ---

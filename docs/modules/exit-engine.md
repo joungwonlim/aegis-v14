@@ -31,6 +31,10 @@
 ✅ **데이터:**
 - `trade.positions` - 포지션 마스터
 - `trade.position_state` - Exit FSM 상태
+- `trade.exit_control` - 전역 제어 (킬 스위치)
+- `trade.exit_profiles` - Exit 룰 프로파일
+- `trade.symbol_exit_overrides` - 종목별 설정
+- `trade.exit_signals` - 트리거 평가 기록
 - `trade.order_intents` (EXIT_* 타입) - 청산 의도
 
 ✅ **로직:**
@@ -38,23 +42,28 @@
 - 트리거 조건 판정 (SL/TP/TRAIL)
 - HWM/StopFloor 계산
 - 청산 주문 의도 생성 (멱등)
+- **Profile Resolver** (position > symbol > strategy > default)
+- **Control Gate** (전역 제어 체크)
 
 ### 다른 모듈과의 경계
 
 ❌ **Exit Engine이 하지 않는 것:**
 - 현재가 결정 → PriceSync
 - 주문 제출 → Execution
+- **ExitEvent 생성** → Execution (holdings 확정 후)
 - 재진입 판단 → Reentry Engine
 
 ❌ **Exit Engine이 접근하지 않는 것:**
 - `market.*` 테이블 쓰기 (읽기만)
 - `trade.orders/fills` 쓰기 (읽기만)
+- `trade.exit_events` 쓰기 (읽기만) **← 중요: Execution만 생성**
 - `trade.reentry_candidates` 쓰기 (읽기만)
 
 ✅ **Exit Engine이 읽을 수 있는 것:**
 - `market.prices_best` (현재가)
 - `market.freshness` (안전 게이트)
 - `trade.fills` (체결 확인)
+- `trade.exit_events` (참고용)
 
 ---
 
@@ -86,28 +95,23 @@ INSERT INTO trade.order_intents (
 - `status=NEW`로 생성
 - `qty`는 포지션 잔량 이하
 
-#### Output: reentry_candidates (재진입 후보 생성)
+#### ⚠️ Exit Engine은 ExitEvent를 생성하지 않음
 
-```sql
--- Reentry Engine이 읽어서 후보 관리
-INSERT INTO trade.reentry_candidates (
-    candidate_id,
-    symbol,
-    origin_position_id,
-    exit_reason,        -- SL1 | SL2 | TRAIL | TP | TIME
-    exit_ts,
-    exit_price,
-    cooldown_until,     -- exit_ts + cooldown_period
-    state,              -- COOLDOWN
-    max_reentries,
-    reentry_count
-) VALUES (...);
-```
+**중요**: Exit Engine은 `trade.exit_events`를 생성하지 않습니다.
 
-**계약:**
-- 포지션이 CLOSED로 확정될 때만 생성
-- `cooldown_until`은 반드시 미래 시각
-- `state=COOLDOWN`로 시작
+**ExitEvent 생성 책임**: **Execution Service**
+- Execution이 KIS holdings를 reconcile할 때
+- holdings에서 `qty=0` 확정 시점에 ExitEvent 생성
+- 또는 fills 누적이 포지션을 완전 소진한 시점
+
+**이유**:
+- Exit Engine이 intent를 생성해도 실제 체결되지 않을 수 있음
+- 수동 청산 / 브로커 직접 청산도 ExitEvent로 기록되어야 함
+- **ExitEvent = 브로커 사실 기반 SSOT** (의도가 아닌 결과)
+
+**Reentry 연결**:
+- Reentry Engine은 ExitEvent를 입력으로 사용
+- Exit Engine이 멈춰도(PAUSE), 수동 청산이 발생하면 ExitEvent가 생성되고 Reentry는 정상 동작
 
 ### 2. 외부 의존 인터페이스
 
@@ -162,6 +166,78 @@ INDEX idx_positions_open (account_id, status, symbol)
   WHERE status IN ('OPEN', 'CLOSING')
 ```
 
+#### 📌 Column-Level SSOT (positions 공유 쓰기 책임)
+
+trade.positions는 Exit Engine과 Execution Service가 **모두 쓰기 가능**하지만, 각 컬럼별 소유권은 명확히 구분됩니다.
+
+| 컬럼 | 소유자 | 업데이트 시점 | 설명 |
+|------|--------|-------------|------|
+| **position_id** | Execution | 진입 시 (INSERT) | 생성 후 불변 |
+| **account_id** | Execution | 진입 시 (INSERT) | 생성 후 불변 |
+| **symbol** | Execution | 진입 시 (INSERT) | 생성 후 불변 |
+| **side** | Execution | 진입 시 (INSERT) | 생성 후 불변 |
+| **qty** | **Execution** | 체결 발생 시 | **브로커 사실 기준** (holdings reconcile) |
+| **avg_price** | **Execution** | 체결 발생 시 | **브로커 사실 기준** (fills 누적 계산) |
+| **entry_ts** | Execution | 진입 시 (INSERT) | 생성 후 불변 |
+| **status** | **Exit Engine** | Exit FSM 전이 시 | **전략 상태 머신** (OPEN→CLOSING→CLOSED) |
+| **exit_mode** | **Exit Engine** | 수동 설정 시 | Control Gate (ENABLED/DISABLED/MANUAL_ONLY) |
+| **exit_profile_id** | **Exit Engine** | 수동 설정 시 | Profile Resolver (포지션별 오버라이드) |
+| **strategy_id** | Execution | 진입 시 (INSERT) | 진입 전략 추적용 |
+| **updated_ts** | 공유 | 각 업데이트 시 | 마지막 수정 시각 (trigger) |
+| **version** | 공유 | 각 업데이트 시 | 낙관적 잠금 (trigger, 자동 증가) |
+
+**중요 규칙**:
+
+1. **Execution 소유 컬럼 (브로커 사실)**:
+   - `qty`, `avg_price`는 **Execution만** 업데이트
+   - KIS holdings reconcile로 실제 보유 현황 반영
+   - Exit Engine은 이 값들을 **읽기 전용**으로 사용
+   - **근거**: 브로커가 궁극적 진실 (수동 청산, 부분 체결 등 반영)
+
+2. **Exit Engine 소유 컬럼 (전략 FSM)**:
+   - `status`는 **Exit Engine만** 업데이트
+   - Exit FSM에 따라 OPEN → CLOSING → CLOSED 전이
+   - Execution은 이 값을 **읽기만** (예: holdings reconcile 시 참고)
+   - **근거**: Exit 전략 로직이 청산 생애주기 소유
+
+3. **Exit Engine 소유 컬럼 (제어 설정)**:
+   - `exit_mode`, `exit_profile_id`는 **Exit Engine만** 업데이트
+   - 운영자 또는 API를 통한 수동 설정
+   - Execution은 읽지 않음 (Exit 전용 설정)
+
+**위반 예시 (금지)**:
+```
+❌ Exit Engine에서 qty, avg_price 업데이트
+❌ Execution에서 status, exit_mode 업데이트
+❌ Exit Engine에서 reentry_candidates 생성 (Reentry만 생성)
+❌ Exit Engine에서 exit_events 생성 (Execution만 생성)
+```
+
+**올바른 패턴**:
+```sql
+-- ✅ Execution: qty/avg_price 업데이트 (holdings reconcile)
+UPDATE trade.positions
+SET qty = $1, avg_price = $2, updated_ts = NOW()
+WHERE position_id = $3 AND version = $4;
+
+-- ✅ Exit Engine: status 업데이트 (FSM 전이)
+UPDATE trade.positions
+SET status = 'CLOSING', updated_ts = NOW()
+WHERE position_id = $1 AND version = $2;
+
+-- ✅ Exit Engine: exit_mode 설정 (수동 제어)
+UPDATE trade.positions
+SET exit_mode = 'DISABLED', updated_ts = NOW()
+WHERE position_id = $1;
+```
+
+**Version 충돌 처리**:
+- `qty`/`avg_price` 업데이트 중 Exit이 `status`를 변경하면 version 불일치
+- 낙관적 잠금으로 감지 후 재시도 (각 모듈의 변경사항 병합)
+- 최대 3회 재시도 후 실패 시 알람
+
+---
+
 ### trade.position_state (Exit FSM 상태)
 
 **목적**: 청산 상태 머신 유지
@@ -203,21 +279,43 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    A[Load OPEN positions] --> B[For each position]
-    B --> C{price stale?}
-    C -->|yes| D[Fail-Closed Policy]
-    D --> X[Skip or Conservative Exit]
-    C -->|no| E[Compute pnl/ret/hwm]
-    E --> F[Check triggers by priority]
-    F --> G{Any trigger hit?}
-    G -->|no| H[Update state metrics]
-    G -->|yes| I[Create order_intent]
-    I --> J{Insert success?}
-    J -->|yes| K[Intent created]
-    J -->|no| L[Already exists (idempotent)]
-    K --> H
-    L --> H
+    START[Start Evaluation Cycle] --> GATE1[Load exit_control.mode]
+    GATE1 --> GATE2{mode == PAUSE_ALL?}
+    GATE2 -->|yes| SKIP[Skip creating intents<br/>Update metrics only]
+    GATE2 -->|no| LOAD[Load OPEN positions]
+
+    LOAD --> LOOP[For each position]
+    LOOP --> CHK_DISABLED{position.exit_mode<br/>== DISABLED?}
+    CHK_DISABLED -->|yes| NEXT1[Skip position]
+    CHK_DISABLED -->|no| RESOLVE[Resolve exit profile<br/>position > symbol > strategy > default]
+
+    RESOLVE --> STALE{price stale?}
+    STALE -->|yes| FAIL[Fail-Closed Policy]
+    FAIL --> CONSERVATIVE[Skip or Conservative Exit]
+    STALE -->|no| COMPUTE[Compute pnl/ret/hwm with profile params]
+
+    COMPUTE --> FILTER{mode == PAUSE_PROFIT?}
+    FILTER -->|yes| SL_ONLY[Check SL triggers only]
+    FILTER -->|no| ALL_TRIGGER[Check all triggers by priority]
+
+    SL_ONLY --> TRIGGER_CHECK{Any trigger hit?}
+    ALL_TRIGGER --> TRIGGER_CHECK
+
+    TRIGGER_CHECK -->|no| UPDATE[Update state metrics]
+    TRIGGER_CHECK -->|yes| INTENT[Create order_intent<br/>action_key idempotent]
+    INTENT --> INSERT{Insert success?}
+    INSERT -->|yes| CREATED[Intent created]
+    INSERT -->|no| EXISTS[Already exists<br/>idempotent]
+    CREATED --> UPDATE
+    EXISTS --> UPDATE
+    UPDATE --> NEXT2[Next position]
 ```
+
+**주요 변경점**:
+1. **Control Gate** (최상단): `exit_control.mode` 체크
+2. **Position Skip**: `exit_mode=DISABLED`인 포지션 제외
+3. **Profile Resolver**: 우선순위 기반 프로파일 결정
+4. **Mode-based Filtering**: `PAUSE_PROFIT`이면 익절/트레일 차단
 
 **Fail-Closed 정책 (stale 시):**
 
@@ -585,33 +683,90 @@ if user_requests_manual_exit(position_id, qty, reason) {
 
 ---
 
-### Exit Signal 모니터링 (60초 간격)
+### A. Exit Evaluator Loop (1~5초) - 핵심 평가
 
-**목적**: 청산 트리거 감지 및 기록
+**목적**: **청산 트리거 판단 및 order_intents 생성 (최우선)**
 
-```sql
-CREATE TABLE IF NOT EXISTS trade.exit_signals (
-    signal_id UUID PRIMARY KEY,
-    position_id UUID NOT NULL REFERENCES trade.positions(position_id),
-    ts TIMESTAMPTZ NOT NULL,
-    rule_name TEXT NOT NULL,  -- HARD_STOP | GAP_DOWN | SCALE_OUT | ...
-    triggered BOOLEAN NOT NULL,
-    reason TEXT,
-    current_price NUMERIC NOT NULL,
-    hwm_price NUMERIC,
-    stop_floor_price NUMERIC,
-    current_pnl_pct FLOAT NOT NULL,
-    intent_id UUID,  -- 생성된 intent (있으면)
-    created_ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+**주기**: 1~5초 (보유 종목 기준, 손절 지연 최소화)
 
-CREATE INDEX idx_exit_signals_position_ts
-ON trade.exit_signals (position_id, ts DESC);
+**⚠️ 중요**: 이 루프는 **intent 생성만** 수행하며, signal 기록은 하지 않음.
+
+```go
+func EvaluateExitTriggers(ctx context.Context) {
+    ticker := time.NewTicker(3 * time.Second)  // 권장: 1~5초
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            positions := loadOpenPositions()
+
+            for _, pos := range positions {
+                // Control Gate 체크
+                controlMode := loadExitControlMode()
+                if controlMode == "PAUSE_ALL" {
+                    // HardStop 제외 모든 평가 스킵
+                    if !shouldEvaluateHardStop(pos) {
+                        continue
+                    }
+                }
+
+                // 현재가 조회
+                price, err := priceSync.GetBestPrice(pos.Symbol)
+                if err != nil || price.IsStale {
+                    continue  // Fail-Closed
+                }
+
+                // Profile Resolver
+                profile := resolveExitProfile(pos)
+                if profile == nil {
+                    continue
+                }
+
+                // 트리거 평가 (우선순위 순서)
+                trigger := evaluateTriggersInPriority(pos, price, profile, controlMode)
+                if trigger == nil {
+                    continue  // 트리거 없음
+                }
+
+                // Intent 생성 (멱등)
+                err := createIntent(pos.ID, trigger.Type, trigger.Qty, trigger.Reason)
+                if err != nil {
+                    log.Error("intent creation failed", "error", err)
+                }
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
 ```
 
-**모니터링 루프:**
+**특징**:
+- **손절 지연 최소화**: 1~5초 주기로 SL1/SL2 평가
+- **intent 생성만**: Signal 기록은 별도 루프에서 처리
+- **Fail-Closed**: 가격 stale 시 평가 스킵
+- **Control Gate**: PAUSE_ALL 시 HardStop만 평가
+
+---
+
+### B. Exit Signal Logger (60초) - 디버깅/백테스트
+
+**목적**: **청산 트리거 평가 결과 기록 (intent 생성 없음)**
+
+**주기**: 60초 (또는 샘플링)
+
+**데이터베이스 테이블**: `trade.exit_signals`
+
+Exit 트리거 평가 기록을 저장합니다. 각 룰(HARD_STOP, GAP_DOWN, SCALE_OUT 등)의 평가 결과와 트리거 여부를 기록하여 디버깅 및 백테스트에 활용합니다.
+
+**상세 스키마**: [schema.md](../database/schema.md#tradeexit_signals) 참고
+
+**⚠️ 중요**: 이 루프는 **기록만** 수행하며, **절대 intent를 생성하지 않음**.
+
 ```go
-func MonitorExitSignals(ctx context.Context) {
+func LogExitSignals(ctx context.Context) {
     ticker := time.NewTicker(60 * time.Second)
     defer ticker.Stop()
 
@@ -621,21 +776,35 @@ func MonitorExitSignals(ctx context.Context) {
             positions := loadOpenPositions()
 
             for _, pos := range positions {
+                price, err := priceSync.GetBestPrice(pos.Symbol)
+                if err != nil {
+                    continue
+                }
+
+                profile := resolveExitProfile(pos)
+                if profile == nil {
+                    continue
+                }
+
                 // 모든 rule 평가 (우선순위 순서)
                 for _, rule := range exitRules {
-                    triggered, reason := rule.Check(pos)
+                    triggered, reason, distance := rule.Check(pos, price, profile)
 
-                    // Signal 기록 (트리거 여부 무관)
-                    insertExitSignal(pos.ID, rule.Name, triggered, reason, ...)
+                    // Signal 기록만 (트리거 여부 무관)
+                    insertExitSignal(ExitSignal{
+                        PositionID:    pos.ID,
+                        RuleName:      rule.Name,
+                        IsTriggered:   triggered,
+                        Reason:        reason,
+                        Distance:      distance,  // 트리거까지 거리 (디버깅용)
+                        Price:         price.Last,
+                        EvaluatedAt:   time.Now(),
+                    })
 
-                    // 트리거되면 intent 생성 후 중단
-                    if triggered {
-                        intentID := createIntent(pos.ID, rule.Name, ...)
-                        updateExitSignal(signalID, intentID)
-                        break  // 한 사이클에 하나만
-                    }
+                    // ⚠️ 절대 intent를 생성하지 않음
                 }
             }
+
         case <-ctx.Done():
             return
         }
@@ -643,10 +812,15 @@ func MonitorExitSignals(ctx context.Context) {
 }
 ```
 
-**이점:**
+**이점**:
 - 모든 평가 결과 추적 (디버깅)
-- 트리거 직전 상황 분석
+- 트리거 직전 상황 분석 (distance 필드)
 - 백테스트 데이터로 활용
+- **평가 루프와 분리**: intent 생성 지연 없음
+
+**주의**:
+- 이 루프는 **기록 전용**이며, 실시간 청산 로직에 관여하지 않음
+- Intent 생성은 **Exit Evaluator Loop (A)**에서만 수행
 
 ---
 
@@ -688,19 +862,11 @@ func MonitorExitSignals(ctx context.Context) {
 
 **목적**: 하나의 Exit Engine 인스턴스만 실행 보장
 
-```sql
--- Advisory lock 테이블
-CREATE TABLE IF NOT EXISTS system.process_locks (
-    lock_name    TEXT PRIMARY KEY,
-    instance_id  TEXT NOT NULL,
-    acquired_ts  TIMESTAMPTZ NOT NULL,
-    heartbeat_ts TIMESTAMPTZ NOT NULL,
-    host         TEXT NOT NULL,
-    pid          INT NOT NULL
-);
+**데이터베이스 테이블**: `system.process_locks`
 
-CREATE INDEX idx_process_locks_heartbeat ON system.process_locks (heartbeat_ts DESC);
-```
+PostgreSQL Advisory Lock을 사용한 Leader Election을 위한 메타데이터 테이블입니다. 인스턴스 정보와 heartbeat를 기록하여 중복 실행을 방지합니다.
+
+**상세 스키마**: [schema.md](../database/schema.md#systemprocess_locks) 참고
 
 **Leader Election 구현:**
 
@@ -1240,8 +1406,10 @@ func (e *ExitEngine) monitorPriceSyncHealth(ctx context.Context) {
    ```
    ❌ Exit에서 재진입 판단
    ❌ Exit에서 reentry_candidates 상태 변경
+   ❌ Exit에서 reentry_candidates 생성
 
-   ✅ candidates 생성만 (COOLDOWN 상태로)
+   ✅ Exit는 order_intents (EXIT_*) 만 생성
+   ✅ Reentry는 exit_events를 소비해서 candidates 생성
    ```
 
 ### ✅ 허용된 패턴
@@ -1258,9 +1426,10 @@ func (e *ExitEngine) monitorPriceSyncHealth(ctx context.Context) {
    SELECT status FROM trade.orders WHERE intent_id = ?;
    ```
 
-3. **Reentry Candidate 생성 (쓰기)**
+3. **ExitEvent 읽기 (참고용)**
    ```sql
-   INSERT INTO trade.reentry_candidates (...) VALUES (...);
+   -- Exit Engine은 exit_events를 읽기만 가능 (생성은 Execution)
+   SELECT * FROM trade.exit_events WHERE position_id = ?;
    ```
 
 ---
@@ -1296,6 +1465,705 @@ ON trade.order_intents (action_key);
 
 ---
 
+## 🎛️ Control Gate (전역 제어)
+
+### exit_control 모드
+
+Exit Engine은 평가 루프 최상단에서 `trade.exit_control.mode`를 체크합니다.
+
+```sql
+SELECT mode FROM trade.exit_control WHERE id = 1;
+```
+
+| 모드 | 손절(SL) | 익절/트레일(TP/TRAIL) | 설명 |
+|------|----------|---------------------|------|
+| `RUNNING` | ✅ 허용 | ✅ 허용 | 정상 동작 (기본) |
+| `PAUSE_PROFIT` | ✅ 허용 | ❌ 차단 | 익절/트레일만 멈춤 (가장 안전한 일시정지) |
+| `PAUSE_ALL` | ❌ 차단 | ❌ 차단 | 모든 자동청산 멈춤 (단기 사용 권장) |
+| `EMERGENCY_FLATTEN` | ✅ 강제 | ✅ 강제 | 비상 전량 청산 (선택적 구현) |
+
+### 운영 시나리오
+
+**시나리오 1: 장중 급변동 → 익절만 일시정지**
+```sql
+UPDATE trade.exit_control
+SET mode = 'PAUSE_PROFIT', reason = '장중 급변동으로 익절 보류', updated_by = 'operator'
+WHERE id = 1;
+```
+- 손절은 계속 작동 (안전)
+- 익절/트레일링만 멈춤
+- 수동으로 RUNNING 복귀 시까지 유지
+
+**시나리오 2: 긴급 전체 정지**
+```sql
+UPDATE trade.exit_control
+SET mode = 'PAUSE_ALL', reason = '시스템 점검', updated_by = 'operator'
+WHERE id = 1;
+```
+- 모든 자동청산 intent 생성 중단
+- Execution reconcile은 계속 동작 (보유 현황 추적)
+- 수동 청산은 가능 (브로커 직접)
+
+### 안전장치 (권장)
+
+**HardStop은 항상 허용 (선택적 구현)**:
+```
+PAUSE_ALL 모드에서도 다음은 허용:
+- 계좌 일손실 한도 도달 (-5% 등)
+- 종목 재앙적 손실 (-20% 등)
+→ 이 경우 mode를 무시하고 강제 청산
+```
+
+---
+
+## 🔀 Profile Resolver (설정 우선순위)
+
+Exit 룰(SL/TP/Trailing 파라미터)을 결정하는 우선순위:
+
+### 1. 우선순위 체계
+
+```
+포지션 오버라이드 (position.exit_profile_id)
+    ↓ (NULL이면)
+종목 오버라이드 (symbol_exit_overrides.profile_id)
+    ↓ (없으면)
+전략 오버라이드 (strategy_id → profile mapping)
+    ↓ (없으면)
+기본 프로파일 (default_v1)
+```
+
+### 2. Resolver 구현 (Go 의사코드)
+
+```go
+func ResolveExitProfile(ctx context.Context, pos Position) (*ExitProfile, error) {
+    // 1. Position 오버라이드
+    if pos.ExitMode == "DISABLED" {
+        return nil, ErrExitDisabled
+    }
+    if pos.ExitMode == "MANUAL_ONLY" {
+        return nil, ErrManualOnly
+    }
+    if pos.ExitProfileID != "" {
+        return loadProfile(pos.ExitProfileID)
+    }
+
+    // 2. Symbol 오버라이드
+    override, err := loadSymbolOverride(pos.Symbol)
+    if err == nil && override.Enabled {
+        return loadProfile(override.ProfileID)
+    }
+
+    // 3. Strategy 오버라이드 (미구현 시 skip)
+    // if strategyProfile := getStrategyProfile(pos.StrategyID); strategyProfile != "" {
+    //     return loadProfile(strategyProfile)
+    // }
+
+    // 4. Default
+    return loadProfile("default_v1")
+}
+```
+
+### 3. 종목별 설정 예시
+
+**고베타 종목 (빡빡한 손절)**:
+```sql
+INSERT INTO trade.symbol_exit_overrides (symbol, profile_id, reason, created_by)
+VALUES ('373220', 'high_beta_tight_sl', 'LG에너지솔루션 - 변동성 높음', 'operator');
+```
+
+**저유동 종목 (보수적 익절)**:
+```sql
+INSERT INTO trade.symbol_exit_overrides (symbol, profile_id, reason, created_by)
+VALUES ('900110', 'low_vol_conservative', '저유동 - 유리한 타이밍에만 익절', 'operator');
+```
+
+### 4. 프로파일 예시
+
+**default_v1 (기본 ATR 전략)**:
+```json
+{
+  "sl1_pct": -3.0,
+  "sl2_pct": -8.0,
+  "tp1_pct": 5.0,
+  "tp1_qty_pct": 30.0,
+  "tp2_pct": 10.0,
+  "tp2_qty_pct": 30.0,
+  "tp3_pct": 20.0,
+  "tp3_qty_pct": 40.0,
+  "atr_trail_enabled": true,
+  "atr_trail_multiplier": 2.0,
+  "time_exit_hours": 168
+}
+```
+
+**high_beta_tight_sl (고베타 빡빡한 손절)**:
+```json
+{
+  "sl1_pct": -2.0,
+  "sl2_pct": -5.0,
+  "tp1_pct": 3.0,
+  "tp1_qty_pct": 50.0,
+  "atr_trail_enabled": false,
+  "time_exit_hours": 72
+}
+```
+
+---
+
+## 🌐 운영 API
+
+Exit Engine 제어 및 프로파일 관리를 위한 REST API.
+
+### 1. Control Management
+
+#### GET /api/v1/exit/control
+현재 Exit 제어 모드 조회
+
+**Response**:
+```json
+{
+  "mode": "RUNNING",
+  "reason": null,
+  "updated_by": "system",
+  "updated_ts": "2026-01-13T10:00:00+09:00"
+}
+```
+
+#### POST /api/v1/exit/control
+Exit 제어 모드 변경
+
+**Request**:
+```json
+{
+  "mode": "PAUSE_PROFIT",
+  "reason": "장중 급변동으로 익절 보류",
+  "updated_by": "operator_wonny"
+}
+```
+
+**Response**: 200 OK
+
+**Validation**:
+- `mode` ∈ {RUNNING, PAUSE_PROFIT, PAUSE_ALL, EMERGENCY_FLATTEN}
+- `updated_by` 필수 (감사 추적)
+
+### 2. Profile Management
+
+#### GET /api/v1/exit/profiles
+모든 Exit 프로파일 조회
+
+**Query**:
+- `active_only=true`: is_active=true만
+
+**Response**:
+```json
+{
+  "profiles": [
+    {
+      "profile_id": "default_v1",
+      "name": "Default ATR Strategy",
+      "config": { "sl1_pct": -3.0, ... },
+      "is_active": true
+    }
+  ]
+}
+```
+
+#### POST /api/v1/exit/profiles
+새 프로파일 생성 / 수정
+
+**Request**:
+```json
+{
+  "profile_id": "custom_v1",
+  "name": "Custom Strategy",
+  "description": "테스트용 커스텀 전략",
+  "config": {
+    "sl1_pct": -2.5,
+    "tp1_pct": 4.0
+  },
+  "created_by": "operator_wonny"
+}
+```
+
+### 3. Symbol Override Management
+
+#### GET /api/v1/exit/overrides/{symbol}
+종목별 오버라이드 조회
+
+**Response**:
+```json
+{
+  "symbol": "373220",
+  "profile_id": "high_beta_tight_sl",
+  "enabled": true,
+  "effective_from": "2026-01-13",
+  "reason": "LG에너지솔루션 - 변동성 높음"
+}
+```
+
+#### POST /api/v1/exit/overrides/{symbol}
+종목별 오버라이드 설정
+
+**Request**:
+```json
+{
+  "profile_id": "high_beta_tight_sl",
+  "reason": "고베타 종목",
+  "created_by": "operator_wonny"
+}
+```
+
+#### DELETE /api/v1/exit/overrides/{symbol}
+종목별 오버라이드 제거 (기본값으로 복귀)
+
+---
+
+## 📏 Exit 표준 룰 (Hybrid % + ATR Profile)
+
+### 핵심 개념
+
+Exit Engine은 단순한 고정 퍼센트 규칙(-3%, -5%, +7%, +10%)이 아닙니다.
+
+**Exit Engine = (트리거 집합) + (상태 머신) + (제어 플레인) + (실행 안전)**
+
+이 섹션에서는 **Base % + ATR 동적 스케일링** 하이브리드 접근을 표준으로 정의합니다.
+
+### 1. 기본 원칙
+
+**Base % (기본 임계값)**
+- SL1 = -3%, SL2 = -5%
+- TP1 = +7%, TP2 = +10%, TP3 = +16%
+
+**ATR% 기반 동적 조정**
+- 종목별 ATR(14일) %에 따라 임계값을 자동 스케일링
+- 저변동 종목 → 더 타이트한 Exit
+- 고변동 종목 → 더 넓은 Exit (휩쏘 방지)
+
+**Clamp (최소/최대 제한)**
+- 조정된 값이 과도하게 벗어나지 않도록 min/max 적용
+
+### 2. ATR 기반 Factor 계산
+
+```python
+# 종목별 ATR% 계산
+ATR = ATR(14, 일봉)  # 전일 종가 기준
+ATR_pct = ATR / entry_price
+
+# Factor 계산 (기준값 대비 배수)
+ATR_ref = 0.02  # 2% (기준 변동성)
+factor = ATR_pct / ATR_ref
+
+# Factor 제한
+factor_min = 0.7
+factor_max = 1.6
+factor = clamp(factor, factor_min, factor_max)
+
+# 임계값 조정
+SL1_pct = clamp(base_sl1 * factor, sl1_min, sl1_max)
+SL2_pct = clamp(base_sl2 * factor, sl2_min, sl2_max)
+TP1_pct = clamp(base_tp1 * factor, tp1_min, tp1_max)
+TP2_pct = clamp(base_tp2 * factor, tp2_min, tp2_max)
+TP3_pct = clamp(base_tp3 * factor, tp3_min, tp3_max)
+```
+
+**예시**:
+- 저변동 우량주 (ATR% = 1.0%): factor = 0.5 → 0.7 (clamp) → SL1 = 3% * 0.7 = 2.1%
+- 중변동 (ATR% = 2.0%): factor = 1.0 → SL1 = 3% * 1.0 = 3.0%
+- 고변동 테마주 (ATR% = 4.0%): factor = 2.0 → 1.6 (clamp) → SL1 = 3% * 1.6 = 4.8%
+
+### 3. 표준 Exit 상태 머신
+
+```mermaid
+stateDiagram-v2
+    [*] --> OPEN
+    OPEN --> TP1_DONE: TP1 hit
+    OPEN --> EXITED: SL1/SL2/TIME
+    TP1_DONE --> TP2_DONE: TP2 hit
+    TP1_DONE --> EXITED: Stop Floor hit
+    TP2_DONE --> TRAIL_ACTIVE: TP3 hit or conditions
+    TP2_DONE --> EXITED: Stop Floor hit
+    TRAIL_ACTIVE --> EXITED: Trailing stop hit
+    EXITED --> [*]
+```
+
+**부분 청산 비중 (권장)**:
+
+| 트리거 | 청산 비중 | intent_type | 설명 |
+|--------|----------|-------------|------|
+| SL1 | 50% | EXIT_PARTIAL | 1차 손절 (방어) |
+| SL2 | 100% (잔여) | EXIT_FULL | 2차 손절 (전량 정리) |
+| TP1 | 25% | EXIT_PARTIAL | 1차 익절 → Stop Floor 활성 |
+| TP2 | 25% | EXIT_PARTIAL | 2차 익절 |
+| TP3 | 20% | EXIT_PARTIAL | 3차 익절 → Trailing 시작 |
+| TRAIL | 100% (잔여) | EXIT_FULL | Trailing stop 트리거 |
+| TIME | 100% (잔여) | EXIT_FULL | 시간 청산 |
+
+### 4. Stop Floor (본전 방어)
+
+**TP1 체결 후 자동 활성화**:
+
+```python
+# TP1 체결 후
+stop_floor_price = entry_price * (1 + be_profit_pct)
+
+# 권장값
+be_profit_pct = 0.006  # 0.6% (수수료+α 커버)
+
+# 평가
+if price <= stop_floor_price:
+    create_intent(EXIT_FULL, reason="STOP_FLOOR")
+```
+
+**의미**:
+- TP1로 25% 익절 확보 후, 남은 75%를 "본전+α"로 방어
+- 급락 시에도 최소한 손해 없도록 보장
+
+### 5. Trailing Stop (수익 극대화)
+
+**TRAIL_ACTIVE 상태에서만 평가**:
+
+```python
+# HWM(최고가) 갱신
+if price > HWM:
+    HWM = price
+    HWM_ts = now()
+
+# Trailing gap 계산 (동적)
+pct_trail = 0.04  # 4% (기본)
+ATR_k = 2.0
+trail_gap_pct = max(pct_trail, ATR_k * ATR_pct)
+
+# 트리거
+trail_trigger_price = HWM * (1 - trail_gap_pct)
+if price <= trail_trigger_price:
+    create_intent(EXIT_FULL, reason="TRAIL")
+```
+
+**특징**:
+- 저변동 종목: pct_trail = 4%가 바닥 (타이트)
+- 고변동 종목: ATR_k * ATR_pct가 더 커서 자동으로 갭 확대 (휩쏘 방지)
+
+### 6. Time Stop (시간 청산)
+
+**2단계 정책**:
+
+#### A. 최대 보유 기간 초과
+```python
+hold_days = (now - entry_ts).days
+
+if hold_days >= max_hold_days:
+    create_intent(EXIT_FULL, reason="TIME_MAX_HOLD")
+```
+
+#### B. 모멘텀 미발생 청산 (선택)
+```python
+if hold_days >= no_momentum_days and max_profit_pct < no_momentum_profit:
+    create_intent(EXIT_FULL, reason="TIME_NO_MOMENTUM")
+```
+
+**권장값**:
+- max_hold_days = 10
+- no_momentum_days = 3
+- no_momentum_profit = 0.02 (2%)
+
+**예시**: 3일 동안 최고 수익이 +2% 미만이면 "기대 모멘텀 부재"로 정리
+
+### 7. HardStop (비상 손절)
+
+**PAUSE_ALL 모드에서도 허용되는 강력한 손절**:
+
+```python
+# HardStop은 Control Gate를 우회
+if mode == "PAUSE_ALL" and hardstop_always_on:
+    # SL2급 손절은 계속 평가
+    if ret <= hardstop_pct:
+        create_intent(EXIT_FULL, reason="HARDSTOP")
+```
+
+**권장값**:
+- hardstop_pct = -7% ~ -10%
+- hardstop_always_on = true (기본)
+
+**목적**:
+- 계좌 보호
+- 시스템 일시 정지 중에도 치명적 손실 방지
+
+### 8. 표준 프로파일 3종
+
+#### A. default_hybrid_v1 (기본)
+
+```yaml
+profile_id: default_hybrid_v1
+name: Default Hybrid Profile
+description: Base % + ATR 동적 조정 (표준)
+
+atr:
+  ref: 0.02           # 2%
+  factor_min: 0.7
+  factor_max: 1.6
+
+triggers:
+  sl1:
+    base_pct: -0.03   # -3%
+    min_pct: -0.02    # -2%
+    max_pct: -0.06    # -6%
+    qty_pct: 0.50     # 50%
+
+  sl2:
+    base_pct: -0.05   # -5%
+    min_pct: -0.035   # -3.5%
+    max_pct: -0.10    # -10%
+    qty_pct: 1.00     # 잔여 전량
+
+  tp1:
+    base_pct: 0.07    # +7%
+    min_pct: 0.05     # +5%
+    max_pct: 0.12     # +12%
+    qty_pct: 0.25     # 25%
+    stop_floor_profit: 0.006  # 0.6%
+
+  tp2:
+    base_pct: 0.10    # +10%
+    min_pct: 0.08     # +8%
+    max_pct: 0.18     # +18%
+    qty_pct: 0.25     # 25%
+
+  tp3:
+    base_pct: 0.16    # +16%
+    min_pct: 0.12     # +12%
+    max_pct: 0.25     # +25%
+    qty_pct: 0.20     # 20%
+    start_trailing: true
+
+trailing:
+  pct_trail: 0.04     # 4%
+  atr_k: 2.0
+
+time_stop:
+  max_hold_days: 10
+  no_momentum_days: 3
+  no_momentum_profit: 0.02
+
+hardstop:
+  enabled: true
+  pct: -0.10          # -10%
+```
+
+#### B. high_beta (고변동 종목용)
+
+**테마주, 급등주, 고베타 종목에 적용**
+
+```yaml
+profile_id: high_beta
+name: High Beta Profile
+description: 변동성 큰 종목용 (넓은 SL, 넓은 Trail)
+
+atr:
+  ref: 0.03           # 3% (기준 변동성 ↑)
+  factor_min: 0.8
+  factor_max: 1.8     # factor 범위 확대
+
+triggers:
+  sl1:
+    base_pct: -0.04   # -4% (base도 ↑)
+    min_pct: -0.025
+    max_pct: -0.08    # max도 ↑
+    qty_pct: 0.50
+
+  sl2:
+    base_pct: -0.06
+    min_pct: -0.045
+    max_pct: -0.12
+    qty_pct: 1.00
+
+  tp1:
+    base_pct: 0.08
+    min_pct: 0.06
+    max_pct: 0.12     # TP는 너무 멀지 않게 유지
+    qty_pct: 0.30     # 30% (조금 더 많이)
+    stop_floor_profit: 0.008
+
+  # ... TP2, TP3 similar
+
+trailing:
+  pct_trail: 0.05     # 5% (넓게)
+  atr_k: 2.3          # ATR 배수 ↑
+
+time_stop:
+  max_hold_days: 7    # 짧게 (테마는 빠르게)
+  no_momentum_days: 2
+  no_momentum_profit: 0.03
+```
+
+#### C. low_vol (저변동 우량주용)
+
+**대형 우량주, 저변동 종목에 적용**
+
+```yaml
+profile_id: low_vol
+name: Low Volatility Profile
+description: 저변동 우량주용 (타이트한 SL, 타이트한 Trail)
+
+atr:
+  ref: 0.015          # 1.5% (기준 ↓)
+  factor_min: 0.6     # factor 최소 ↓
+  factor_max: 1.3
+
+triggers:
+  sl1:
+    base_pct: -0.025  # -2.5%
+    min_pct: -0.015   # -1.5% (매우 타이트)
+    max_pct: -0.05
+    qty_pct: 0.40     # 40% (조금 적게)
+
+  sl2:
+    base_pct: -0.04
+    min_pct: -0.03
+    max_pct: -0.08
+    qty_pct: 1.00
+
+  tp1:
+    base_pct: 0.06
+    min_pct: 0.04
+    max_pct: 0.10
+    qty_pct: 0.25
+    stop_floor_profit: 0.005
+
+  # ... TP2, TP3 similar
+
+trailing:
+  pct_trail: 0.03     # 3% (타이트)
+  atr_k: 1.8          # ATR 배수 ↓
+
+time_stop:
+  max_hold_days: 15   # 길게 (우량주는 천천히)
+  no_momentum_days: 5
+  no_momentum_profit: 0.015
+```
+
+### 9. 프로파일 선택 예시
+
+```python
+# Profile Resolver
+def resolve_exit_profile(position: Position) -> ExitProfile:
+    # 1. Position 강제
+    if position.exit_mode == "DISABLED":
+        return None
+    if position.exit_profile_id:
+        return load_profile(position.exit_profile_id)
+
+    # 2. Symbol override
+    override = load_symbol_override(position.symbol)
+    if override and override.enabled:
+        return load_profile(override.profile_id)
+
+    # 3. Strategy (향후 확장)
+    # if strategy_profile := get_strategy_profile(position.strategy_id):
+    #     return load_profile(strategy_profile)
+
+    # 4. Default
+    return load_profile("default_hybrid_v1")
+```
+
+**종목별 오버라이드 예시**:
+```sql
+-- 삼성전자: 저변동 프로파일
+INSERT INTO trade.symbol_exit_overrides (symbol, profile_id, reason)
+VALUES ('005930', 'low_vol', '대형 우량주');
+
+-- LG에너지솔루션: 고변동 프로파일
+INSERT INTO trade.symbol_exit_overrides (symbol, profile_id, reason)
+VALUES ('373220', 'high_beta', '고베타 2차전지 테마');
+```
+
+### 10. 설정 예시 (YAML)
+
+```yaml
+# Exit Control
+exit_control:
+  mode: RUNNING           # RUNNING | PAUSE_PROFIT | PAUSE_ALL
+  hardstop_always_on: true
+  reason: null
+
+# Exit Profiles (3종 표준 + 커스텀)
+exit_profiles:
+  default_hybrid_v1:
+    # (위 8.A 참조)
+
+  high_beta:
+    # (위 8.B 참조)
+
+  low_vol:
+    # (위 8.C 참조)
+
+  custom_conservative_v1:
+    # 사용자 정의 프로파일
+    atr:
+      ref: 0.02
+      factor_min: 0.5
+      factor_max: 1.2
+    # ...
+
+# Symbol Overrides
+symbol_overrides:
+  "005930": low_vol           # 삼성전자
+  "373220": high_beta         # LG에너지솔루션
+  "012450": high_beta         # 한화에어로스페이스
+  "207940": custom_conservative_v1  # 삼성바이오로직스
+```
+
+### 11. 트리거 우선순위 (재확인)
+
+Control Gate 통과 후, 다음 우선순위로 트리거 평가:
+
+1. **HardStop** (최우선, PAUSE_ALL에서도 작동)
+2. **SL2** (전량 손절)
+3. **Stop Floor** (TP1 이후 본전 방어)
+4. **SL1** (부분 손절)
+5. **Trailing Stop** (TRAIL_ACTIVE 상태에서만)
+6. **TP3** (고수익 구간)
+7. **TP2**
+8. **TP1**
+9. **Time Stop** (최후 방어선)
+
+### 12. 멱등성 (action_key 규약)
+
+각 트리거는 포지션당 1회만 발화:
+
+```
+{position_id}:SL1
+{position_id}:SL2
+{position_id}:TP1
+{position_id}:TP2
+{position_id}:TP3
+{position_id}:TRAIL
+{position_id}:STOP_FLOOR
+{position_id}:TIME
+{position_id}:HARDSTOP
+```
+
+DB UNIQUE constraint로 강제:
+```sql
+CREATE UNIQUE INDEX uq_order_intents_action_key ON trade.order_intents (action_key);
+```
+
+---
+
+### 4. 실시간 갱신 (LISTEN/NOTIFY)
+
+프로파일/오버라이드 변경 시 Exit Engine에 즉시 반영:
+
+```sql
+-- 변경 이벤트 발행
+NOTIFY exit_config_changed, '{"type": "profile", "profile_id": "custom_v1"}';
+NOTIFY exit_config_changed, '{"type": "control", "mode": "PAUSE_PROFIT"}';
+```
+
+Exit Engine은 LISTEN으로 이벤트를 받아 메모리 캐시 갱신.
+
+---
+
 ## 🧪 테스트 전략
 
 ### 1. 단위 테스트
@@ -1321,15 +2189,23 @@ ON trade.order_intents (action_key);
 
 ## 📊 설계 완료 기준
 
-- [ ] 입력/출력 인터페이스 명확히 정의
-- [ ] 데이터 모델 (positions/state) 완성
-- [ ] Exit FSM 상태 전이 정의
-- [ ] 트리거 우선순위 정의
-- [ ] 멱등성 규칙 (action_key) 정의
-- [ ] 수량 계산 로직 정의
-- [ ] Fail-Closed 정책 정의
-- [ ] SSOT 규칙 (소유권/금지) 명시
-- [ ] 에러 처리 시나리오 정의
+- [x] 입력/출력 인터페이스 명확히 정의
+- [x] 데이터 모델 (positions/state/control/profiles/overrides) 완성
+- [x] Exit FSM 상태 전이 정의
+- [x] **Exit 표준 룰 정의 (Hybrid % + ATR)**
+- [x] **ATR 기반 동적 조정 로직**
+- [x] **Stop Floor + Trailing 상세**
+- [x] **Time Stop (최대 보유 + 모멘텀 미발생)**
+- [x] **HardStop (비상 손절, PAUSE_ALL 우회)**
+- [x] **표준 프로파일 3종 (default_hybrid_v1, high_beta, low_vol)**
+- [x] 트리거 우선순위 정의
+- [x] 멱등성 규칙 (action_key) 정의
+- [x] 수량 계산 로직 정의
+- [x] Fail-Closed 정책 정의
+- [x] SSOT 규칙 (소유권/금지) 명시
+- [x] Control Gate + Profile System 완료
+- [x] ExitEvent 생성 책임 제거 (Execution으로 이동)
+- [x] 에러 처리 시나리오 정의
 
 ---
 
@@ -1344,6 +2220,7 @@ ON trade.order_intents (action_key);
 
 **Module Owner**: Exit Engine
 **Dependencies**: PriceSync (읽기), Execution (읽기)
-**Consumers**: Execution (order_intents), Reentry (candidates)
+**Consumers**: Execution (order_intents 소비)
+**Important Change**: Exit Engine은 더 이상 reentry_candidates를 생성하지 않음. Execution이 exit_events를 생성하고, Reentry는 그것을 소비함.
 **Version**: v14.0.0-design
 **Last Updated**: 2026-01-13

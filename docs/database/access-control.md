@@ -143,9 +143,58 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA trade
 
 ---
 
-### 3. aegis_trade (Strategy 모듈: Exit/Reentry)
+### 3. aegis_router (Router 모듈: Pick 처리)
 
-**목적**: 포지션 관리 및 청산 로직
+**목적**: 종목 선정 결과 수신 및 ENTRY intent 생성
+
+```sql
+-- Role 생성
+CREATE ROLE aegis_router WITH
+    LOGIN
+    PASSWORD 'CHANGE_ME'
+    NOCREATEDB
+    NOCREATEROLE;
+
+COMMENT ON ROLE aegis_router IS 'Router 모듈 - picks/pick_decisions/order_intents(ENTRY) 쓰기';
+
+-- market schema 권한 (READ ONLY)
+GRANT USAGE ON SCHEMA market TO aegis_router;
+GRANT SELECT ON ALL TABLES IN SCHEMA market TO aegis_router;
+
+-- trade schema 권한
+GRANT USAGE ON SCHEMA trade TO aegis_router;
+
+-- 쓰기 가능 테이블 (SSOT 소유)
+GRANT SELECT, INSERT, UPDATE ON trade.picks TO aegis_router;
+GRANT SELECT, INSERT, UPDATE ON trade.pick_decisions TO aegis_router;
+GRANT SELECT, INSERT, UPDATE ON trade.order_intents TO aegis_router;  -- ENTRY only
+
+-- 읽기 전용 테이블
+GRANT SELECT ON trade.positions TO aegis_router;
+GRANT SELECT ON trade.exit_events TO aegis_router;
+GRANT SELECT ON trade.orders TO aegis_router;
+GRANT SELECT ON trade.fills TO aegis_router;
+GRANT SELECT ON trade.holdings TO aegis_router;
+
+-- Sequence 권한
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_router;
+```
+
+**쓰기 가능 테이블**:
+- ✅ `trade.picks` (선정 결과 수신)
+- ✅ `trade.pick_decisions` (충돌 해결 결과)
+- ✅ `trade.order_intents` (ENTRY 타입만)
+
+**읽기 전용 테이블**:
+- 👁️ `market.*` (신선도 체크)
+- 👁️ `trade.positions` (중복 진입 방지)
+- 👁️ `trade.holdings` (실제 보유 확인)
+
+---
+
+### 4. aegis_trade (Exit/Reentry 모듈)
+
+**목적**: 포지션 관리 및 청산/재진입 로직
 
 ```sql
 -- Role 생성
@@ -155,7 +204,7 @@ CREATE ROLE aegis_trade WITH
     NOCREATEDB
     NOCREATEROLE;
 
-COMMENT ON ROLE aegis_trade IS 'Strategy 모듈 (Exit/Reentry) - trade.* 일부 쓰기 권한';
+COMMENT ON ROLE aegis_trade IS 'Exit/Reentry 모듈 - positions/order_intents(EXIT_*/ENTRY) 쓰기';
 
 -- market schema 권한 (READ ONLY)
 GRANT USAGE ON SCHEMA market TO aegis_trade;
@@ -164,14 +213,26 @@ GRANT SELECT ON ALL TABLES IN SCHEMA market TO aegis_trade;
 -- trade schema 권한
 GRANT USAGE ON SCHEMA trade TO aegis_trade;
 
--- 쓰기 가능 테이블 (SSOT 소유)
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.positions TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.position_state TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.reentry_candidates TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.order_intents TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.exit_signals TO aegis_trade;
+-- 쓰기 가능 테이블 (Exit Engine SSOT)
+-- positions: 컬럼별 권한 (SSOT: Exit는 전략 상태만, Execution이 qty/avg_price 소유)
+GRANT SELECT, INSERT ON trade.positions TO aegis_trade;
+GRANT UPDATE (status, exit_mode, exit_profile_id, updated_ts) ON trade.positions TO aegis_trade;
+
+GRANT SELECT, INSERT, UPDATE ON trade.position_state TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.order_intents TO aegis_trade;  -- EXIT_*, ENTRY (reentry)
+GRANT SELECT, INSERT, UPDATE ON trade.exit_signals TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.exit_control TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.exit_profiles TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.symbol_exit_overrides TO aegis_trade;
+
+-- 쓰기 가능 테이블 (Reentry Engine SSOT)
+GRANT SELECT, INSERT, UPDATE ON trade.reentry_candidates TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.reentry_control TO aegis_trade;
 
 -- 읽기 전용 테이블
+GRANT SELECT ON trade.picks TO aegis_trade;
+GRANT SELECT ON trade.pick_decisions TO aegis_trade;
+GRANT SELECT ON trade.exit_events TO aegis_trade;  -- Reentry가 소비
 GRANT SELECT ON trade.orders TO aegis_trade;
 GRANT SELECT ON trade.fills TO aegis_trade;
 GRANT SELECT ON trade.holdings TO aegis_trade;
@@ -181,11 +242,15 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
 ```
 
 **쓰기 가능 테이블**:
-- ✅ `trade.positions` (포지션 마스터)
+- ✅ `trade.positions` (포지션 마스터 - Exit 소유)
 - ✅ `trade.position_state` (Exit FSM 상태)
 - ✅ `trade.reentry_candidates` (Reentry FSM 상태)
-- ✅ `trade.order_intents` (주문 의도 생성)
+- ✅ `trade.order_intents` (EXIT_*, ENTRY for reentry)
 - ✅ `trade.exit_signals` (Exit 트리거 평가 기록)
+- ✅ `trade.exit_control` (Exit 전역 제어)
+- ✅ `trade.exit_profiles` (Exit 프로파일)
+- ✅ `trade.symbol_exit_overrides` (종목별 Exit 오버라이드)
+- ✅ `trade.reentry_control` (Reentry 전역 제어)
 
 **읽기 전용 테이블**:
 - 👁️ `market.*` (현재가 조회)
@@ -193,9 +258,13 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
 - 👁️ `trade.fills` (체결 내역 확인)
 - 👁️ `trade.holdings` (KIS 보유 현황 조회)
 
+**중요 노트**:
+- 👁️ `trade.picks`, `trade.pick_decisions` - READ ONLY (Router가 소유)
+- 👁️ `trade.exit_events` - READ ONLY (Execution이 소유, Reentry가 소비)
+
 ---
 
-### 4. aegis_exec (Execution 모듈)
+### 5. aegis_exec (Execution 모듈)
 
 **목적**: 주문 제출 및 체결 관리
 
@@ -220,14 +289,14 @@ GRANT USAGE ON SCHEMA trade TO aegis_exec;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.orders TO aegis_exec;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.fills TO aegis_exec;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.holdings TO aegis_exec;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.exit_events TO aegis_exec;
 
 -- 읽기 전용 테이블
 GRANT SELECT ON trade.order_intents TO aegis_exec;
 GRANT SELECT ON trade.positions TO aegis_exec;
 
--- 특별 권한: positions 수량 조정 (체결 후)
--- UPDATE는 qty 컬럼만 허용 (Row Level Security 사용 시)
-GRANT UPDATE (qty, updated_ts) ON trade.positions TO aegis_exec;
+-- 특별 권한: positions 체결 동기화 (SSOT: Execution이 qty/avg_price 소유)
+GRANT UPDATE (qty, avg_price, updated_ts) ON trade.positions TO aegis_exec;
 
 -- Sequence 권한
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_exec;
@@ -237,6 +306,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_exec;
 - ✅ `trade.orders` (주문 상태)
 - ✅ `trade.fills` (체결 내역)
 - ✅ `trade.holdings` (KIS 보유종목 현황)
+- ✅ `trade.exit_events` (청산 확정 이벤트 생성 - SSOT)
 - ✅ `trade.positions` (qty 컬럼만 UPDATE)
 
 **읽기 전용 테이블**:
@@ -296,11 +366,18 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA trade
 | **trade.positions** | ALL | READ | READ/WRITE | READ + UPDATE(qty) | READ |
 | **trade.position_state** | ALL | READ | READ/WRITE | READ | READ |
 | **trade.reentry_candidates** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.reentry_control** | ALL | READ | READ/WRITE | READ | READ |
 | **trade.order_intents** | ALL | READ | READ/WRITE | READ | READ |
 | **trade.orders** | ALL | READ | READ | READ/WRITE | READ |
 | **trade.fills** | ALL | READ | READ | READ/WRITE | READ |
 | **trade.exit_signals** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.exit_control** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.exit_profiles** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.symbol_exit_overrides** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.exit_events** | ALL | READ | READ | READ/WRITE | READ |
 | **trade.holdings** | ALL | READ | READ | READ/WRITE | READ |
+| **trade.picks** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.pick_decisions** | ALL | READ | READ/WRITE | READ | READ |
 | **system.process_locks** | ALL | READ/WRITE | READ/WRITE | READ/WRITE | READ |
 
 **범례**:
@@ -505,13 +582,25 @@ GRANT USAGE ON SCHEMA market TO aegis_trade;
 GRANT SELECT ON ALL TABLES IN SCHEMA market TO aegis_trade;
 
 GRANT USAGE ON SCHEMA trade TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.positions TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.position_state TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.reentry_candidates TO aegis_trade;
-GRANT SELECT, INSERT, UPDATE, DELETE ON trade.order_intents TO aegis_trade;
+-- positions: 컬럼별 권한
+GRANT SELECT, INSERT ON trade.positions TO aegis_trade;
+GRANT UPDATE (status, exit_mode, exit_profile_id, updated_ts) ON trade.positions TO aegis_trade;
 
+GRANT SELECT, INSERT, UPDATE ON trade.position_state TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.reentry_candidates TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.order_intents TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.exit_signals TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE ON trade.exit_control TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.exit_profiles TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.symbol_exit_overrides TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.reentry_control TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.picks TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.pick_decisions TO aegis_trade;
+
+GRANT SELECT ON trade.exit_events TO aegis_trade;
 GRANT SELECT ON trade.orders TO aegis_trade;
 GRANT SELECT ON trade.fills TO aegis_trade;
+GRANT SELECT ON trade.holdings TO aegis_trade;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
 
@@ -523,10 +612,12 @@ GRANT SELECT ON market.prices_best TO aegis_exec;
 GRANT USAGE ON SCHEMA trade TO aegis_exec;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.orders TO aegis_exec;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.fills TO aegis_exec;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.holdings TO aegis_exec;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.exit_events TO aegis_exec;
 
 GRANT SELECT ON trade.order_intents TO aegis_exec;
 GRANT SELECT ON trade.positions TO aegis_exec;
-GRANT UPDATE (qty, updated_ts) ON trade.positions TO aegis_exec;
+GRANT UPDATE (qty, avg_price, updated_ts) ON trade.positions TO aegis_exec;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_exec;
 
@@ -579,9 +670,13 @@ UPDATE market.prices_best SET last_price = 100000 WHERE symbol = '005930';
 SELECT * FROM market.prices_best WHERE symbol = '005930';
 -- 예상 결과: 1 row
 
--- ✅ 성공해야 함: trade.positions 수정
-UPDATE trade.positions SET qty = 10 WHERE position_id = '...';
+-- ✅ 성공해야 함: trade.positions 전략 상태 수정 (Exit 소유 컬럼)
+UPDATE trade.positions SET status = 'CLOSING', exit_mode = 'DEFAULT' WHERE position_id = '...';
 -- 예상 결과: UPDATE 1
+
+-- ❌ 실패해야 함: positions qty 수정 시도 (Execution 소유 컬럼)
+UPDATE trade.positions SET qty = 10 WHERE position_id = '...';
+-- 예상 결과: ERROR: permission denied for column "qty" of relation "positions"
 ```
 
 ### 2. Execution 권한 테스트
@@ -594,13 +689,17 @@ SET ROLE aegis_exec;
 UPDATE trade.position_state SET phase = 'TP1_DONE' WHERE position_id = '...';
 -- 예상 결과: ERROR: permission denied for table position_state
 
--- ✅ 성공해야 함: positions 수량만 수정
-UPDATE trade.positions SET qty = 5, updated_ts = NOW() WHERE position_id = '...';
+-- ✅ 성공해야 함: positions 체결 동기화 (Execution 소유 컬럼)
+UPDATE trade.positions SET qty = 5, avg_price = 71500, updated_ts = NOW() WHERE position_id = '...';
 -- 예상 결과: UPDATE 1
 
--- ❌ 실패해야 함: positions status 수정 시도
+-- ❌ 실패해야 함: positions status 수정 시도 (Exit 소유 컬럼)
 UPDATE trade.positions SET status = 'CLOSED' WHERE position_id = '...';
 -- 예상 결과: ERROR: permission denied for column "status" of relation "positions"
+
+-- ❌ 실패해야 함: positions exit_mode 수정 시도 (Exit 소유 컬럼)
+UPDATE trade.positions SET exit_mode = 'DISABLED' WHERE position_id = '...';
+-- 예상 결과: ERROR: permission denied for column "exit_mode" of relation "positions"
 ```
 
 ---

@@ -481,86 +481,46 @@ ON trade.order_intents (action_key);
 
 ## 🗄️ 데이터 모델
 
+Router는 다음 2개 테이블을 소유합니다:
+
 ### trade.picks (선정 결과 저장)
 
-```sql
-CREATE TABLE trade.picks (
-    pick_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    producer_id       TEXT NOT NULL,
-    producer_name     TEXT,
-    run_id            TEXT NOT NULL,
-    run_date          DATE NOT NULL,
-    asof_ts           TIMESTAMPTZ NOT NULL,
+각 선정 모듈(producer)의 종목 추천 결과를 저장합니다.
 
-    symbol            TEXT NOT NULL,
-    side              TEXT NOT NULL,  -- LONG
-    score             NUMERIC NOT NULL,
-    confidence        TEXT NOT NULL,  -- LOW | MEDIUM | HIGH
-    rank              INT,
-    reasons           TEXT[],
-    metadata          JSONB,
-    constraints       JSONB,
+**주요 컬럼**:
+- `pick_id`: UUID 기본키
+- `producer_id`: 선정 모듈 ID (예: "3000", "3001")
+- `run_id`: 실행 고유 ID (날짜+시각+seed)
+- `symbol`: 종목 코드
+- `score`: 0~100 점수 또는 z-score
+- `confidence`: LOW | MEDIUM | HIGH
+- `reasons[]`: 선정 이유 코드 리스트 (예: ["MOM", "VALUE", "NEWS_POS"])
+- `gate*_passed_ts`: 각 게이트 통과 시각
+- `reject_reason`: 거부 사유 (gate 실패 시)
 
-    status            TEXT NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE | SUPERSEDED | REJECTED
-    gate1_passed_ts   TIMESTAMPTZ,
-    gate2_passed_ts   TIMESTAMPTZ,
-    gate3_passed_ts   TIMESTAMPTZ,
-    reject_reason     TEXT,
-
-    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_picks_run ON trade.picks (run_date, producer_id, run_id);
-CREATE INDEX idx_picks_symbol ON trade.picks (symbol, run_date DESC);
-CREATE INDEX idx_picks_status ON trade.picks (status, run_date DESC);
-
--- run_id + symbol 중복 방지
-CREATE UNIQUE INDEX uq_picks_run_symbol ON trade.picks (run_id, symbol);
-```
+**인덱스**:
+- `run_id + symbol` 중복 방지 (UNIQUE)
+- 날짜별, producer별, 심볼별 조회 최적화
 
 ### trade.pick_decisions (Router 결과)
 
-```sql
-CREATE TABLE trade.pick_decisions (
-    decision_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_date          DATE NOT NULL,
-    decision_ts       TIMESTAMPTZ NOT NULL DEFAULT now(),
+Router가 다중 picks를 통합한 최종 결정을 저장합니다.
 
-    symbol            TEXT NOT NULL,
-    final_score       NUMERIC NOT NULL,
-    confidence        TEXT NOT NULL,
-    method            TEXT NOT NULL,  -- PRIORITY | WEIGHTED | CONSENSUS
+**주요 컬럼**:
+- `decision_id`: UUID 기본키
+- `symbol`: 종목 코드
+- `final_score`: 통합된 최종 점수
+- `method`: PRIORITY | WEIGHTED | CONSENSUS (Router 알고리즘)
+- `producer_count`: 해당 종목을 추천한 모듈 수
+- `pick_ids[]`: 원본 picks 테이블 참조 (FK array)
+- `gate*_result`: 각 게이트 통과 여부
+- `final_decision`: PASS | REJECT
+- `intent_id`: 생성된 order_intent FK (PASS 시)
 
-    -- 합의 정보
-    producer_count    INT NOT NULL,
-    producer_ids      TEXT[],
-    pick_ids          UUID[],  -- 원본 picks 참조
+**제약 조건**:
+- `run_date + symbol` 중복 방지 (UNIQUE) - 하루에 동일 종목 하나의 decision만
 
-    -- Router 메타
-    router_version    TEXT NOT NULL,  -- 예: "v1.0-priority"
-    config            JSONB,
-
-    -- 게이트 결과
-    gate1_result      TEXT,  -- PASS | REJECT
-    gate2_result      TEXT,
-    gate3_result      TEXT,
-    final_decision    TEXT NOT NULL,  -- PASS | REJECT
-    reject_reason     TEXT,
-
-    -- Intent 생성
-    intent_id         UUID REFERENCES trade.order_intents(intent_id),
-
-    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_decisions_date ON trade.pick_decisions (run_date DESC);
-CREATE INDEX idx_decisions_symbol ON trade.pick_decisions (symbol, run_date DESC);
-CREATE INDEX idx_decisions_final ON trade.pick_decisions (final_decision, run_date DESC);
-
--- 하루에 동일 종목 하나의 최종 decision만
-CREATE UNIQUE INDEX uq_decisions_date_symbol ON trade.pick_decisions (run_date, symbol);
-```
+**상세 스키마**: [schema.md](../database/schema.md#tradepicks) 참고
 
 ---
 

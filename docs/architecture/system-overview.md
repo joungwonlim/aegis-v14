@@ -203,14 +203,17 @@ flowchart TD
 | `trade.positions` | Exit | 전체 | Exit, Execution |
 | `trade.position_state` | Exit | 전체 | Exit만 |
 | `trade.reentry_candidates` | Reentry | 전체 | Reentry만 |
-| `trade.order_intents` | Strategy | 전체 | Exit, Reentry만 |
+| `trade.order_intents` | - | 전체 | Exit, Reentry, Router |
 | `trade.orders` | Execution | 전체 | Execution만 |
 | `trade.fills` | Execution | 전체 | Execution만 |
+| `trade.picks` | Router | 전체 | Router만 |
+| `trade.pick_decisions` | Router | 전체 | Router만 |
 
 **규칙:**
 - 각 모듈은 자신의 테이블만 INSERT/UPDATE
 - 다른 모듈 테이블은 READ ONLY
 - 상태 변경은 반드시 소유자 모듈을 통해
+- **상세한 SSOT 소유권**: [database/schema.md](../database/schema.md) 참조
 
 ---
 
