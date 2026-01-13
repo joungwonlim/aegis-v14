@@ -208,6 +208,58 @@ CREATE INDEX idx_discrepancies_symbol_ts ON market.discrepancies (symbol, ts DES
 CREATE INDEX idx_discrepancies_severity ON market.discrepancies (severity, ts DESC);
 ```
 
+### market.regime_snapshot
+
+**목적**: 시장 국면 분석 결과 (Reentry Engine 안전장치)
+
+**소유자**: DataSync 또는 별도 Regime Analyzer 모듈
+
+```sql
+CREATE TABLE market.regime_snapshot (
+    id                SERIAL PRIMARY KEY,
+    asof_ts           TIMESTAMPTZ NOT NULL,
+
+    -- 국면 판정 (핵심)
+    regime            TEXT NOT NULL,  -- RISK_ON | NEUTRAL | RISK_OFF | PANIC
+    regime_score      NUMERIC,        -- 0~100 (선택: 디버깅용)
+
+    -- 지수 추세 지표
+    idx_trend_ok      BOOLEAN NOT NULL,  -- 예: 지수 > MA20 && MA20 > MA60
+    idx_above_ma20    BOOLEAN,
+    idx_above_ma60    BOOLEAN,
+    idx_drawdown_20d  NUMERIC,           -- 20일 고점 대비 낙폭 %
+
+    -- 변동성 지표
+    rv_20d            NUMERIC,           -- 20일 실현 변동성
+    vix_equivalent    NUMERIC,           -- VIX 대용 지표 (선택)
+
+    -- 시장 폭 (Breadth)
+    advancing_pct     NUMERIC,           -- 상승 종목 비율
+    new_highs         INT,               -- 신고가 종목 수
+    new_lows          INT,               -- 신저가 종목 수
+
+    -- 메타
+    analyzer_version  TEXT,              -- 분석 로직 버전
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_regime CHECK (regime IN ('RISK_ON', 'NEUTRAL', 'RISK_OFF', 'PANIC'))
+);
+
+-- 최신 스냅샷 조회용 인덱스
+CREATE INDEX idx_regime_snapshot_asof_ts ON market.regime_snapshot (asof_ts DESC);
+
+-- Stale 체크용
+CREATE INDEX idx_regime_snapshot_regime ON market.regime_snapshot (regime, asof_ts DESC);
+```
+
+**Fail-Closed 원칙:**
+- Snapshot이 stale (예: 5분 초과)이면 Reentry는 `RISK_OFF`로 간주하고 진입 차단
+- Snapshot 없음 = 시스템 이상 = 안전 모드 (재진입 금지)
+
+**데이터 제공:**
+- DataSync 모듈 또는 별도 Regime Analyzer가 1~5분 주기로 업데이트
+- Reentry Engine은 **읽기만** (SSOT 준수)
+
 ---
 
 ## 🗃️ Trade Schema (Strategy/Execution)
@@ -349,6 +401,118 @@ CREATE INDEX idx_reentry_control_mode ON trade.reentry_control (mode);
 - `PAUSE_ENTRY`: 후보 생성/평가는 하되 ENTRY intent 생성만 금지 (안전한 일시정지)
 - `PAUSE_ALL`: 후보 생성/평가 자체도 중단
 ```
+
+### trade.reentry_profiles
+
+**목적**: Reentry 정책 프로파일 (Exit Reason × Market Regime)
+
+**소유자**: Reentry Engine
+
+```sql
+CREATE TABLE trade.reentry_profiles (
+    profile_id            TEXT PRIMARY KEY,
+    name                  TEXT NOT NULL,
+    description           TEXT,
+
+    -- 적용 조건
+    exit_reason_code      TEXT NOT NULL,  -- SL1 | SL2 | TRAIL | TP1 | TP2 | TP3
+    regime                TEXT NOT NULL,  -- RISK_ON | NEUTRAL | RISK_OFF | PANIC
+
+    -- 허용 여부
+    allow_candidate       BOOLEAN NOT NULL DEFAULT true,   -- Candidate 생성 허용
+    allow_entry           BOOLEAN NOT NULL DEFAULT true,   -- ENTRY intent 생성 허용
+
+    -- 시간 제약
+    cooldown_minutes      INT NOT NULL DEFAULT 30,         -- 쿨다운 시간
+    watch_ttl_minutes     INT NOT NULL DEFAULT 120,        -- WATCH 상태 최대 유지 시간
+
+    -- 횟수 제약
+    max_reentries_per_day INT NOT NULL DEFAULT 2,          -- 일일 최대 재진입 횟수
+    max_reentries_total   INT NOT NULL DEFAULT 2,          -- 총 최대 재진입 횟수
+
+    -- 포지션 사이징
+    size_pct_entry1       NUMERIC NOT NULL DEFAULT 60.0,   -- 1차 재진입 사이즈 %
+    size_pct_entry2       NUMERIC,                         -- 2차 재진입 사이즈 % (NULL이면 불허)
+
+    -- 트리거 파라미터 (Exit Reason별로 다름)
+    trigger_params        JSONB NOT NULL,                  -- 재진입 트리거 조건
+
+    -- 메타
+    is_active             BOOLEAN NOT NULL DEFAULT true,
+    priority              INT NOT NULL DEFAULT 0,          -- 우선순위 (높을수록 우선)
+    created_by            TEXT NOT NULL,
+    created_ts            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_ts            TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_exit_reason CHECK (exit_reason_code IN ('SL1', 'SL2', 'TRAIL', 'TP1', 'TP2', 'TP3', 'TIME', 'MANUAL')),
+    CONSTRAINT chk_regime CHECK (regime IN ('RISK_ON', 'NEUTRAL', 'RISK_OFF', 'PANIC'))
+);
+
+CREATE INDEX idx_reentry_profiles_lookup ON trade.reentry_profiles (exit_reason_code, regime, is_active);
+CREATE INDEX idx_reentry_profiles_active ON trade.reentry_profiles (is_active, priority DESC);
+```
+
+**trigger_params JSONB 스키마 (Exit Reason별)**:
+
+```json
+// SL1/SL2 (손절 후 Rebound)
+{
+  "rebound_pct": 2.0,              // 반등 % (exit_price * (1 + rebound_pct/100))
+  "min_stable_minutes": 15,        // 최소 안정화 시간
+  "require_structure_break": true, // 구조적 돌파 필요 여부 (스윙하이 재돌파)
+  "min_volume_ratio": 1.2          // 최소 거래량 비율 (평균 대비)
+}
+
+// TRAIL (트레일 후 Breakout Chase)
+{
+  "breakout_atr_k": 0.5,           // ATR 배수 (prior_hwm + ATR * k)
+  "require_volume_spike": true,    // 거래량 급증 필요
+  "min_stable_candles": 3          // 최소 안정 캔들 수
+}
+
+// TP (익절 후 Momentum Continuation)
+{
+  "momentum_threshold": 0.7,       // 모멘텀 유지 기준 (0~1)
+  "max_volatility": 3.0,           // 최대 변동성 (ATR 배수)
+  "require_ranking_hold": true     // 랭킹 유지 필요
+}
+```
+
+**기본 프로파일 예시**:
+
+```sql
+-- PANIC: 모든 재진입 금지
+INSERT INTO trade.reentry_profiles VALUES
+('panic_sl_block', 'PANIC - SL Block', 'PANIC 시 SL 재진입 완전 차단',
+ 'SL1', 'PANIC', false, false, 999, 0, 0, 0, 0, NULL,
+ '{"reason": "Market panic - no reentry"}'::jsonb, true, 100, 'system', now(), now());
+
+-- RISK_OFF: SL 재진입 금지, TRAIL만 극히 보수적 허용
+INSERT INTO trade.reentry_profiles VALUES
+('risk_off_sl_block', 'RISK_OFF - SL Block', '하락장 SL 재진입 금지',
+ 'SL1', 'RISK_OFF', false, false, 120, 0, 0, 0, 30.0, NULL,
+ '{"rebound_pct": 5.0, "min_stable_minutes": 30, "require_structure_break": true}'::jsonb,
+ true, 90, 'system', now(), now());
+
+-- NEUTRAL: 조건부 허용
+INSERT INTO trade.reentry_profiles VALUES
+('neutral_sl_conservative', 'NEUTRAL - SL Conservative', '중립장 SL 조건부 재진입',
+ 'SL1', 'NEUTRAL', true, true, 60, 120, 1, 1, 40.0, NULL,
+ '{"rebound_pct": 3.0, "min_stable_minutes": 20, "require_structure_break": true}'::jsonb,
+ true, 50, 'system', now(), now());
+
+-- RISK_ON: TRAIL/TP 적극 허용
+INSERT INTO trade.reentry_profiles VALUES
+('risk_on_trail', 'RISK_ON - TRAIL Active', '상승장 TRAIL 재진입 적극 허용',
+ 'TRAIL', 'RISK_ON', true, true, 15, 180, 2, 2, 60.0, 40.0,
+ '{"breakout_atr_k": 0.5, "require_volume_spike": false}'::jsonb,
+ true, 80, 'system', now(), now());
+```
+
+**Profile 해석 로직**:
+1. `exit_reason_code` + `regime` 조합으로 매칭
+2. 여러 개 매칭 시 `priority` 높은 것 선택
+3. 매칭 실패 시 기본값: `allow_entry=false` (fail-closed)
 
 ### trade.order_intents
 

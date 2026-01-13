@@ -219,15 +219,200 @@ flowchart TD
     READY --> K[Create ENTRY intent]
 ```
 
-### 2. 재진입 게이트 (Risk Gates)
+### 2. 재진입 게이트 (Risk Gates) - 업데이트
 
-| Gate | 조건 | 실패 시 |
-|------|------|--------|
-| **G1** | cooldown 통과 | COOLDOWN 유지 |
-| **G2** | symbol 재진입 횟수 < max | BLOCKED |
-| **G3** | portfolio 익스포저 < 한도 | BLOCKED |
-| **G4** | 일 손실 < 한도 | BLOCKED |
-| **G5** | price freshness OK | BLOCKED |
+**⚠️ 중요**: Gate 순서는 성능과 안전성을 위해 **반드시 G0부터 순차 평가**해야 합니다.
+
+| Gate | 조건 | 실패 시 | 목적 |
+|------|------|--------|------|
+| **G0** | **Market Regime OK** | **BLOCKED** (또는 WATCH 유지) | **Whipsaw 차단 (최우선)** |
+| **G0.5** | **Exit Reason Policy OK** | **BLOCKED** | **정책적 원천 차단** |
+| **G1** | cooldown 통과 | COOLDOWN 유지 | 시간 게이트 |
+| **G2** | symbol 재진입 횟수 < max | BLOCKED | 과도한 재진입 방지 |
+| **G3** | portfolio 익스포저 < 한도 | BLOCKED | 집중 리스크 관리 |
+| **G4** | 일 손실 < 한도 | BLOCKED | 일일 손실 제한 |
+| **G5** | price freshness OK | BLOCKED | 데이터 안전성 |
+
+#### G0: Market Regime Gate (최상단, 가장 중요)
+
+**목적**: 하락장/패닉 시 whipsaw로 인한 손실 확대 방지
+
+**데이터 소스**: `market.regime_snapshot` (읽기 전용)
+
+**평가 로직**:
+```go
+// 1. Regime Snapshot 로드
+snapshot := LoadLatestRegimeSnapshot()
+
+// 2. Stale 체크 (Fail-Closed)
+if now() - snapshot.asof_ts > 5분 {
+    // 데이터가 오래되었거나 없음 = 시스템 이상
+    regime = "RISK_OFF"  // 안전 모드
+    log.Warn("regime snapshot stale, defaulting to RISK_OFF")
+}
+
+// 3. Profile 매칭
+profile := GetReentryProfile(candidate.exit_reason_code, snapshot.regime)
+
+// 4. 정책 적용
+if !profile.allow_entry {
+    candidate.state = "BLOCKED"
+    candidate.blocked_reason = "Market regime does not allow reentry"
+    candidate.blocked_gate = "G0"
+    return FAIL
+}
+
+return PASS
+```
+
+**Fail-Closed 원칙**:
+- Snapshot이 없거나 stale → `RISK_OFF`로 간주 → 대부분 재진입 차단
+- 시스템 장애 시에도 손실 확대 방지
+
+#### G0.5: Exit Reason Policy Gate
+
+**목적**: SL/TRAIL/TP별 정책적 원천 차단
+
+**평가 로직**:
+```go
+profile := GetReentryProfile(candidate.exit_reason_code, current_regime)
+
+// Candidate 생성 단계에서 이미 allow_candidate=false면 생성 자체를 안 했겠지만
+// Evaluation 시점에 다시 확인 (regime이 바뀔 수 있음)
+if !profile.allow_candidate {
+    candidate.state = "BLOCKED"
+    candidate.blocked_reason = "Exit reason not allowed for reentry in current regime"
+    candidate.blocked_gate = "G0.5"
+    return FAIL
+}
+
+// Cooldown 재계산 (profile이 변경될 수 있음)
+if profile.cooldown_minutes > remaining_cooldown {
+    candidate.cooldown_until = exit_ts + profile.cooldown_minutes
+}
+
+return PASS
+```
+
+#### G1~G5: 기존 게이트
+
+기존 게이트는 그대로 유지 (순서만 G0, G0.5 다음으로 밀림)
+
+---
+
+## 📊 Exit Reason × Regime 정책표
+
+**목적**: 시장 국면에 따라 청산 사유별로 재진입 정책을 구조적으로 차별화
+
+### 정책표 (기본 운영 권장값)
+
+| Exit Reason | PANIC | RISK_OFF | NEUTRAL | RISK_ON | 운영 의도 |
+|-------------|-------|----------|---------|---------|-----------|
+| **SL1/SL2** (손절) | ❌ 금지 | ❌ 금지 | 🟡 조건부 (1회, 40%) | 🟡 조건부 (1회, 50%) | **Whipsaw 차단 핵심** |
+| **TRAIL** (트레일) | ❌ 금지 | 🟡 극히 보수적 (30%) | 🟢 허용 (50%) | 🟢 적극 (60%, 2회) | 추세 복귀 포착 |
+| **TP** (익절) | ❌ 금지 | ❌ 금지 | 🟡 조건부 | 🟢 허용 | 모멘텀 확장 |
+
+**범례**:
+- ❌ **금지**: `allow_entry=false`, max_reentries=0
+- 🟡 **조건부**: `allow_entry=true`, 엄격한 트리거 조건, 횟수 제한
+- 🟢 **허용**: `allow_entry=true`, 표준 트리거 조건
+
+### Regime별 상세 정책
+
+#### PANIC (패닉)
+
+**상황**: 급락, 서킷 브레이커, VIX 급등, 시장 폭락
+
+**정책**: 전면 차단 (시스템 생존 모드)
+
+| Exit Reason | allow_entry | max_reentries | Cooldown | Size |
+|-------------|-------------|---------------|----------|------|
+| SL1/SL2 | ❌ false | 0 | N/A | N/A |
+| TRAIL | ❌ false | 0 | N/A | N/A |
+| TP | ❌ false | 0 | N/A | N/A |
+
+**운영**:
+- 모든 재진입 차단
+- `reentry_control.mode = PAUSE_ALL` 고려
+- 시장 안정 전까지 관망
+
+#### RISK_OFF (하락장)
+
+**상황**: 지수 MA 이탈, 하락 추세, 변동성 증가
+
+**정책**: SL 차단 + TRAIL만 극히 보수적 허용
+
+| Exit Reason | allow_entry | max_reentries | Cooldown | Size | 트리거 조건 |
+|-------------|-------------|---------------|----------|------|------------|
+| SL1/SL2 | ❌ false | 0 | 120분 | N/A | **차단** (Whipsaw 방지) |
+| TRAIL | 🟡 true | 1 | 60분 | 30% | rebound_pct=5%, 구조적 돌파 필수 |
+| TP | ❌ false | 0 | N/A | N/A | 차단 |
+
+**핵심**:
+- **SL 재진입 = 금지** (하락장 whipsaw 차단의 핵심)
+- TRAIL은 "추세 복귀 확인"일 때만 극소량
+
+#### NEUTRAL (중립장)
+
+**상황**: 횡보, 박스권, 방향성 불명
+
+**정책**: 선별적 허용 (보수적 조건)
+
+| Exit Reason | allow_entry | max_reentries | Cooldown | Size | 트리거 조건 |
+|-------------|-------------|---------------|----------|------|------------|
+| SL1/SL2 | 🟡 true | 1 | 60분 | 40% | rebound_pct=3%, 구조적 돌파 + 안정화 15분 |
+| TRAIL | 🟢 true | 2 | 30분 | 50% | breakout_atr_k=0.5, 볼륨 확인 |
+| TP | 🟡 true | 1 | 20분 | 40% | 모멘텀 유지 + 변동성 필터 |
+
+**핵심**:
+- SL은 "반전 확인" 조건 필수
+- TRAIL은 표준 조건
+- TP는 모멘텀 지속 시에만
+
+#### RISK_ON (상승장)
+
+**상황**: 지수 상승, MA 상회, 긍정 모멘텀
+
+**정책**: TRAIL/TP 적극 + SL도 조건부 허용
+
+| Exit Reason | allow_entry | max_reentries | Cooldown | Size | 트리거 조건 |
+|-------------|-------------|---------------|----------|------|------------|
+| SL1/SL2 | 🟡 true | 1 | 45분 | 50% | rebound_pct=2%, 구조적 돌파 권장 |
+| TRAIL | 🟢 true | 2 | 15분 | 60% (1차), 40% (2차) | breakout_atr_k=0.5 |
+| TP | 🟢 true | 2 | 10분 | 60% (1차), 40% (2차) | 모멘텀 유지 |
+
+**핵심**:
+- TRAIL/TP 재진입으로 수익 확장
+- SL도 "빠른 반등"이면 재진입 가능
+- 사이징 적극 (1차 60%)
+
+### 정책 전환 시나리오
+
+#### 시나리오 1: RISK_ON → RISK_OFF 급변
+
+```
+09:00  RISK_ON (정상 운영)
+10:30  급락 → Regime Analyzer가 RISK_OFF 판정
+10:31  G0 Gate가 새 스냅샷 로드
+       → 기존 WATCH 상태 candidates 재평가
+       → SL candidates: state=BLOCKED (정책 변경)
+       → TRAIL candidates: 조건 강화 (size 30%로 축소)
+10:32  신규 ExitEvent (SL1) 발생
+       → Profile 매칭: risk_off_sl_block
+       → allow_candidate=false
+       → Candidate 생성 자체를 안 함 (또는 즉시 BLOCKED)
+```
+
+#### 시나리오 2: RISK_OFF → NEUTRAL 회복
+
+```
+14:00  RISK_OFF (SL 재진입 차단 중)
+15:00  지수 회복 → Regime Analyzer가 NEUTRAL 판정
+15:01  G0 Gate가 새 스냅샷 로드
+       → 기존 BLOCKED candidates 재평가
+       → SL candidates: 여전히 조건부 (하지만 allow_entry=true)
+       → state=WATCH로 전환 가능 (조건 충족 시)
+```
 
 ### 3. 재진입 트리거 (Exit Reason별)
 
@@ -399,6 +584,200 @@ NOTIFY reentry_candidate_created, '{"candidate_id":"...","symbol":"..."}';
 
 ---
 
+## 🛡️ 운영 안전장치 (Operational Safety)
+
+### 핵심 원칙: Fail-Closed
+
+**"의심스러우면 차단, 확실할 때만 허용"**
+
+Reentry Engine은 **손실 확대 위험**이 크므로, 모든 불확실성은 "재진입 차단" 방향으로 해석합니다.
+
+### 안전장치 체크리스트
+
+#### 1. Market Regime Snapshot Staleness
+
+**문제**: Regime Analyzer 장애 → Stale 데이터
+
+**대응**:
+```go
+if now() - snapshot.asof_ts > 5분 {
+    regime = "RISK_OFF"  // Fail-closed
+    log.Warn("regime snapshot stale, blocking reentry")
+}
+```
+
+**모니터링**:
+- Alert: `regime_snapshot_stale_minutes > 5`
+- Dashboard: Regime snapshot 최신성 타임라인
+
+#### 2. Reentry Control Override
+
+**문제**: 긴급 상황 시 수동 차단 필요
+
+**대응**:
+```sql
+-- 즉시 모든 재진입 차단
+UPDATE trade.reentry_control
+SET mode = 'PAUSE_ALL', reason = 'Emergency stop', updated_by = 'admin'
+WHERE id = 1;
+```
+
+**복구**:
+```sql
+-- 안전 확인 후 재개
+UPDATE trade.reentry_control
+SET mode = 'RUNNING', reason = 'Market stabilized', updated_by = 'admin'
+WHERE id = 1;
+```
+
+#### 3. Loss-Triggered Cooldown 확대
+
+**문제**: 연속 손절 → 손실 루프
+
+**대응**:
+```go
+// SL 후 재진입 시 cooldown 동적 확대
+if exit_reason_code == "SL1" || exit_reason_code == "SL2" {
+    recent_losses := CountRecentLosses(symbol, 24시간)
+
+    if recent_losses >= 2 {
+        // 당일 재진입 금지
+        cooldown_minutes = 1440  // 24시간
+        log.Warn("symbol has 2+ recent losses, extending cooldown to 24h")
+    } else if recent_losses == 1 {
+        // 쿨다운 2배 확대
+        cooldown_minutes *= 2
+    }
+}
+```
+
+#### 4. Symbol-Level 재진입 차단
+
+**문제**: 특정 종목에서 반복 손실
+
+**대응**:
+```sql
+-- 특정 종목 재진입 완전 차단
+INSERT INTO trade.reentry_blacklist (symbol, reason, until_ts)
+VALUES ('005930', 'Repeated losses', now() + INTERVAL '7 days');
+
+-- Candidate 생성 시 체크
+SELECT 1 FROM trade.reentry_blacklist
+WHERE symbol = ? AND until_ts > now();
+-- 존재하면 Candidate 생성 안 함
+```
+
+#### 5. Daily Loss Limit (Global)
+
+**문제**: 일일 손실 한도 초과
+
+**대응**:
+```go
+// G4 Gate에서 체크
+daily_loss := CalculateDailyPnL()
+
+if daily_loss < -5% {  // 예: -5% 한도
+    log.Warn("daily loss limit exceeded, blocking all reentry")
+    return BLOCKED
+}
+```
+
+#### 6. Profile Override (긴급 조정)
+
+**문제**: Profile 변경이 필요하나 재배포 불가
+
+**대응**:
+```sql
+-- 기존 profile 비활성화
+UPDATE trade.reentry_profiles
+SET is_active = false
+WHERE exit_reason_code = 'SL1' AND regime = 'RISK_OFF';
+
+-- 더 보수적인 profile 활성화
+UPDATE trade.reentry_profiles
+SET is_active = true, priority = 100
+WHERE profile_id = 'risk_off_sl_block_strict';
+```
+
+### 운영 권장 설정 (초기)
+
+#### 시장 개장 직후 (09:00~09:30)
+
+```sql
+-- 변동성 큰 시간대: 보수적 운영
+UPDATE trade.reentry_control
+SET mode = 'PAUSE_ENTRY', reason = 'Market opening volatility'
+WHERE id = 1;
+```
+
+#### 일반 장중 (09:30~15:00)
+
+```sql
+-- 정상 운영 (단, Regime Gate가 자동 제어)
+UPDATE trade.reentry_control
+SET mode = 'RUNNING', reason = 'Normal hours'
+WHERE id = 1;
+```
+
+#### 장 마감 임박 (14:50~15:30)
+
+```sql
+-- 재진입 차단 (청산 집중)
+UPDATE trade.reentry_control
+SET mode = 'PAUSE_ENTRY', reason = 'Market closing soon'
+WHERE id = 1;
+```
+
+### 모니터링 대시보드 (필수 지표)
+
+| 지표 | Alert 기준 | 조치 |
+|------|-----------|------|
+| **regime_snapshot_age** | > 5분 | Regime Analyzer 점검 |
+| **reentry_success_rate** | < 30% | Profile 조정 필요 |
+| **avg_holding_time_after_reentry** | < 10분 | 너무 빠른 재청산 → Profile 강화 |
+| **SL_reentry_whipsaw_rate** | > 50% | RISK_OFF 시 SL 차단 강화 |
+| **daily_reentry_count** | > 20회 | 과도한 재진입 → 전역 제한 |
+| **blocked_by_regime_pct** | > 80% | Regime 판정 너무 보수적 |
+
+### 긴급 대응 플레이북
+
+#### 상황 1: 재진입 손실 급증
+
+```
+증상: 재진입 후 연속 손절, 손실률 증가
+조치:
+1. mode = PAUSE_ALL (즉시 차단)
+2. 최근 24시간 reentry candidates 분석
+3. 문제 exit_reason_code 식별
+4. 해당 Profile 비활성화
+5. 시장 안정 후 재개
+```
+
+#### 상황 2: Regime Snapshot Stale
+
+```
+증상: regime_snapshot_age > 5분, 알람 발생
+조치:
+1. Reentry는 자동으로 RISK_OFF 간주 (fail-closed)
+2. Regime Analyzer 프로세스 점검
+3. 복구 후 Snapshot 정상화 확인
+4. Reentry 자동 재개 (코드 변경 불필요)
+```
+
+#### 상황 3: 시장 급변 (RISK_ON → PANIC)
+
+```
+증상: 지수 급락, 서킷 브레이커
+조치:
+1. Regime Analyzer가 자동으로 PANIC 판정
+2. G0 Gate가 자동으로 모든 재진입 차단
+3. 필요 시 수동으로 mode = PAUSE_ALL
+4. 시장 안정 후 RISK_OFF → NEUTRAL 회복 대기
+5. Regime이 NEUTRAL 전환 시 자동 재개
+```
+
+---
+
 ## 🔒 SSOT 규칙 (금지 패턴)
 
 ### ❌ 절대 금지
@@ -432,6 +811,11 @@ NOTIFY reentry_candidate_created, '{"candidate_id":"...","symbol":"..."}';
 - [x] 포지션 사이징 정의
 - [x] SSOT 규칙 명시
 - [x] Exit/Reentry 디커플링 완료
+- [x] **Market Regime Gate (G0) 추가** - Whipsaw 차단
+- [x] **Exit Reason × Regime 정책표** - 국면별 재진입 정책
+- [x] **trade.reentry_profiles 테이블** - 레짐별 정책 관리
+- [x] **market.regime_snapshot 참조** - 시장 국면 데이터 소스
+- [x] **운영 안전장치** - Fail-Closed 원칙, 긴급 대응 플레이북
 
 ---
 
