@@ -1,0 +1,69 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+log/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Backend (Go)
+backend/bin/
+backend/build/
+backend/tmp/
+backend/*.exe
+backend/*.test
+backend/coverage.txt
+backend/coverage.html
+
+# Frontend (Next.js)
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.pnpm-store/
+frontend/dist/
+frontend/build/
+
+# Testing
+frontend/coverage/
+backend/coverage/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Desktop.ini
+$RECYCLE.BIN/
+
+# Runtime artifacts
+pids/
+*.pid
+*.seed
+*.pid.lock
