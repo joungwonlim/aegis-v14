@@ -678,6 +678,544 @@ func MonitorExitSignals(ctx context.Context) {
 
 ---
 
+## 🛡️ 운영 안정성 (v10 문제 해결)
+
+### 1. 프로세스 중복 실행 방지
+
+**v10 문제**: 메모리에 남아있거나 이전 프로세스가 kill되지 않아 중복 처리 발생
+
+#### Leader Election (PostgreSQL Advisory Lock)
+
+**목적**: 하나의 Exit Engine 인스턴스만 실행 보장
+
+```sql
+-- Advisory lock 테이블
+CREATE TABLE IF NOT EXISTS system.process_locks (
+    lock_name    TEXT PRIMARY KEY,
+    instance_id  TEXT NOT NULL,
+    acquired_ts  TIMESTAMPTZ NOT NULL,
+    heartbeat_ts TIMESTAMPTZ NOT NULL,
+    host         TEXT NOT NULL,
+    pid          INT NOT NULL
+);
+
+CREATE INDEX idx_process_locks_heartbeat ON system.process_locks (heartbeat_ts DESC);
+```
+
+**Leader Election 구현:**
+
+```go
+const (
+    LockName = "exit_engine_leader"
+    LockID = 1001  // 고정 advisory lock ID
+    HeartbeatInterval = 5 * time.Second
+    HeartbeatTimeout = 15 * time.Second
+)
+
+func AcquireLeadership(ctx context.Context, db *pgxpool.Pool) (bool, error) {
+    instanceID := fmt.Sprintf("%s-%d", hostname, os.Getpid())
+
+    // 1. PostgreSQL Advisory Lock 시도
+    var acquired bool
+    err := db.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", LockID).Scan(&acquired)
+    if err != nil || !acquired {
+        return false, err
+    }
+
+    // 2. 메타데이터 기록
+    _, err = db.Exec(ctx, `
+        INSERT INTO system.process_locks (lock_name, instance_id, acquired_ts, heartbeat_ts, host, pid)
+        VALUES ($1, $2, NOW(), NOW(), $3, $4)
+        ON CONFLICT (lock_name) DO UPDATE
+        SET instance_id = EXCLUDED.instance_id,
+            acquired_ts = EXCLUDED.acquired_ts,
+            heartbeat_ts = EXCLUDED.heartbeat_ts,
+            host = EXCLUDED.host,
+            pid = EXCLUDED.pid
+    `, LockName, instanceID, hostname, os.Getpid())
+
+    if err != nil {
+        // Lock 획득 실패 시 advisory lock 해제
+        db.Exec(ctx, "SELECT pg_advisory_unlock($1)", LockID)
+        return false, err
+    }
+
+    // 3. Heartbeat 시작
+    go maintainHeartbeat(ctx, db, instanceID)
+
+    return true, nil
+}
+
+func maintainHeartbeat(ctx context.Context, db *pgxpool.Pool, instanceID string) {
+    ticker := time.NewTicker(HeartbeatInterval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            _, err := db.Exec(ctx, `
+                UPDATE system.process_locks
+                SET heartbeat_ts = NOW()
+                WHERE lock_name = $1 AND instance_id = $2
+            `, LockName, instanceID)
+
+            if err != nil {
+                log.Error("heartbeat update failed", "error", err)
+                // Advisory lock은 연결 종료 시 자동 해제됨
+            }
+
+        case <-ctx.Done():
+            // Graceful shutdown
+            releaseLeadership(db, instanceID)
+            return
+        }
+    }
+}
+
+func releaseLeadership(db *pgxpool.Pool, instanceID string) {
+    ctx := context.Background()
+
+    // 1. Advisory lock 해제
+    db.Exec(ctx, "SELECT pg_advisory_unlock($1)", LockID)
+
+    // 2. 메타데이터 삭제
+    db.Exec(ctx, "DELETE FROM system.process_locks WHERE lock_name = $1 AND instance_id = $2",
+        LockName, instanceID)
+}
+```
+
+**Stale Leader 감지 (다른 인스턴스가 실행):**
+
+```go
+func detectStaleLeader(ctx context.Context, db *pgxpool.Pool) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            var lastHeartbeat time.Time
+            err := db.QueryRow(ctx, `
+                SELECT heartbeat_ts FROM system.process_locks
+                WHERE lock_name = $1
+            `, LockName).Scan(&lastHeartbeat)
+
+            if err == nil {
+                staleDuration := time.Since(lastHeartbeat)
+                if staleDuration > HeartbeatTimeout {
+                    log.Warn("stale leader detected",
+                        "last_heartbeat", lastHeartbeat,
+                        "stale_duration", staleDuration)
+
+                    // Advisory lock 강제 해제 (관리자 권한 필요)
+                    // 또는 알람 발송 후 수동 개입
+                }
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+#### Graceful Shutdown
+
+**목적**: 평가 중인 작업 완료 후 종료
+
+```go
+func (e *ExitEngine) Run(ctx context.Context) error {
+    // Leader election
+    isLeader, err := AcquireLeadership(ctx, e.db)
+    if err != nil || !isLeader {
+        return fmt.Errorf("failed to acquire leadership: %w", err)
+    }
+    defer releaseLeadership(e.db, e.instanceID)
+
+    // Evaluation loop
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+
+    // Graceful shutdown channel
+    shutdownCh := make(chan os.Signal, 1)
+    signal.Notify(shutdownCh, syscall.SIGINT, syscall.SIGTERM)
+
+    for {
+        select {
+        case <-ticker.C:
+            // 평가 작업 시작
+            evalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+            e.evaluatePositions(evalCtx)
+            cancel()
+
+        case <-shutdownCh:
+            log.Info("graceful shutdown initiated")
+
+            // 진행 중인 평가 완료 대기 (최대 60초)
+            shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+            defer cancel()
+
+            e.waitForInFlightEvaluations(shutdownCtx)
+
+            log.Info("graceful shutdown completed")
+            return nil
+
+        case <-ctx.Done():
+            return ctx.Err()
+        }
+    }
+}
+
+func (e *ExitEngine) waitForInFlightEvaluations(ctx context.Context) {
+    e.wg.Wait()  // WaitGroup으로 진행 중인 평가 대기
+}
+```
+
+#### 중복 실행 감지 알람
+
+**모니터링:**
+
+```sql
+-- 중복 실행 감지 쿼리 (모니터링 도구에서 주기 실행)
+SELECT
+    lock_name,
+    COUNT(*) AS instance_count,
+    array_agg(instance_id) AS instances,
+    array_agg(heartbeat_ts) AS heartbeats
+FROM system.process_locks
+WHERE lock_name = 'exit_engine_leader'
+GROUP BY lock_name
+HAVING COUNT(*) > 1;  -- 1개보다 많으면 중복 실행
+```
+
+---
+
+### 2. 평단가 변경 감지 및 재계산
+
+**v10 문제**: Exit 평가 중 추가 매수 발생 시 평단가 변경을 반영하지 못함
+
+#### 낙관적 잠금 (Optimistic Locking)
+
+**positions 테이블에 version 추가:**
+
+```sql
+ALTER TABLE trade.positions
+ADD COLUMN version INT NOT NULL DEFAULT 1;
+
+-- Version 증가 트리거
+CREATE OR REPLACE FUNCTION increment_position_version()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.avg_price != OLD.avg_price OR NEW.qty != OLD.qty THEN
+        NEW.version = OLD.version + 1;
+        NEW.updated_ts = NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_positions_version
+BEFORE UPDATE ON trade.positions
+FOR EACH ROW
+EXECUTE FUNCTION increment_position_version();
+```
+
+#### Exit 평가 시 평단가 검증
+
+**평가 시작 시 snapshot:**
+
+```go
+type PositionSnapshot struct {
+    PositionID UUID
+    Symbol     string
+    Qty        int64
+    AvgPrice   decimal.Decimal
+    Version    int  // 낙관적 잠금
+}
+
+func (e *ExitEngine) evaluatePosition(ctx context.Context, pos Position) error {
+    // 1. 평가 시작 시 snapshot
+    snapshot := PositionSnapshot{
+        PositionID: pos.PositionID,
+        Symbol:     pos.Symbol,
+        Qty:        pos.Qty,
+        AvgPrice:   pos.AvgPrice,
+        Version:    pos.Version,
+    }
+
+    // 2. 현재가 조회
+    currentPrice, err := e.priceSync.GetBestPrice(ctx, pos.Symbol)
+    if err != nil {
+        return fmt.Errorf("price fetch failed: %w", err)
+    }
+
+    // 3. 트리거 평가 (snapshot 기준)
+    trigger, qty := e.evaluateTriggers(snapshot, currentPrice)
+    if trigger == nil {
+        return nil  // 트리거 없음
+    }
+
+    // 4. Intent 생성 전 version 재확인
+    var latestVersion int
+    var latestAvgPrice decimal.Decimal
+    var latestQty int64
+
+    err = e.db.QueryRow(ctx, `
+        SELECT version, avg_price, qty FROM trade.positions
+        WHERE position_id = $1
+    `, snapshot.PositionID).Scan(&latestVersion, &latestAvgPrice, &latestQty)
+
+    if err != nil {
+        return fmt.Errorf("version check failed: %w", err)
+    }
+
+    // 5. Version 변경 감지
+    if latestVersion != snapshot.Version {
+        log.Warn("position changed during evaluation",
+            "position_id", snapshot.PositionID,
+            "old_version", snapshot.Version,
+            "new_version", latestVersion,
+            "old_avg_price", snapshot.AvgPrice,
+            "new_avg_price", latestAvgPrice)
+
+        // 변경된 포지션으로 재평가
+        updatedPos := Position{
+            PositionID: snapshot.PositionID,
+            Symbol:     snapshot.Symbol,
+            Qty:        latestQty,
+            AvgPrice:   latestAvgPrice,
+            Version:    latestVersion,
+        }
+
+        return e.evaluatePosition(ctx, updatedPos)  // 재귀 (최대 3회)
+    }
+
+    // 6. Intent 생성 (version 일치)
+    err = e.createIntent(ctx, snapshot, trigger, qty)
+    if err != nil {
+        return fmt.Errorf("intent creation failed: %w", err)
+    }
+
+    return nil
+}
+```
+
+#### 재평가 제한 (무한 루프 방지)
+
+```go
+func (e *ExitEngine) evaluatePositionWithRetry(ctx context.Context, pos Position, attempt int) error {
+    const maxAttempts = 3
+
+    if attempt >= maxAttempts {
+        log.Error("max evaluation attempts reached",
+            "position_id", pos.PositionID,
+            "attempts", attempt)
+        return fmt.Errorf("evaluation abandoned after %d attempts", maxAttempts)
+    }
+
+    err := e.evaluatePosition(ctx, pos)
+    if errors.Is(err, ErrPositionChanged) {
+        // Version 변경 감지 시 재시도
+        return e.evaluatePositionWithRetry(ctx, pos, attempt+1)
+    }
+
+    return err
+}
+```
+
+#### 평단가 변경 알람
+
+```go
+func (e *ExitEngine) alertAvgPriceChange(old, new PositionSnapshot) {
+    priceDiff := new.AvgPrice.Sub(old.AvgPrice)
+    priceDiffPct := priceDiff.Div(old.AvgPrice).Mul(decimal.NewFromInt(100))
+
+    if priceDiffPct.Abs().GreaterThan(decimal.NewFromFloat(1.0)) {
+        // 1% 이상 변경 시 알람
+        e.alerter.Send(Alert{
+            Level:   "WARNING",
+            Message: "Avg price changed significantly during exit evaluation",
+            Data: map[string]interface{}{
+                "position_id":     new.PositionID,
+                "symbol":          new.Symbol,
+                "old_avg_price":   old.AvgPrice,
+                "new_avg_price":   new.AvgPrice,
+                "diff_pct":        priceDiffPct,
+                "old_version":     old.Version,
+                "new_version":     new.Version,
+            },
+        })
+    }
+}
+```
+
+---
+
+### 3. Price Sync 장애 대응 (Fail-Safe)
+
+**v10 문제**: Price sync가 되지 않아 청산 평가 불가
+
+#### Fail-Closed 정책 (보수적 청산 중단)
+
+**원칙**: 가격 신뢰 불가 시 청산 중단 (손실 방지)
+
+```go
+func (e *ExitEngine) evaluatePositions(ctx context.Context) {
+    positions := e.loadOpenPositions(ctx)
+
+    for _, pos := range positions {
+        // 1. 가격 신선도 체크 (BLOCKER)
+        freshness, err := e.priceSync.GetFreshness(ctx, pos.Symbol)
+        if err != nil {
+            log.Error("freshness check failed", "symbol", pos.Symbol, "error", err)
+            continue  // 평가 건너뛰기
+        }
+
+        if freshness.IsStale {
+            log.Warn("price stale, skipping evaluation",
+                "symbol", pos.Symbol,
+                "reason", freshness.StaleReason,
+                "stale_duration", time.Since(freshness.BestTs))
+
+            // Stale 경고 기록
+            e.recordStalePriceWarning(ctx, pos.PositionID, freshness)
+            continue  // 평가 건너뛰기
+        }
+
+        // 2. 현재가 조회
+        currentPrice, err := e.priceSync.GetBestPrice(ctx, pos.Symbol)
+        if err != nil {
+            log.Error("price fetch failed", "symbol", pos.Symbol, "error", err)
+            continue  // 평가 건너뛰기
+        }
+
+        // 3. 트리거 평가 진행
+        e.evaluatePosition(ctx, pos, currentPrice)
+    }
+}
+```
+
+#### Emergency Exit (강제 청산 조건)
+
+**극단적 상황에서만 활성화 (관리자 승인 필요):**
+
+```go
+type EmergencyExitConfig struct {
+    Enabled          bool
+    StaleThreshold   time.Duration  // 60초 (기본값)
+    LossThreshold    float64        // -5.0% (손실 임계값)
+    ManualApproval   bool           // true (관리자 승인 필수)
+}
+
+func (e *ExitEngine) checkEmergencyExit(ctx context.Context, pos Position, freshness Freshness) bool {
+    if !e.emergencyConfig.Enabled {
+        return false
+    }
+
+    staleDuration := time.Since(freshness.BestTs)
+
+    // 조건 1: Stale 지속 시간 초과
+    if staleDuration < e.emergencyConfig.StaleThreshold {
+        return false
+    }
+
+    // 조건 2: 손실 상태 (보수적 청산)
+    lastKnownPrice := freshness.LastPrice
+    pnlPct := (lastKnownPrice - pos.AvgPrice) / pos.AvgPrice * 100
+
+    if pnlPct > e.emergencyConfig.LossThreshold {
+        return false  // 이익 상태면 청산 안 함
+    }
+
+    // 조건 3: 수동 승인 확인
+    if e.emergencyConfig.ManualApproval {
+        approved := e.checkManualApproval(ctx, pos.PositionID)
+        if !approved {
+            log.Warn("emergency exit requires manual approval",
+                "position_id", pos.PositionID,
+                "stale_duration", staleDuration,
+                "pnl_pct", pnlPct)
+            return false
+        }
+    }
+
+    log.Error("EMERGENCY EXIT triggered",
+        "position_id", pos.PositionID,
+        "symbol", pos.Symbol,
+        "stale_duration", staleDuration,
+        "pnl_pct", pnlPct)
+
+    return true
+}
+```
+
+#### Price Sync 장애 알람 (즉시 통보)
+
+```sql
+-- 알람 조건 체크 (모니터링 도구에서 1분마다 실행)
+SELECT
+    symbol,
+    is_stale,
+    stale_reason,
+    EXTRACT(EPOCH FROM (NOW() - best_ts)) AS stale_seconds,
+    last_ws_ts,
+    last_rest_ts,
+    last_naver_ts
+FROM market.freshness
+WHERE is_stale = true
+  AND EXTRACT(EPOCH FROM (NOW() - best_ts)) > 30  -- 30초 이상 stale
+ORDER BY best_ts ASC;
+```
+
+**알람 트리거:**
+
+```go
+func (e *ExitEngine) monitorPriceSyncHealth(ctx context.Context) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            var staleSymbols []StalePriceInfo
+            rows, err := e.db.Query(ctx, `
+                SELECT symbol, stale_reason, best_ts
+                FROM market.freshness
+                WHERE is_stale = true
+                  AND EXTRACT(EPOCH FROM (NOW() - best_ts)) > 30
+            `)
+            if err != nil {
+                log.Error("price health check failed", "error", err)
+                continue
+            }
+
+            for rows.Next() {
+                var info StalePriceInfo
+                rows.Scan(&info.Symbol, &info.Reason, &info.LastTs)
+                staleSymbols = append(staleSymbols, info)
+            }
+            rows.Close()
+
+            if len(staleSymbols) > 0 {
+                e.alerter.Send(Alert{
+                    Level:   "CRITICAL",
+                    Message: fmt.Sprintf("Price sync stale for %d symbols", len(staleSymbols)),
+                    Data: map[string]interface{}{
+                        "stale_symbols": staleSymbols,
+                        "count":         len(staleSymbols),
+                    },
+                })
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+---
+
 ## 🔒 SSOT 규칙 (금지 패턴)
 
 ### ❌ 절대 금지

@@ -11,6 +11,7 @@
 ```sql
 CREATE SCHEMA IF NOT EXISTS market;   -- PriceSync 소유
 CREATE SCHEMA IF NOT EXISTS trade;    -- Strategy/Execution 공유
+CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 ```
 
 ### SSOT 소유권
@@ -29,6 +30,7 @@ CREATE SCHEMA IF NOT EXISTS trade;    -- Strategy/Execution 공유
 | trade | orders | Execution | Execution만 |
 | trade | fills | Execution | Execution만 |
 | trade | exit_signals | Exit | Exit만 |
+| system | process_locks | System | 모든 모듈 (advisory lock) |
 
 ---
 
@@ -152,11 +154,29 @@ CREATE TABLE trade.positions (
     entry_ts      TIMESTAMPTZ NOT NULL,
     status        TEXT NOT NULL,  -- OPEN | CLOSING | CLOSED
     strategy_id   TEXT,
+    version       INT NOT NULL DEFAULT 1,  -- 낙관적 잠금 (평단가 변경 감지)
     updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_positions_open ON trade.positions (account_id, status, symbol)
     WHERE status IN ('OPEN', 'CLOSING');
+
+-- Version 자동 증가 트리거
+CREATE OR REPLACE FUNCTION increment_position_version()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.avg_price != OLD.avg_price OR NEW.qty != OLD.qty THEN
+        NEW.version = OLD.version + 1;
+        NEW.updated_ts = NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_positions_version
+BEFORE UPDATE ON trade.positions
+FOR EACH ROW
+EXECUTE FUNCTION increment_position_version();
 ```
 
 ### trade.position_state
@@ -302,6 +322,57 @@ CREATE INDEX idx_exit_signals_rule ON trade.exit_signals (rule_name, triggered, 
 |--------|-----------|------|
 | 1차 재진입 | `{candidate_id}:ENTRY:1` | `d4e5f6-...:ENTRY:1` |
 | 2차 재진입 | `{candidate_id}:ENTRY:2` | `d4e5f6-...:ENTRY:2` |
+
+---
+
+## 🗃️ System Schema (Process 관리)
+
+### system.process_locks
+
+**목적**: Leader election 및 중복 실행 방지 (PostgreSQL Advisory Lock)
+
+```sql
+CREATE TABLE system.process_locks (
+    lock_name    TEXT PRIMARY KEY,
+    instance_id  TEXT NOT NULL,
+    acquired_ts  TIMESTAMPTZ NOT NULL,
+    heartbeat_ts TIMESTAMPTZ NOT NULL,
+    host         TEXT NOT NULL,
+    pid          INT NOT NULL
+);
+
+CREATE INDEX idx_process_locks_heartbeat ON system.process_locks (heartbeat_ts DESC);
+```
+
+**사용 방법:**
+
+```go
+// Advisory Lock 획득
+SELECT pg_try_advisory_lock(1001);  // 1001 = exit_engine_leader
+
+// Heartbeat 갱신 (5초마다)
+UPDATE system.process_locks
+SET heartbeat_ts = NOW()
+WHERE lock_name = 'exit_engine_leader' AND instance_id = ?;
+
+// Advisory Lock 해제
+SELECT pg_advisory_unlock(1001);
+```
+
+**모니터링:**
+
+```sql
+-- Stale leader 감지 (15초 이상 heartbeat 없음)
+SELECT
+    lock_name,
+    instance_id,
+    host,
+    pid,
+    heartbeat_ts,
+    EXTRACT(EPOCH FROM (NOW() - heartbeat_ts)) AS stale_seconds
+FROM system.process_locks
+WHERE EXTRACT(EPOCH FROM (NOW() - heartbeat_ts)) > 15;
+```
 
 ---
 

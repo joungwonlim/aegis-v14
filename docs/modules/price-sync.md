@@ -557,6 +557,425 @@ SELECT add_continuous_aggregate_policy(
 
 ---
 
+## 🛡️ 운영 안정성 (v10 문제 해결)
+
+### 1. Price Sync 장애 감지 및 복구
+
+**v10 문제**: Price sync가 정지되어 전략이 마비되는 상황 발생
+
+#### 자동 감지 시스템
+
+**Freshness 모니터링 (CRITICAL):**
+
+```sql
+-- 전체 시스템 가격 신선도 체크 (1분마다 실행)
+CREATE OR REPLACE VIEW market.price_health AS
+SELECT
+    COUNT(*) AS total_symbols,
+    COUNT(*) FILTER (WHERE is_stale = false) AS fresh_count,
+    COUNT(*) FILTER (WHERE is_stale = true) AS stale_count,
+    COUNT(*) FILTER (WHERE is_stale = true AND
+                     EXTRACT(EPOCH FROM (NOW() - best_ts)) > 60) AS critical_stale_count,
+    AVG(EXTRACT(EPOCH FROM (NOW() - best_ts))) AS avg_stale_seconds,
+    MAX(EXTRACT(EPOCH FROM (NOW() - best_ts))) AS max_stale_seconds,
+    MIN(best_ts) AS oldest_price_ts
+FROM market.freshness
+WHERE symbol IN (
+    -- 활성 심볼만 (보유 포지션 + 관심 종목)
+    SELECT DISTINCT symbol FROM trade.positions WHERE status = 'OPEN'
+    UNION
+    SELECT DISTINCT symbol FROM trade.reentry_candidates WHERE state IN ('WATCH', 'READY')
+);
+```
+
+**알람 조건:**
+
+```go
+type PriceHealthStatus struct {
+    TotalSymbols        int
+    FreshCount          int
+    StaleCount          int
+    CriticalStaleCount  int  // 60초 이상 stale
+    AvgStaleSeconds     float64
+    MaxStaleSeconds     float64
+    OldestPriceTs       time.Time
+}
+
+func (p *PriceSync) monitorHealth(ctx context.Context) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            var status PriceHealthStatus
+            err := p.db.QueryRow(ctx, `SELECT * FROM market.price_health`).Scan(&status)
+            if err != nil {
+                log.Error("health check failed", "error", err)
+                continue
+            }
+
+            // 알람 조건 1: 전체 심볼의 50% 이상 stale
+            if status.StaleCount > status.TotalSymbols/2 {
+                p.alerter.Send(Alert{
+                    Level:   "CRITICAL",
+                    Message: "Majority of symbols are stale",
+                    Data:    status,
+                })
+            }
+
+            // 알람 조건 2: Critical stale 존재 (60초 이상)
+            if status.CriticalStaleCount > 0 {
+                p.alerter.Send(Alert{
+                    Level:   "CRITICAL",
+                    Message: fmt.Sprintf("%d symbols critically stale (>60s)", status.CriticalStaleCount),
+                    Data:    status,
+                })
+            }
+
+            // 알람 조건 3: 평균 지연 30초 이상
+            if status.AvgStaleSeconds > 30 {
+                p.alerter.Send(Alert{
+                    Level:   "WARNING",
+                    Message: fmt.Sprintf("High average staleness: %.1fs", status.AvgStaleSeconds),
+                    Data:    status,
+                })
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+#### 소스별 장애 감지
+
+**KIS WebSocket 장애:**
+
+```go
+type WSHealthMetrics struct {
+    ConnectionState   string  // CONNECTED | DISCONNECTED | RECONNECTING
+    LastMessageTs     time.Time
+    MessageCount60s   int
+    ReconnectAttempts int
+    LastErrorTs       time.Time
+    LastError         string
+}
+
+func (w *KISWebSocket) monitorConnection(ctx context.Context) {
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            metrics := w.getHealthMetrics()
+
+            // 조건 1: 60초 이상 메시지 없음
+            if time.Since(metrics.LastMessageTs) > 60*time.Second {
+                log.Error("WS no messages for 60s", "last_message", metrics.LastMessageTs)
+
+                // Tier0 REST로 승격
+                w.upgradeToTier0REST(ctx)
+
+                // 재연결 시도
+                go w.reconnect(ctx)
+            }
+
+            // 조건 2: 재연결 3회 이상 실패
+            if metrics.ReconnectAttempts >= 3 {
+                log.Error("WS reconnect failed multiple times", "attempts", metrics.ReconnectAttempts)
+
+                // Naver fallback 활성화
+                w.enableNaverFallback(ctx)
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+**KIS REST API Rate Limit:**
+
+```go
+type RESTHealthMetrics struct {
+    RequestCount60s   int
+    Rate429Count60s   int
+    Rate5xxCount60s   int
+    AvgLatencyMs      float64
+    CurrentTier       string  // Tier0 | Tier1 | Tier2
+}
+
+func (r *KISREST) monitorRateLimit(ctx context.Context) {
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            metrics := r.getHealthMetrics()
+
+            // 조건 1: 429 비율 20% 이상
+            if metrics.Rate429Count60s > metrics.RequestCount60s/5 {
+                log.Warn("high 429 rate", "ratio", float64(metrics.Rate429Count60s)/float64(metrics.RequestCount60s))
+
+                // Tier 강등 (주기 증가)
+                r.downgradeTier(ctx)
+
+                // Naver를 일부 심볼에 활성화
+                r.enablePartialNaverFallback(ctx)
+            }
+
+            // 조건 2: 5xx 에러 연속 3회 이상
+            if metrics.Rate5xxCount60s >= 3 {
+                log.Error("KIS API server errors", "count", metrics.Rate5xxCount60s)
+
+                // KIS 전체 비활성화 고려 (Naver로 전환)
+                r.considerFullNaverFallback(ctx)
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+**Naver API 장애:**
+
+```go
+type NaverHealthMetrics struct {
+    RequestCount60s  int
+    TimeoutCount60s  int
+    ErrorCount60s    int
+    AvgLatencyMs     float64
+}
+
+func (n *NaverAPI) monitorHealth(ctx context.Context) {
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            metrics := n.getHealthMetrics()
+
+            // 조건 1: 타임아웃 비율 50% 이상
+            if metrics.TimeoutCount60s > metrics.RequestCount60s/2 {
+                log.Error("Naver high timeout rate", "ratio", float64(metrics.TimeoutCount60s)/float64(metrics.RequestCount60s))
+
+                // Naver 비활성화
+                n.disable(ctx)
+
+                // KIS만으로 커버
+                log.Info("Naver disabled, relying on KIS only")
+            }
+
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+---
+
+### 2. 자동 복구 전략
+
+#### Failover 시나리오
+
+**시나리오 1: WS 단절 → REST 승격**
+
+```go
+func (p *PriceSync) handleWSDisconnection(ctx context.Context) {
+    // 1. 현재 WS 구독 심볼 조회
+    wsSymbols := p.ws.GetSubscribedSymbols()
+
+    // 2. Tier0 REST로 승격 (1~2초 주기)
+    for _, symbol := range wsSymbols {
+        p.rest.UpgradeToTier0(ctx, symbol)
+    }
+
+    // 3. WS 재연결 시도 (백그라운드)
+    go func() {
+        backoff := time.Second
+        for i := 0; i < 10; i++ {
+            err := p.ws.Reconnect(ctx)
+            if err == nil {
+                log.Info("WS reconnected successfully")
+
+                // Tier0 REST 원복
+                for _, symbol := range wsSymbols {
+                    p.rest.DowngradeFromTier0(ctx, symbol)
+                }
+                return
+            }
+
+            log.Warn("WS reconnect failed", "attempt", i+1, "error", err)
+            time.Sleep(backoff)
+            backoff = min(backoff*2, 30*time.Second)  // exponential backoff
+        }
+
+        log.Error("WS reconnect abandoned after 10 attempts")
+    }()
+}
+```
+
+**시나리오 2: REST Rate Limit → Tier 강등 + Naver 활성화**
+
+```go
+func (p *PriceSync) handleRateLimit(ctx context.Context) {
+    // 1. Tier2 주기 증가 (60s → 120s)
+    p.rest.SetTier2Interval(120 * time.Second)
+
+    // 2. Tier1 일부 심볼을 Tier2로 강등
+    tier1Symbols := p.rest.GetTier1Symbols()
+    toDowngrade := tier1Symbols[len(tier1Symbols)/2:]  // 하위 50%
+
+    for _, symbol := range toDowngrade {
+        p.rest.DowngradeTo Tier2(ctx, symbol)
+    }
+
+    // 3. Naver를 강등된 심볼에 활성화
+    for _, symbol := range toDowngrade {
+        p.naver.Enable(ctx, symbol)
+    }
+
+    log.Info("rate limit mitigation applied",
+        "tier2_interval", "120s",
+        "downgraded_symbols", len(toDowngrade),
+        "naver_enabled_for", len(toDowngrade))
+}
+```
+
+**시나리오 3: 전체 장애 → Emergency Mode**
+
+```go
+type EmergencyMode struct {
+    Enabled      bool
+    TriggeredTs  time.Time
+    Reason       string
+}
+
+func (p *PriceSync) enterEmergencyMode(ctx context.Context, reason string) {
+    p.emergencyMode = EmergencyMode{
+        Enabled:     true,
+        TriggeredTs: time.Now(),
+        Reason:      reason,
+    }
+
+    log.Error("EMERGENCY MODE activated", "reason", reason)
+
+    // 1. 모든 소스를 최소 주기로 폴링 시도
+    p.rest.SetAllTier0(ctx)  // 모든 심볼을 Tier0 (1~2초)로
+    p.naver.EnableAll(ctx)   // Naver도 활성화
+
+    // 2. Exit Engine에 통보 (평가 중단 권고)
+    p.notifyEmergency(ctx, "price_sync_emergency")
+
+    // 3. 관리자 알람
+    p.alerter.Send(Alert{
+        Level:   "CRITICAL",
+        Message: "PriceSync EMERGENCY MODE",
+        Data: map[string]interface{}{
+            "reason":       reason,
+            "triggered_at": p.emergencyMode.TriggeredTs,
+        },
+    })
+
+    // 4. 복구 모니터링 (5분 후 자동 해제 시도)
+    time.AfterFunc(5*time.Minute, func() {
+        p.tryExitEmergencyMode(ctx)
+    })
+}
+
+func (p *PriceSync) tryExitEmergencyMode(ctx context.Context) {
+    // 복구 조건 체크
+    health := p.getHealthStatus(ctx)
+
+    if health.StaleCount < health.TotalSymbols/10 {  // 10% 미만 stale
+        p.emergencyMode.Enabled = false
+
+        log.Info("EMERGENCY MODE deactivated", "duration", time.Since(p.emergencyMode.TriggeredTs))
+
+        // Tier 원복
+        p.rest.RestoreNormalTiers(ctx)
+        p.naver.RestoreNormalState(ctx)
+
+        // 통보 해제
+        p.notifyEmergency(ctx, "price_sync_recovered")
+    } else {
+        log.Warn("emergency mode recovery failed, retrying in 5 minutes")
+        time.AfterFunc(5*time.Minute, func() {
+            p.tryExitEmergencyMode(ctx)
+        })
+    }
+}
+```
+
+---
+
+### 3. 모니터링 대시보드 (외부 도구 통합)
+
+#### Metrics 출력 (Prometheus 형식)
+
+```go
+// Metrics 엔드포인트: /metrics
+func (p *PriceSync) exposeMetrics() {
+    // 소스별 가격 이벤트 수
+    prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "price_sync_ticks_total",
+            Help: "Total number of price ticks received",
+        },
+        []string{"source"},  // KIS_WS, KIS_REST, NAVER
+    )
+
+    // Stale 심볼 수
+    prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "price_sync_stale_symbols",
+            Help: "Number of symbols with stale prices",
+        },
+        []string{"severity"},  // NORMAL, WARNING, CRITICAL
+    )
+
+    // 소스별 레이턴시
+    prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name:    "price_sync_latency_seconds",
+            Help:    "Latency of price updates",
+            Buckets: prometheus.DefBuckets,
+        },
+        []string{"source"},
+    )
+
+    // WS 연결 상태
+    prometheus.NewGauge(
+        prometheus.GaugeOpts{
+            Name: "price_sync_ws_connected",
+            Help: "1 if WS connected, 0 otherwise",
+        },
+    )
+}
+```
+
+#### 알람 정책
+
+| 조건 | Level | 조치 |
+|------|-------|------|
+| Stale 심볼 > 50% | CRITICAL | 즉시 개입 |
+| Critical stale (>60s) 존재 | CRITICAL | 즉시 개입 |
+| WS 60초 이상 단절 | WARNING | REST 승격 확인 |
+| REST 429 비율 > 20% | WARNING | Tier 강등 확인 |
+| 평균 지연 > 30초 | WARNING | 소스 상태 확인 |
+| Naver 타임아웃 > 50% | WARNING | Naver 비활성화 확인 |
+
+---
+
 ## 🧪 테스트 전략
 
 ### 1. 단위 테스트
