@@ -65,7 +65,8 @@ docs/
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
-| `database/schema.md` | ✅ 완료 | 전체 테이블 스키마 정의 (market, trade schema) |
+| `database/schema.md` | ✅ 완료 | 전체 테이블 스키마 정의 (market, trade, system schema) |
+| `database/access-control.md` | ✅ 완료 | PostgreSQL RBAC 설계 (role 기반 접근 제어) |
 | `database/erd.md` | ⬜ TODO | ERD 상세 (schema.md에 포함되어 있음) |
 | `database/indexes.md` | ⬜ TODO | 인덱스 최적화 전략 (schema.md에 일부 포함) |
 | `database/migration-plan.md` | ⬜ TODO | 마이그레이션 계획 |
@@ -99,10 +100,10 @@ docs/
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 7/30 (계획 변경: Quant Runtime 중심)
-진행률: 23%
+총 문서 수: 8/30 (계획 변경: Quant Runtime 중심)
+진행률: 27%
 
-✅ 완료: 7
+✅ 완료: 8
   - architecture/system-overview.md
   - modules/price-sync.md
   - modules/exit-engine.md
@@ -110,12 +111,15 @@ docs/
   - modules/execution-service.md
   - modules/external-apis.md
   - database/schema.md
+  - database/access-control.md
 
 🚧 진행 중: 0
-⬜ TODO: 23
+⬜ TODO: 22
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
+데이터베이스 접근 제어 설계 완료 (PostgreSQL RBAC) ✅
+v10 운영 이슈 해결 설계 완료 (중복 실행, 평단가 변경, Price Sync 장애) ✅
 ```
 
 ---

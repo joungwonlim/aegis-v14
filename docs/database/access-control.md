@@ -169,6 +169,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON trade.positions TO aegis_trade;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.position_state TO aegis_trade;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.reentry_candidates TO aegis_trade;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.order_intents TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.exit_signals TO aegis_trade;
 
 -- 읽기 전용 테이블
 GRANT SELECT ON trade.orders TO aegis_trade;
@@ -183,6 +184,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
 - ✅ `trade.position_state` (Exit FSM 상태)
 - ✅ `trade.reentry_candidates` (Reentry FSM 상태)
 - ✅ `trade.order_intents` (주문 의도 생성)
+- ✅ `trade.exit_signals` (Exit 트리거 평가 기록)
 
 **읽기 전용 테이블**:
 - 👁️ `market.*` (현재가 조회)
@@ -293,6 +295,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA trade
 | **trade.order_intents** | ALL | READ | READ/WRITE | READ | READ |
 | **trade.orders** | ALL | READ | READ | READ/WRITE | READ |
 | **trade.fills** | ALL | READ | READ | READ/WRITE | READ |
+| **trade.exit_signals** | ALL | READ | READ/WRITE | READ | READ |
+| **system.process_locks** | ALL | READ/WRITE | READ/WRITE | READ/WRITE | READ |
 
 **범례**:
 - `ALL` = SUPERUSER (모든 권한)
@@ -521,18 +525,34 @@ GRANT UPDATE (qty, updated_ts) ON trade.positions TO aegis_exec;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_exec;
 
+-- system schema 권한 (모든 모듈)
+-- =====================================================
+-- process_locks는 모든 모듈이 advisory lock 사용 가능
+GRANT USAGE ON SCHEMA system TO aegis_price;
+GRANT USAGE ON SCHEMA system TO aegis_trade;
+GRANT USAGE ON SCHEMA system TO aegis_exec;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON system.process_locks TO aegis_price;
+GRANT SELECT, INSERT, UPDATE, DELETE ON system.process_locks TO aegis_trade;
+GRANT SELECT, INSERT, UPDATE, DELETE ON system.process_locks TO aegis_exec;
+
 -- aegis_readonly 권한 (조회 전용)
 -- =====================================================
 GRANT USAGE ON SCHEMA market TO aegis_readonly;
 GRANT USAGE ON SCHEMA trade TO aegis_readonly;
+GRANT USAGE ON SCHEMA system TO aegis_readonly;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA market TO aegis_readonly;
 GRANT SELECT ON ALL TABLES IN SCHEMA trade TO aegis_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA system TO aegis_readonly;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA market
     GRANT SELECT ON TABLES TO aegis_readonly;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA trade
+    GRANT SELECT ON TABLES TO aegis_readonly;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA system
     GRANT SELECT ON TABLES TO aegis_readonly;
 ```
 
