@@ -30,6 +30,7 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 | trade | orders | Execution | Execution만 |
 | trade | fills | Execution | Execution만 |
 | trade | exit_signals | Exit | Exit만 |
+| trade | holdings | Execution | Execution만 |
 | system | process_locks | System | 모든 모듈 (advisory lock) |
 
 ---
@@ -300,6 +301,30 @@ CREATE TABLE trade.exit_signals (
 CREATE INDEX idx_exit_signals_position_ts ON trade.exit_signals (position_id, ts DESC);
 CREATE INDEX idx_exit_signals_rule ON trade.exit_signals (rule_name, triggered, ts DESC);
 ```
+
+### trade.holdings
+
+**목적**: KIS 보유종목 현황 = 포지션 최종 진실 (Execution 소유)
+
+```sql
+CREATE TABLE trade.holdings (
+    account_id    TEXT        NOT NULL,
+    symbol        TEXT        NOT NULL,
+    qty           BIGINT      NOT NULL,
+    avg_price     NUMERIC     NOT NULL,
+    current_price NUMERIC,
+    pnl           NUMERIC,
+    pnl_pct       FLOAT,
+    updated_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    raw           JSONB,
+    PRIMARY KEY (account_id, symbol)
+);
+```
+
+**중요**:
+- `holdings`: KIS가 말하는 진실 (브로커 현황)
+- `positions`: 내부 전략이 추적하는 포지션 (전략 현황)
+- Mismatch 감지를 위해 **별도 관리** 필수
 
 ---
 

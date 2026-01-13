@@ -174,6 +174,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON trade.exit_signals TO aegis_trade;
 -- 읽기 전용 테이블
 GRANT SELECT ON trade.orders TO aegis_trade;
 GRANT SELECT ON trade.fills TO aegis_trade;
+GRANT SELECT ON trade.holdings TO aegis_trade;
 
 -- Sequence 권한
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
@@ -190,6 +191,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_trade;
 - 👁️ `market.*` (현재가 조회)
 - 👁️ `trade.orders` (주문 상태 확인)
 - 👁️ `trade.fills` (체결 내역 확인)
+- 👁️ `trade.holdings` (KIS 보유 현황 조회)
 
 ---
 
@@ -217,6 +219,7 @@ GRANT USAGE ON SCHEMA trade TO aegis_exec;
 -- 쓰기 가능 테이블 (SSOT 소유)
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.orders TO aegis_exec;
 GRANT SELECT, INSERT, UPDATE, DELETE ON trade.fills TO aegis_exec;
+GRANT SELECT, INSERT, UPDATE, DELETE ON trade.holdings TO aegis_exec;
 
 -- 읽기 전용 테이블
 GRANT SELECT ON trade.order_intents TO aegis_exec;
@@ -233,6 +236,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trade TO aegis_exec;
 **쓰기 가능 테이블**:
 - ✅ `trade.orders` (주문 상태)
 - ✅ `trade.fills` (체결 내역)
+- ✅ `trade.holdings` (KIS 보유종목 현황)
 - ✅ `trade.positions` (qty 컬럼만 UPDATE)
 
 **읽기 전용 테이블**:
@@ -296,6 +300,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA trade
 | **trade.orders** | ALL | READ | READ | READ/WRITE | READ |
 | **trade.fills** | ALL | READ | READ | READ/WRITE | READ |
 | **trade.exit_signals** | ALL | READ | READ/WRITE | READ | READ |
+| **trade.holdings** | ALL | READ | READ | READ/WRITE | READ |
 | **system.process_locks** | ALL | READ/WRITE | READ/WRITE | READ/WRITE | READ |
 
 **범례**:
