@@ -24,7 +24,7 @@ docs/
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
-| `architecture/system-overview.md` | ⬜ TODO | 전체 시스템 개요 |
+| `architecture/system-overview.md` | ✅ 완료 | 전체 시스템 개요 (SSOT, 모듈 독립성, 멱등성) |
 | `architecture/data-flow.md` | ⬜ TODO | 데이터 흐름 다이어그램 |
 | `architecture/layer-design.md` | ⬜ TODO | 레이어 구조 설계 |
 | `architecture/tech-stack.md` | ⬜ TODO | 기술 스택 선정 및 근거 |
@@ -33,18 +33,31 @@ docs/
 
 ## 🧩 Modules (모듈 설계)
 
+### 핵심 모듈 (Quant Runtime)
+
 | 모듈 | 문서 | 상태 | 설명 |
 |------|------|------|------|
-| S0 | `modules/s0-data-quality.md` | ⬜ TODO | 데이터 수집/검증 |
-| S1 | `modules/s1-universe.md` | ⬜ TODO | 투자 가능 종목 선정 |
-| S2 | `modules/s2-signals.md` | ⬜ TODO | 팩터/이벤트 시그널 |
-| S3 | `modules/s3-screener.md` | ⬜ TODO | 1차 필터링 |
-| S4 | `modules/s4-ranking.md` | ⬜ TODO | 종합 점수 산출 |
-| S5 | `modules/s5-portfolio.md` | ⬜ TODO | 포트폴리오 구성 |
-| S6 | `modules/s6-execution.md` | ⬜ TODO | 주문 실행 |
-| S7 | `modules/s7-audit.md` | ⬜ TODO | 성과 분석 |
-| External | `modules/external-apis.md` | ⬜ TODO | 외부 API 연동 (KIS, DART, Naver) |
-| Brain | `modules/brain-orchestrator.md` | ⬜ TODO | 오케스트레이터 |
+| PriceSync | `modules/price-sync.md` | ✅ 완료 | 현재가 동기화 (KIS WS/REST, Naver) |
+| Exit Engine | `modules/exit-engine.md` | ✅ 완료 | 자동 청산 (손절/익절/트레일링) |
+| Reentry Engine | `modules/reentry-engine.md` | ✅ 완료 | 재진입 전략 (쿨다운/게이트/트리거) |
+| Execution | `modules/execution-service.md` | ⬜ TODO | 주문 제출/체결 관리 |
+
+### 전략 모듈 (향후 확장)
+
+| 모듈 | 문서 | 상태 | 설명 |
+|------|------|------|------|
+| Universe | `modules/universe.md` | ⬜ TODO | 투자 가능 종목 선정 |
+| Signals | `modules/signals.md` | ⬜ TODO | 팩터/이벤트 시그널 |
+| Ranking | `modules/ranking.md` | ⬜ TODO | 종합 점수 산출 |
+| Portfolio | `modules/portfolio.md` | ⬜ TODO | 포트폴리오 구성 |
+| Risk | `modules/risk-management.md` | ⬜ TODO | 리스크 관리 |
+
+### 인프라 모듈
+
+| 모듈 | 문서 | 상태 | 설명 |
+|------|------|------|------|
+| External APIs | `modules/external-apis.md` | ⬜ TODO | 외부 API 연동 (KIS, DART, Naver) |
+| Monitoring | `modules/monitoring.md` | ⬜ TODO | 모니터링/알람 |
 
 ---
 
@@ -52,9 +65,9 @@ docs/
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
-| `database/erd.md` | ⬜ TODO | ERD (Entity Relationship Diagram) |
-| `database/schema.md` | ⬜ TODO | 전체 테이블 스키마 정의 |
-| `database/indexes.md` | ⬜ TODO | 인덱스 전략 |
+| `database/schema.md` | ✅ 완료 | 전체 테이블 스키마 정의 (market, trade schema) |
+| `database/erd.md` | ⬜ TODO | ERD 상세 (schema.md에 포함되어 있음) |
+| `database/indexes.md` | ⬜ TODO | 인덱스 최적화 전략 (schema.md에 일부 포함) |
 | `database/migration-plan.md` | ⬜ TODO | 마이그레이션 계획 |
 
 ---
@@ -86,12 +99,20 @@ docs/
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 0/28
-진행률: 0%
+총 문서 수: 5/30 (계획 변경: Quant Runtime 중심)
+진행률: 17%
 
-✅ 완료: 0
+✅ 완료: 5
+  - architecture/system-overview.md
+  - modules/price-sync.md
+  - modules/exit-engine.md
+  - modules/reentry-engine.md
+  - database/schema.md
+
 🚧 진행 중: 0
-⬜ TODO: 28
+⬜ TODO: 25
+
+핵심 모듈 우선 완료 (PriceSync, Exit, Reentry) ✅
 ```
 
 ---
