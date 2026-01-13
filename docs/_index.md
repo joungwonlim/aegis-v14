@@ -31,7 +31,7 @@ docs/
 |------|------|------|
 | `architecture/system-overview.md` | ✅ 완료 | 전체 시스템 개요 (SSOT, 모듈 독립성, 멱등성) |
 | `architecture/pick-to-execution-pipeline.md` | ✅ 완료 | 다중 선정 모듈 → 단일 실행 시스템 파이프라인 |
-| `architecture/architecture-improvements.md` | ✅ 완료 | 성능 및 안정성 개선안 (P0~P2 우선순위) |
+| `architecture/architecture-improvements.md` | ✅ 완료 | 성능 및 안정성 개선안 (P0~P2 우선순위, Redis 캐싱 포함) |
 | `architecture/data-flow.md` | ⬜ TODO | 데이터 흐름 다이어그램 |
 | `architecture/layer-design.md` | ⬜ TODO | 레이어 구조 설계 |
 | `architecture/tech-stack.md` | ⬜ TODO | 기술 스택 선정 및 근거 |

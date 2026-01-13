@@ -208,7 +208,92 @@ func (e *ExitEngine) PreComputeGapDownCandidates(ctx context.Context) {
 
 ---
 
-### 4. Pick Pipeline Event-Driven Router
+### 4. Redis 캐싱으로 DB 읽기 부하 감소
+
+**문제점**: 고빈도 DB 읽기로 인한 병목
+
+현재 PriceSync, Exit Engine, Execution Service가 PostgreSQL에서 반복적으로 읽기 작업을 수행합니다:
+- `prices_best` 조회 (Strategy 모듈, 1~3초마다)
+- `positions` 조회 (Exit/Reentry, 2초마다)
+- `order_intents` 조회 (Execution, 1~3초마다)
+
+**개선안**: 자주 읽는 Hot Data를 Redis에 캐싱
+
+```go
+// prices_best 캐싱 (TTL: 5초)
+type PriceCache struct {
+    redis *redis.Client
+}
+
+func (pc *PriceCache) GetBestPrice(ctx context.Context, symbol string) (*BestPrice, error) {
+    // 1. Redis 조회
+    key := fmt.Sprintf("price:best:%s", symbol)
+    cached, err := pc.redis.Get(ctx, key).Result()
+
+    if err == redis.Nil {
+        // 2. Cache Miss → DB 조회
+        price := pc.db.GetBestPrice(ctx, symbol)
+
+        // 3. Redis 저장 (5초 TTL)
+        pc.redis.Set(ctx, key, marshalPrice(price), 5*time.Second)
+        return price, nil
+    }
+
+    return unmarshalPrice(cached), nil
+}
+
+// PriceSync가 prices_best 업데이트 시 캐시 무효화
+func (ps *PriceSync) UpdateBestPrice(ctx context.Context, symbol string, price *BestPrice) error {
+    // 1. DB 업데이트
+    ps.db.UpsertBestPrice(ctx, symbol, price)
+
+    // 2. Redis 캐시 업데이트 (즉시 반영)
+    key := fmt.Sprintf("price:best:%s", symbol)
+    ps.redis.Set(ctx, key, marshalPrice(price), 5*time.Second)
+
+    return nil
+}
+```
+
+**캐싱 대상 데이터**:
+
+| 데이터 | TTL | 무효화 시점 | 효과 |
+|--------|-----|------------|------|
+| `prices_best` | 5초 | PriceSync 업데이트 시 | DB 읽기 90% 감소 |
+| `positions` (status, qty) | 3초 | Exit/Execution 업데이트 시 | DB 읽기 80% 감소 |
+| `order_intents` (NEW 상태) | 2초 | Execution 처리 시 | DB 읽기 70% 감소 |
+| `exit_profiles` | 1시간 | 설정 변경 시 | DB 읽기 99% 감소 |
+
+**Write-Through vs Write-Behind**:
+
+```go
+// Write-Through: DB 쓰기 후 즉시 캐시 업데이트 (권장)
+func (s *ExecutionService) UpdatePositionQty(ctx context.Context, positionID uuid.UUID, qty int64) error {
+    // 1. DB 업데이트 (영속성 보장)
+    s.db.UpdatePosition(ctx, positionID, qty)
+
+    // 2. Redis 캐시 즉시 업데이트
+    key := fmt.Sprintf("position:%s", positionID)
+    s.redis.HSet(ctx, key, "qty", qty)
+    s.redis.Expire(ctx, key, 3*time.Second)
+
+    return nil
+}
+```
+
+**효과**:
+- DB 읽기 부하: **70~90% 감소**
+- 응답 속도: PostgreSQL 1~3ms → Redis 0.1~0.3ms (10배 향상)
+- DB max_connections 여유 확보
+
+**주의사항**:
+- **영속성은 PostgreSQL에서 보장** (Redis는 캐시 레이어만)
+- **TTL 설정 필수** (stale data 방지)
+- **Write-Through 패턴 사용** (DB와 Redis 불일치 방지)
+
+---
+
+### 5. Pick Pipeline Event-Driven Router
 
 **문제점**: Router 스케줄러(1분) 지연
 
@@ -270,7 +355,7 @@ func (r *Router) ScheduledFallback() {
 
 ## 🟢 P2: 보통 개선 (향후 검토)
 
-### 5. KIS API Circuit Breaker & Fallback
+### 6. KIS API Circuit Breaker & Fallback
 
 **문제점**: KIS API 장애 시 시스템 전체 마비
 
@@ -349,7 +434,7 @@ kis_accounts:
 
 ---
 
-### 6. PostgreSQL Connection Pooling 최적화
+### 7. PostgreSQL Connection Pooling 최적화
 
 **문제점**: 모듈별 DB Connection Pool 관리
 
@@ -391,6 +476,7 @@ reserve_pool_size = 5    # 예비 연결
 | **P0** | Locked Qty 계산 로직 | 1일 | 중복 주문 방지 (Critical) |
 | **P1** | NOTIFY/LISTEN 이벤트 | 2일 | Latency 90% 감소 |
 | **P1** | Morning Rush Mode | 1일 | 시가 급변동 대응 |
+| **P1** | Redis 캐싱 (DB 부하 감소) | 2일 | DB 읽기 70~90% 감소 |
 | **P1** | Event-Driven Router | 1일 | 뉴스 전략 즉시 반응 |
 | **P2** | Circuit Breaker | 2일 | API 장애 대응 |
 | **P2** | PgBouncer 도입 | 1일 | 향후 스케일링 대비 |
