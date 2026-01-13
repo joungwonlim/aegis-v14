@@ -824,6 +824,192 @@ func LogExitSignals(ctx context.Context) {
 
 ---
 
+## 🚨 v10 사고 사례 및 교훈 (CRITICAL)
+
+> **왜 이 안전장치들이 필요한가?** v10 실전 운영에서 발생한 실제 사고 사례입니다.
+
+### 사고 1: 평단가 캐시 불일치로 조기 청산
+
+**상황:**
+1. 포지션 진입: 100주 @ 70,000원 (평단가: 70,000원)
+2. 추가 매수: 50주 @ 75,000원 → **평단가: 71,667원으로 상승**
+3. Exit Engine 평가: 인메모리 캐시에는 여전히 70,000원
+4. 현재가: 72,500원
+5. 손익률 계산 (캐시 기준): **(72,500 - 70,000) / 70,000 = +3.57%** ← 잘못됨
+6. 실제 손익률 (DB 기준): (72,500 - 71,667) / 71,667 = +1.16%
+7. **결과**: TP +3.0% 트리거 발동 → 조기 청산 (실제로는 +1.16%밖에 안됨)
+
+**근본 원인:**
+- Execution이 holdings reconcile로 평단가 업데이트
+- Exit Engine은 인메모리 캐시만 참조 (DB 재조회 안함)
+- 캐시 무효화 로직 없음
+
+**v14 방어:**
+```go
+// ✅ Intent 생성 직전 DB 재확인 (강제)
+snapshot := PositionSnapshot{AvgPrice: pos.AvgPrice, Version: pos.Version}
+
+// 트리거 평가...
+if shouldExit {
+    // 🔒 DB에서 최신 평단가/버전 재조회
+    var latestVersion int
+    var latestAvgPrice decimal.Decimal
+    e.db.QueryRow(ctx, `
+        SELECT version, avg_price FROM trade.positions WHERE position_id = $1
+    `, pos.PositionID).Scan(&latestVersion, &latestAvgPrice)
+
+    // 🚨 버전 불일치 감지
+    if latestVersion != snapshot.Version {
+        log.Warn("평단가 변경 감지 - 재평가 필요",
+            "old_avg_price", snapshot.AvgPrice,
+            "new_avg_price", latestAvgPrice,
+            "diff_pct", (latestAvgPrice - snapshot.AvgPrice) / snapshot.AvgPrice * 100)
+        return ErrPositionChanged  // 다음 tick에서 재평가
+    }
+
+    // ✅ 버전 일치 → 최신 평단가로 Intent 생성
+    createIntent(ctx, latestAvgPrice, latestVersion)
+}
+```
+
+---
+
+### 사고 2: 가격 캐시 Stale로 청산 실패
+
+**상황:**
+1. 포지션 진입: 100주 @ 100,000원
+2. 현재가: 95,000원 (실제)
+3. 가격 캐시: 99,500원 (5초 전 데이터, stale)
+4. Exit Engine 평가 (캐시 기준): (99,500 - 100,000) / 100,000 = **-0.5%**
+5. SL -3.0% 트리거 미충족
+6. **실제 손익률**: (95,000 - 100,000) / 100,000 = **-5.0%** (SL 넘음!)
+7. **결과**: 청산 실패 → 손실 확대
+
+**근본 원인:**
+- PriceSync가 가격을 업데이트했지만 캐시는 stale
+- Exit Engine이 타임스탬프 검증 없이 캐시 사용
+- freshness 체크 없음
+
+**v14 방어:**
+```go
+// ✅ 가격 조회 시 타임스탬프 검증 필수
+price, err := e.priceSync.GetBestPrice(ctx, pos.Symbol)
+if err != nil {
+    return nil, ErrPriceFetchFailed
+}
+
+// 🔒 Freshness 체크 (BLOCKER)
+freshness, err := e.priceSync.GetFreshness(ctx, pos.Symbol)
+if err != nil || freshness.IsStale {
+    log.Warn("가격 stale - 평가 중단",
+        "symbol", pos.Symbol,
+        "last_update", freshness.BestTs,
+        "age_seconds", time.Since(freshness.BestTs).Seconds())
+
+    // 🚨 Fail-Closed: 의심스러우면 평가 보류
+    e.recordStalePriceWarning(ctx, pos.PositionID, freshness)
+    return nil, ErrStalePrice
+}
+
+// 🔒 타임스탬프 검증 (10초 임계값)
+age := time.Since(price.BestTs)
+if age > 10*time.Second {
+    log.Warn("가격 너무 오래됨",
+        "symbol", pos.Symbol,
+        "age_seconds", age.Seconds())
+    return nil, ErrStalePrice
+}
+
+// ✅ 신선한 가격으로 손익률 계산
+pnlPct := (price.Bid - pos.AvgPrice) / pos.AvgPrice * 100
+```
+
+---
+
+### 사고 3: 부분 체결 중 수량 불일치
+
+**상황:**
+1. 청산 Intent 생성: 100주 매도
+2. 부분 체결: 50주 체결됨 (Execution이 positions.qty = 50 업데이트)
+3. Exit Engine 재평가: 캐시에는 여전히 100주
+4. 또 다시 100주 청산 Intent 생성
+5. **결과**: 과다 청산 주문 (100주 추가 매도 → 숏 포지션 진입!)
+
+**근본 원인:**
+- Execution의 qty 업데이트가 캐시에 반영 안됨
+- Exit Engine이 Pending Orders 차감 안함 (Available Qty 계산 없음)
+
+**v14 방어 (P0 개선안):**
+```go
+// ✅ Available Qty 계산 (Locked Qty 차감)
+func (e *ExitEngine) GetAvailableQty(ctx context.Context, positionID uuid.UUID) (int64, error) {
+    // 1. DB에서 최신 포지션 수량 조회
+    var currentQty int64
+    var version int
+    e.db.QueryRow(ctx, `
+        SELECT qty, version FROM trade.positions WHERE position_id = $1
+    `, positionID).Scan(&currentQty, &version)
+
+    // 2. Pending/Submitted 상태 주문의 수량 합계 (Locked Qty)
+    var lockedQty int64
+    e.db.QueryRow(ctx, `
+        SELECT COALESCE(SUM(qty - filled_qty), 0)
+        FROM trade.orders
+        WHERE position_id = $1
+          AND status IN ('NEW', 'SUBMITTED', 'PARTIAL_FILLED')
+    `, positionID).Scan(&lockedQty)
+
+    // 3. 가용 수량 = 현재 수량 - 잠긴 수량
+    availableQty := currentQty - lockedQty
+
+    log.Debug("available qty 계산",
+        "position_id", positionID,
+        "current_qty", currentQty,
+        "locked_qty", lockedQty,
+        "available_qty", availableQty)
+
+    return max(availableQty, 0), nil
+}
+
+// Intent 생성 시
+availableQty, err := e.GetAvailableQty(ctx, pos.PositionID)
+if availableQty <= 0 {
+    log.Warn("가용 수량 없음 - Intent 생성 스킵",
+        "position_id", pos.PositionID,
+        "available_qty", availableQty)
+    return nil  // 이미 청산 주문이 제출됨
+}
+
+// ✅ 가용 수량만큼만 Intent 생성
+createIntent(ctx, pos.PositionID, min(targetQty, availableQty))
+```
+
+---
+
+### 교훈 및 v14 강제 원칙
+
+**원칙 1: 캐시는 SSOT가 아니다**
+- ❌ 캐시를 "정답"처럼 믿고 의사결정 금지
+- ✅ Intent 생성 직전 **반드시 DB 재확인**
+
+**원칙 2: 버전 기반 낙관적 잠금**
+- ❌ 평단가/수량은 언제든 변경 가능
+- ✅ Version 불일치 감지 → 재평가
+
+**원칙 3: 타임스탬프 기반 Freshness 검증**
+- ❌ 타임스탬프 없는 가격 사용 금지
+- ✅ best_ts 기반 stale 판정 (10초 임계값)
+
+**원칙 4: Fail-Closed 정책**
+- ❌ 의심스러운 상황에서 청산 강행 금지
+- ✅ Stale/불일치 → 평가 보류 + 알람
+
+**원칙 5: Locked Qty 차감**
+- ❌ 포지션 수량 그대로 사용 금지
+- ✅ Available Qty = Position Qty - Pending Orders Qty
+
+---
+
 ## 🚨 에러 처리
 
 ### 1. 가격 Stale

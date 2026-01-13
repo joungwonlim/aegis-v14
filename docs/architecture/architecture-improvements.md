@@ -297,6 +297,11 @@ func (e *ExitEngine) GetBestPrice(ctx context.Context, symbol string) (*BestPric
 - 부분 체결/정정/취소/수동 매매 시 Redis ↔ DB 불일치 위험
 - Exit Engine이 잘못된 qty로 과다청산 intent 생성 가능
 
+**v10 실제 사고 사례** (자세한 내용은 `exit-engine.md` 참고):
+1. **평단가 캐시 불일치**: 추가 매수로 평단가 71,667원 → 캐시는 70,000원 → 손익률 착오로 조기 청산
+2. **가격 캐시 Stale**: 실제 -5.0% 손실인데 캐시는 -0.5% → SL 미발동 → 손실 확대
+3. **부분 체결 중 수량 불일치**: 50주 체결 후 100주 재청산 Intent → 과다 청산 (숏 진입!)
+
 **안전 패턴: Intent 생성 직전 DB 재확인 필수**
 
 ```go
