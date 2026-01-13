@@ -25,6 +25,7 @@ docs/
 | 문서 | 상태 | 설명 |
 |------|------|------|
 | `architecture/system-overview.md` | ✅ 완료 | 전체 시스템 개요 (SSOT, 모듈 독립성, 멱등성) |
+| `architecture/pick-to-execution-pipeline.md` | ✅ 완료 | 다중 선정 모듈 → 단일 실행 시스템 파이프라인 |
 | `architecture/data-flow.md` | ⬜ TODO | 데이터 흐름 다이어그램 |
 | `architecture/layer-design.md` | ⬜ TODO | 레이어 구조 설계 |
 | `architecture/tech-stack.md` | ⬜ TODO | 기술 스택 선정 및 근거 |
@@ -100,11 +101,12 @@ docs/
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 8/30 (계획 변경: Quant Runtime 중심)
-진행률: 27%
+총 문서 수: 9/30 (계획 변경: Quant Runtime + Pick Pipeline)
+진행률: 30%
 
-✅ 완료: 8
+✅ 완료: 9
   - architecture/system-overview.md
+  - architecture/pick-to-execution-pipeline.md
   - modules/price-sync.md
   - modules/exit-engine.md
   - modules/reentry-engine.md
@@ -114,12 +116,13 @@ docs/
   - database/access-control.md
 
 🚧 진행 중: 0
-⬜ TODO: 22
+⬜ TODO: 21
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
 데이터베이스 접근 제어 설계 완료 (PostgreSQL RBAC) ✅
 v10 운영 이슈 해결 설계 완료 (중복 실행, 평단가 변경, Price Sync 장애) ✅
+Pick-to-Execution Pipeline 설계 완료 (다중 선정 → 단일 실행) ✅
 ```
 
 ---

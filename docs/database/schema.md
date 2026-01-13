@@ -31,6 +31,8 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 | trade | fills | Execution | Execution만 |
 | trade | exit_signals | Exit | Exit만 |
 | trade | holdings | Execution | Execution만 |
+| trade | picks | Router | Router만 |
+| trade | pick_decisions | Router | Router만 |
 | system | process_locks | System | 모든 모듈 (advisory lock) |
 
 ---
@@ -326,6 +328,108 @@ CREATE TABLE trade.holdings (
 - `positions`: 내부 전략이 추적하는 포지션 (전략 현황)
 - Mismatch 감지를 위해 **별도 관리** 필수
 
+### trade.picks
+
+**목적**: 선정 모듈(3000~)의 종목 추천 결과 저장 (Router 소유)
+
+```sql
+CREATE TABLE trade.picks (
+    pick_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    producer_id       TEXT NOT NULL,
+    producer_name     TEXT,
+    run_id            TEXT NOT NULL,
+    run_date          DATE NOT NULL,
+    asof_ts           TIMESTAMPTZ NOT NULL,
+
+    symbol            TEXT NOT NULL,
+    side              TEXT NOT NULL,  -- LONG
+    score             NUMERIC NOT NULL,
+    confidence        TEXT NOT NULL,  -- LOW | MEDIUM | HIGH
+    rank              INT,
+    reasons           TEXT[],
+    metadata          JSONB,
+    constraints       JSONB,
+
+    status            TEXT NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE | SUPERSEDED | REJECTED
+    gate1_passed_ts   TIMESTAMPTZ,
+    gate2_passed_ts   TIMESTAMPTZ,
+    gate3_passed_ts   TIMESTAMPTZ,
+    reject_reason     TEXT,
+
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_picks_run ON trade.picks (run_date, producer_id, run_id);
+CREATE INDEX idx_picks_symbol ON trade.picks (symbol, run_date DESC);
+CREATE INDEX idx_picks_status ON trade.picks (status, run_date DESC);
+
+-- run_id + symbol 중복 방지
+CREATE UNIQUE INDEX uq_picks_run_symbol ON trade.picks (run_id, symbol);
+```
+
+**컬럼 설명**:
+- `producer_id`: 선정 모듈 ID (예: "3000", "3001")
+- `run_id`: 실행 고유 ID (날짜+시각+seed)
+- `score`: 0~100 또는 z-score
+- `confidence`: 신뢰도 (LOW/MEDIUM/HIGH)
+- `reasons[]`: 선정 이유 코드 리스트 (예: ["MOM", "VALUE", "NEWS_POS"])
+- `gate*_passed_ts`: 각 게이트 통과 시각
+- `reject_reason`: 거부 사유 (gate 실패 시)
+
+### trade.pick_decisions
+
+**목적**: Router가 다중 picks를 통합한 최종 결정 (Router 소유)
+
+```sql
+CREATE TABLE trade.pick_decisions (
+    decision_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_date          DATE NOT NULL,
+    decision_ts       TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    symbol            TEXT NOT NULL,
+    final_score       NUMERIC NOT NULL,
+    confidence        TEXT NOT NULL,
+    method            TEXT NOT NULL,  -- PRIORITY | WEIGHTED | CONSENSUS
+
+    -- 합의 정보
+    producer_count    INT NOT NULL,
+    producer_ids      TEXT[],
+    pick_ids          UUID[],  -- 원본 picks 참조
+
+    -- Router 메타
+    router_version    TEXT NOT NULL,  -- 예: "v1.0-priority"
+    config            JSONB,
+
+    -- 게이트 결과
+    gate1_result      TEXT,  -- PASS | REJECT
+    gate2_result      TEXT,
+    gate3_result      TEXT,
+    final_decision    TEXT NOT NULL,  -- PASS | REJECT
+    reject_reason     TEXT,
+
+    -- Intent 생성
+    intent_id         UUID REFERENCES trade.order_intents(intent_id),
+
+    created_ts        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_decisions_date ON trade.pick_decisions (run_date DESC);
+CREATE INDEX idx_decisions_symbol ON trade.pick_decisions (symbol, run_date DESC);
+CREATE INDEX idx_decisions_final ON trade.pick_decisions (final_decision, run_date DESC);
+
+-- 하루에 동일 종목 하나의 최종 decision만
+CREATE UNIQUE INDEX uq_decisions_date_symbol ON trade.pick_decisions (run_date, symbol);
+```
+
+**컬럼 설명**:
+- `method`: Router 통합 방식 (우선순위/가중치/합의)
+- `producer_count`: 해당 종목을 추천한 모듈 수
+- `pick_ids[]`: 원본 picks 테이블 참조
+- `gate*_result`: 각 게이트 통과 여부
+- `final_decision`: 최종 결정 (PASS → intent 생성)
+- `intent_id`: 생성된 order_intent FK
+
 ---
 
 ## 🔑 멱등성 키 (action_key) 컨벤션
@@ -347,6 +451,20 @@ CREATE TABLE trade.holdings (
 |--------|-----------|------|
 | 1차 재진입 | `{candidate_id}:ENTRY:1` | `d4e5f6-...:ENTRY:1` |
 | 2차 재진입 | `{candidate_id}:ENTRY:2` | `d4e5f6-...:ENTRY:2` |
+
+### Router (Pick-based Entry)
+
+| 트리거 | action_key | 예시 |
+|--------|-----------|------|
+| Pick 기반 진입 | `ENTRY:{date}:{symbol}:{producer}:{run_id}` | `ENTRY:20260113:005930:3000:20260113_153000_abc123` |
+
+**특징**:
+- `date`: 거래일 (YYYYMMDD)
+- `symbol`: 종목 코드
+- `producer`: 선정 모듈 ID (3000, 3001, ...)
+- `run_id`: 해당 실행의 고유 ID
+
+**중복 방지**: 동일 날짜, 동일 종목, 동일 producer, 동일 run에서 중복 주문 절대 방지
 
 ---
 
