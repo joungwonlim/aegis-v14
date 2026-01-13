@@ -40,7 +40,7 @@ docs/
 | PriceSync | `modules/price-sync.md` | ✅ 완료 | 현재가 동기화 (KIS WS/REST, Naver) |
 | Exit Engine | `modules/exit-engine.md` | ✅ 완료 | 자동 청산 (손절/익절/트레일링) |
 | Reentry Engine | `modules/reentry-engine.md` | ✅ 완료 | 재진입 전략 (쿨다운/게이트/트리거) |
-| Execution | `modules/execution-service.md` | ⬜ TODO | 주문 제출/체결 관리 |
+| Execution | `modules/execution-service.md` | ✅ 완료 | 주문 제출/체결 관리 (KIS API 연동) |
 
 ### 전략 모듈 (향후 확장)
 
@@ -56,7 +56,7 @@ docs/
 
 | 모듈 | 문서 | 상태 | 설명 |
 |------|------|------|------|
-| External APIs | `modules/external-apis.md` | ⬜ TODO | 외부 API 연동 (KIS, DART, Naver) |
+| External APIs | `modules/external-apis.md` | ✅ 완료 | 외부 API 연동 (KIS WS/REST, Naver) |
 | Monitoring | `modules/monitoring.md` | ⬜ TODO | 모니터링/알람 |
 
 ---
@@ -99,20 +99,23 @@ docs/
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 5/30 (계획 변경: Quant Runtime 중심)
-진행률: 17%
+총 문서 수: 7/30 (계획 변경: Quant Runtime 중심)
+진행률: 23%
 
-✅ 완료: 5
+✅ 완료: 7
   - architecture/system-overview.md
   - modules/price-sync.md
   - modules/exit-engine.md
   - modules/reentry-engine.md
+  - modules/execution-service.md
+  - modules/external-apis.md
   - database/schema.md
 
 🚧 진행 중: 0
-⬜ TODO: 25
+⬜ TODO: 23
 
-핵심 모듈 우선 완료 (PriceSync, Exit, Reentry) ✅
+핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
+외부 API 연동 설계 완료 (KIS, Naver) ✅
 ```
 
 ---
