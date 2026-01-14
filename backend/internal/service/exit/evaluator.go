@@ -151,14 +151,36 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 		profile = s.defaultProfile
 	}
 
-	// 6. Evaluate triggers (우선순위 순서)
+	// 6. Update HWM if in TRAILING_ACTIVE phase
+	if state.Phase == exit.PhaseTrailingActive {
+		currentPriceInt := bestPrice.BestPrice
+		if bestPrice.BidPrice != nil {
+			currentPriceInt = *bestPrice.BidPrice
+		}
+		currentPrice := decimal.NewFromInt(currentPriceInt)
+
+		// Update HWM if current price is higher
+		if state.HWMPrice == nil || currentPrice.GreaterThan(*state.HWMPrice) {
+			err = s.stateRepo.UpdateHWM(ctx, pos.PositionID, currentPrice)
+			if err != nil {
+				log.Error().Err(err).Str("symbol", pos.Symbol).Msg("Failed to update HWM")
+			} else {
+				log.Debug().
+					Str("symbol", pos.Symbol).
+					Str("hwm_price", currentPrice.String()).
+					Msg("HWM updated")
+			}
+		}
+	}
+
+	// 7. Evaluate triggers (우선순위 순서)
 	trigger := s.evaluateTriggers(snapshot, state, bestPrice, profile, controlMode)
 	if trigger == nil {
 		// No trigger hit
 		return nil
 	}
 
-	// 7. Create intent (v10 방어: Intent 생성 직전 DB 재확인)
+	// 8. Create intent (v10 방어: Intent 생성 직전 DB 재확인)
 	return s.createIntentWithVersionCheck(ctx, snapshot, trigger)
 }
 

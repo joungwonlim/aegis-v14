@@ -13,14 +13,15 @@ import (
 // Priority (high → low):
 // 1. SL2 (full stop loss) - 가장 위험
 // 2. SL1 (partial stop loss)
-// 3. TP3 (take profit 3)
-// 4. TP2 (take profit 2)
-// 5. TP1 (take profit 1)
-// 6. TRAIL (trailing stop, only in TRAILING_ACTIVE phase)
-// 7. TIME (time-based exit)
+// 3. STOP_FLOOR (본전 방어, TP1 체결 후)
+// 4. TP3 (take profit 3)
+// 5. TP2 (take profit 2)
+// 6. TP1 (take profit 1)
+// 7. TRAIL (trailing stop, only in TRAILING_ACTIVE phase)
+// 8. TIME (time-based exit)
 //
 // Control Mode Filtering:
-// - PAUSE_PROFIT: Only SL triggers (block TP/TRAIL)
+// - PAUSE_PROFIT: Only SL/STOP_FLOOR triggers (block TP/TRAIL)
 // - PAUSE_ALL: No triggers (except HardStop if configured)
 func (s *Service) evaluateTriggers(
 	snapshot PositionSnapshot,
@@ -66,35 +67,43 @@ func (s *Service) evaluateTriggers(
 		return trigger
 	}
 
+	// Priority 3: STOP_FLOOR (본전 방어, TP1 체결 후)
+	// TP1_DONE 또는 TP2_DONE phase에서만 평가
+	if state.Phase == exit.PhaseTP1Done || state.Phase == exit.PhaseTP2Done {
+		if trigger := s.evaluateStopFloor(snapshot, currentPrice, state); trigger != nil {
+			return trigger
+		}
+	}
+
 	// If PAUSE_PROFIT mode, block TP/TRAIL
 	if controlMode == exit.ControlModePauseProfit {
 		log.Debug().Str("symbol", snapshot.Symbol).Msg("PAUSE_PROFIT mode, blocking TP/TRAIL")
 		return nil
 	}
 
-	// Priority 3: TP3
+	// Priority 4: TP3
 	if trigger := s.evaluateTP3(snapshot, pnlPct, profile); trigger != nil {
 		return trigger
 	}
 
-	// Priority 4: TP2
+	// Priority 5: TP2
 	if trigger := s.evaluateTP2(snapshot, pnlPct, profile); trigger != nil {
 		return trigger
 	}
 
-	// Priority 5: TP1
+	// Priority 6: TP1
 	if trigger := s.evaluateTP1(snapshot, pnlPct, profile); trigger != nil {
 		return trigger
 	}
 
-	// Priority 6: TRAIL (only in TRAILING_ACTIVE phase)
+	// Priority 7: TRAIL (only in TRAILING_ACTIVE phase)
 	if state.Phase == exit.PhaseTrailingActive {
 		if trigger := s.evaluateTrailing(snapshot, currentPrice, state, profile); trigger != nil {
 			return trigger
 		}
 	}
 
-	// Priority 7: TIME
+	// Priority 8: TIME
 	if trigger := s.evaluateTimeStop(snapshot, profile); trigger != nil {
 		return trigger
 	}
@@ -149,6 +158,32 @@ func (s *Service) evaluateSL1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 		return &exit.ExitTrigger{
 			ReasonCode: exit.ReasonSL1,
 			Qty:        qty,
+			OrderType:  exit.OrderTypeMKT,
+		}
+	}
+
+	return nil
+}
+
+// evaluateStopFloor evaluates Stop Floor trigger (본전 방어, TP1 체결 후)
+func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState) *exit.ExitTrigger {
+	// Check if Stop Floor is set
+	if state.StopFloorPrice == nil {
+		log.Warn().Str("symbol", snapshot.Symbol).Msg("Stop Floor phase but price not set, skipping")
+		return nil
+	}
+
+	// Check if current price hit Stop Floor
+	if currentPrice.LessThanOrEqual(*state.StopFloorPrice) {
+		log.Info().
+			Str("symbol", snapshot.Symbol).
+			Str("current_price", currentPrice.String()).
+			Str("stop_floor_price", state.StopFloorPrice.String()).
+			Msg("Stop Floor trigger hit")
+
+		return &exit.ExitTrigger{
+			ReasonCode: exit.ReasonStopFloor,
+			Qty:        snapshot.Qty, // Full qty (remaining)
 			OrderType:  exit.OrderTypeMKT,
 		}
 	}
