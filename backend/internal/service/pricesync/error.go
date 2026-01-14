@@ -7,4 +7,5 @@ var (
 	ErrInvalidTier         = errors.New("invalid tier")
 	ErrTierMaxSizeExceeded = errors.New("tier max size exceeded")
 	ErrSymbolNotInTier     = errors.New("symbol not in tier")
+	ErrPriceSyncNotRunning = errors.New("price sync not running")
 )

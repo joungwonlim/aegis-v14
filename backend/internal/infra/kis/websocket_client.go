@@ -223,6 +223,23 @@ func (c *WebSocketClient) GetSubscriptionCount() int {
 	return len(c.subscriptions)
 }
 
+// CanSubscribe returns whether there's room for more subscriptions
+func (c *WebSocketClient) CanSubscribe() bool {
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
+	return len(c.subscriptions) < c.maxSubs
+}
+
+// Start starts the WebSocket client (alias for Connect)
+func (c *WebSocketClient) Start(ctx context.Context) error {
+	return c.Connect(ctx)
+}
+
+// Stop stops the WebSocket client (alias for Disconnect)
+func (c *WebSocketClient) Stop() error {
+	return c.Disconnect()
+}
+
 // handleMessages handles incoming WebSocket messages
 func (c *WebSocketClient) handleMessages() {
 	defer c.wg.Done()
