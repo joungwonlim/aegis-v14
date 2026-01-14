@@ -17,6 +17,8 @@ type Service struct {
 	stateRepo     exit.PositionStateRepository
 	controlRepo   exit.ExitControlRepository
 	intentRepo    exit.OrderIntentRepository
+	profileRepo   exit.ExitProfileRepository
+	overrideRepo  exit.SymbolExitOverrideRepository
 
 	// Dependencies
 	priceSync     *pricesync.Service
@@ -39,6 +41,8 @@ func NewService(
 	stateRepo exit.PositionStateRepository,
 	controlRepo exit.ExitControlRepository,
 	intentRepo exit.OrderIntentRepository,
+	profileRepo exit.ExitProfileRepository,
+	overrideRepo exit.SymbolExitOverrideRepository,
 	priceSync *pricesync.Service,
 	defaultProfile *exit.ExitProfile,
 ) *Service {
@@ -47,6 +51,8 @@ func NewService(
 		stateRepo:      stateRepo,
 		controlRepo:    controlRepo,
 		intentRepo:     intentRepo,
+		profileRepo:    profileRepo,
+		overrideRepo:   overrideRepo,
 		priceSync:      priceSync,
 		defaultProfile: defaultProfile,
 		isRunning:      false,
@@ -160,4 +166,29 @@ func (s *Service) UpdateControl(ctx context.Context, mode string, reason *string
 // GetPositionState retrieves the FSM state for a position
 func (s *Service) GetPositionState(ctx context.Context, positionID uuid.UUID) (*exit.PositionState, error) {
 	return s.stateRepo.GetState(ctx, positionID)
+}
+
+// GetActiveProfiles retrieves all active exit profiles
+func (s *Service) GetActiveProfiles(ctx context.Context) ([]*exit.ExitProfile, error) {
+	return s.profileRepo.GetActiveProfiles(ctx)
+}
+
+// CreateOrUpdateProfile creates or updates an exit profile
+func (s *Service) CreateOrUpdateProfile(ctx context.Context, profile *exit.ExitProfile) error {
+	return s.profileRepo.CreateOrUpdateProfile(ctx, profile)
+}
+
+// GetSymbolOverride retrieves symbol override
+func (s *Service) GetSymbolOverride(ctx context.Context, symbol string) (*exit.SymbolExitOverride, error) {
+	return s.overrideRepo.GetOverride(ctx, symbol)
+}
+
+// SetSymbolOverride sets or updates symbol override
+func (s *Service) SetSymbolOverride(ctx context.Context, override *exit.SymbolExitOverride) error {
+	return s.overrideRepo.SetOverride(ctx, override)
+}
+
+// DeleteSymbolOverride removes symbol override
+func (s *Service) DeleteSymbolOverride(ctx context.Context, symbol string) error {
+	return s.overrideRepo.DeleteOverride(ctx, symbol)
 }
