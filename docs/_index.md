@@ -107,6 +107,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | Common | `api/common.md` | ✅ 완료 | 공통 스펙 (응답 구조, 에러 코드, Pagination, CORS) |
 | Health Check | `api/health.md` | ✅ 완료 | Health Check API (liveness, readiness, detailed) |
 | Stocks | `api/stocks.md` | ✅ 완료 | 종목 조회/관리 (목록, 상세, 필터링, 검색) |
+| Prices | `api/prices.md` | ✅ 완료 | 가격 조회 (Best Price, Batch, Freshness) |
 | Signals | `api/signals.md` | ⬜ TODO | 시그널 조회 |
 | Portfolio | `api/portfolio.md` | ⬜ TODO | 포트폴리오 조회/관리 |
 | Orders | `api/orders.md` | ⬜ TODO | 주문 조회/실행 |
