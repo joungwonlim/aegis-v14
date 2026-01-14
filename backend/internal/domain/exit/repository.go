@@ -96,6 +96,9 @@ type OrderIntentRepository interface {
 
 	// UpdateIntentStatus updates intent status
 	UpdateIntentStatus(ctx context.Context, intentID uuid.UUID, status string) error
+
+	// GetRecentIntents retrieves recent intents (for monitoring)
+	GetRecentIntents(ctx context.Context, limit int) ([]*OrderIntent, error)
 }
 
 // ExitSignalRepository manages exit trigger evaluation records (debugging/backtest)

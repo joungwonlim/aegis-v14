@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
 

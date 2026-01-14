@@ -5,16 +5,15 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
-	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
 
 // FillsHandler handles fills-related API requests
 type FillsHandler struct {
-	fillRepo execution.FillRepository
+	fillRepo FillReader
 }
 
 // NewFillsHandler creates a new FillsHandler
-func NewFillsHandler(fillRepo execution.FillRepository) *FillsHandler {
+func NewFillsHandler(fillRepo FillReader) *FillsHandler {
 	return &FillsHandler{
 		fillRepo: fillRepo,
 	}

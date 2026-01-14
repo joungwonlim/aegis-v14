@@ -26,13 +26,13 @@ func (r *HoldingRepository) GetAllHoldings(ctx context.Context) ([]*execution.Ho
 		SELECT
 			account_id,
 			symbol,
-			name,
 			qty,
 			avg_price,
 			current_price,
 			pnl,
 			pnl_pct,
-			updated_ts
+			updated_ts,
+			raw
 		FROM trade.holdings
 		WHERE qty > 0
 		ORDER BY symbol ASC
@@ -50,13 +50,13 @@ func (r *HoldingRepository) GetAllHoldings(ctx context.Context) ([]*execution.Ho
 		err := rows.Scan(
 			&h.AccountID,
 			&h.Symbol,
-			&h.Name,
 			&h.Qty,
 			&h.AvgPrice,
 			&h.CurrentPrice,
 			&h.Pnl,
 			&h.PnlPct,
 			&h.UpdatedTS,
+			&h.Raw,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan holding: %w", err)
@@ -77,13 +77,13 @@ func (r *HoldingRepository) GetHolding(ctx context.Context, accountID, symbol st
 		SELECT
 			account_id,
 			symbol,
-			name,
 			qty,
 			avg_price,
 			current_price,
 			pnl,
 			pnl_pct,
-			updated_ts
+			updated_ts,
+			raw
 		FROM trade.holdings
 		WHERE account_id = $1 AND symbol = $2
 	`
@@ -92,13 +92,13 @@ func (r *HoldingRepository) GetHolding(ctx context.Context, accountID, symbol st
 	err := r.pool.QueryRow(ctx, query, accountID, symbol).Scan(
 		&h.AccountID,
 		&h.Symbol,
-		&h.Name,
 		&h.Qty,
 		&h.AvgPrice,
 		&h.CurrentPrice,
 		&h.Pnl,
 		&h.PnlPct,
 		&h.UpdatedTS,
+		&h.Raw,
 	)
 
 	if err != nil {
@@ -112,31 +112,31 @@ func (r *HoldingRepository) GetHolding(ctx context.Context, accountID, symbol st
 func (r *HoldingRepository) UpsertHolding(ctx context.Context, holding *execution.Holding) error {
 	query := `
 		INSERT INTO trade.holdings (
-			account_id, symbol, name, qty, avg_price,
-			current_price, pnl, pnl_pct, updated_ts
+			account_id, symbol, qty, avg_price,
+			current_price, pnl, pnl_pct, updated_ts, raw
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (account_id, symbol)
 		DO UPDATE SET
-			name = EXCLUDED.name,
 			qty = EXCLUDED.qty,
 			avg_price = EXCLUDED.avg_price,
 			current_price = EXCLUDED.current_price,
 			pnl = EXCLUDED.pnl,
 			pnl_pct = EXCLUDED.pnl_pct,
-			updated_ts = EXCLUDED.updated_ts
+			updated_ts = EXCLUDED.updated_ts,
+			raw = EXCLUDED.raw
 	`
 
 	_, err := r.pool.Exec(ctx, query,
 		holding.AccountID,
 		holding.Symbol,
-		holding.Name,
 		holding.Qty,
 		holding.AvgPrice,
 		holding.CurrentPrice,
 		holding.Pnl,
 		holding.PnlPct,
 		holding.UpdatedTS,
+		holding.Raw,
 	)
 
 	if err != nil {

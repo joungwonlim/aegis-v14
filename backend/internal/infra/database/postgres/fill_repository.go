@@ -24,32 +24,30 @@ func NewFillRepository(pool *pgxpool.Pool) *FillRepository {
 func (r *FillRepository) CreateFill(ctx context.Context, fill *execution.Fill) error {
 	query := `
 		INSERT INTO trade.fills (
-			exec_id,
+			fill_id,
 			order_id,
-			symbol,
+			kis_exec_id,
+			ts,
 			qty,
 			price,
 			fee,
 			tax,
-			timestamp,
-			seq,
-			raw
+			seq
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (exec_id) DO NOTHING
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (fill_id) DO NOTHING
 	`
 
 	_, err := r.pool.Exec(ctx, query,
-		fill.ExecID,
+		fill.FillID,
 		fill.OrderID,
-		fill.Symbol,
+		fill.KisExecID,
+		fill.TS,
 		fill.Qty,
 		fill.Price,
 		fill.Fee,
 		fill.Tax,
-		fill.Timestamp,
 		fill.Seq,
-		fill.Raw,
 	)
 
 	if err != nil {
@@ -63,19 +61,18 @@ func (r *FillRepository) CreateFill(ctx context.Context, fill *execution.Fill) e
 func (r *FillRepository) GetFillsByOrderID(ctx context.Context, orderID string) ([]*execution.Fill, error) {
 	query := `
 		SELECT
-			exec_id,
+			fill_id,
 			order_id,
-			symbol,
+			kis_exec_id,
+			ts,
 			qty,
 			price,
 			fee,
 			tax,
-			timestamp,
-			seq,
-			raw
+			seq
 		FROM trade.fills
 		WHERE order_id = $1
-		ORDER BY timestamp ASC, seq ASC
+		ORDER BY ts ASC, seq ASC
 	`
 
 	rows, err := r.pool.Query(ctx, query, orderID)
@@ -88,16 +85,15 @@ func (r *FillRepository) GetFillsByOrderID(ctx context.Context, orderID string) 
 	for rows.Next() {
 		fill := &execution.Fill{}
 		err := rows.Scan(
-			&fill.ExecID,
+			&fill.FillID,
 			&fill.OrderID,
-			&fill.Symbol,
+			&fill.KisExecID,
+			&fill.TS,
 			&fill.Qty,
 			&fill.Price,
 			&fill.Fee,
 			&fill.Tax,
-			&fill.Timestamp,
 			&fill.Seq,
-			&fill.Raw,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan fill: %w", err)
@@ -116,18 +112,17 @@ func (r *FillRepository) GetFillsByOrderID(ctx context.Context, orderID string) 
 func (r *FillRepository) GetRecentFills(ctx context.Context, limit int) ([]*execution.Fill, error) {
 	query := `
 		SELECT
-			exec_id,
+			fill_id,
 			order_id,
-			symbol,
+			kis_exec_id,
+			ts,
 			qty,
 			price,
 			fee,
 			tax,
-			timestamp,
-			seq,
-			raw
+			seq
 		FROM trade.fills
-		ORDER BY timestamp DESC, seq DESC
+		ORDER BY ts DESC, seq DESC
 		LIMIT $1
 	`
 
@@ -141,16 +136,15 @@ func (r *FillRepository) GetRecentFills(ctx context.Context, limit int) ([]*exec
 	for rows.Next() {
 		fill := &execution.Fill{}
 		err := rows.Scan(
-			&fill.ExecID,
+			&fill.FillID,
 			&fill.OrderID,
-			&fill.Symbol,
+			&fill.KisExecID,
+			&fill.TS,
 			&fill.Qty,
 			&fill.Price,
 			&fill.Fee,
 			&fill.Tax,
-			&fill.Timestamp,
 			&fill.Seq,
-			&fill.Raw,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan fill: %w", err)

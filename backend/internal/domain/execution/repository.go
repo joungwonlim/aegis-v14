@@ -33,6 +33,9 @@ type OrderRepository interface {
 
 	// LoadOrdersByStatus loads orders by status
 	LoadOrdersByStatus(ctx context.Context, statuses []string) ([]*Order, error)
+
+	// GetRecentOrders retrieves recent orders (for monitoring)
+	GetRecentOrders(ctx context.Context, limit int) ([]*Order, error)
 }
 
 // FillRepository manages fill persistence
@@ -54,6 +57,9 @@ type FillRepository interface {
 
 	// SaveCursor saves the sync cursor
 	SaveCursor(ctx context.Context, cursor FillCursor) error
+
+	// GetRecentFills retrieves recent fills (for monitoring)
+	GetRecentFills(ctx context.Context, limit int) ([]*Fill, error)
 }
 
 // HoldingRepository manages holding persistence
@@ -69,6 +75,9 @@ type HoldingRepository interface {
 
 	// DeleteHolding deletes a holding (qty=0 cleanup)
 	DeleteHolding(ctx context.Context, accountID, symbol string) error
+
+	// GetAllHoldings retrieves all holdings (for monitoring)
+	GetAllHoldings(ctx context.Context) ([]*Holding, error)
 }
 
 // ExitEventRepository manages exit event persistence

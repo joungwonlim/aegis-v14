@@ -5,16 +5,15 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
-	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
 
 // OrdersHandler handles orders-related API requests
 type OrdersHandler struct {
-	orderRepo execution.OrderRepository
+	orderRepo OrderReader
 }
 
 // NewOrdersHandler creates a new OrdersHandler
-func NewOrdersHandler(orderRepo execution.OrderRepository) *OrdersHandler {
+func NewOrdersHandler(orderRepo OrderReader) *OrdersHandler {
 	return &OrdersHandler{
 		orderRepo: orderRepo,
 	}

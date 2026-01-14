@@ -5,16 +5,15 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
-	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
 
 // HoldingsHandler handles holdings-related API requests
 type HoldingsHandler struct {
-	holdingRepo execution.HoldingRepository
+	holdingRepo HoldingReader
 }
 
 // NewHoldingsHandler creates a new HoldingsHandler
-func NewHoldingsHandler(holdingRepo execution.HoldingRepository) *HoldingsHandler {
+func NewHoldingsHandler(holdingRepo HoldingReader) *HoldingsHandler {
 	return &HoldingsHandler{
 		holdingRepo: holdingRepo,
 	}

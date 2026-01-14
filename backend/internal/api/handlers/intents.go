@@ -5,16 +5,15 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
-	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
 
 // IntentsHandler handles order intents-related API requests
 type IntentsHandler struct {
-	intentRepo exit.OrderIntentRepository
+	intentRepo IntentReader
 }
 
 // NewIntentsHandler creates a new IntentsHandler
-func NewIntentsHandler(intentRepo exit.OrderIntentRepository) *IntentsHandler {
+func NewIntentsHandler(intentRepo IntentReader) *IntentsHandler {
 	return &IntentsHandler{
 		intentRepo: intentRepo,
 	}

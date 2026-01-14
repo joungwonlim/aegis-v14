@@ -1,17 +1,17 @@
 // Core Runtime API Client
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8099/api'
 
 export interface Holding {
   account_id: string
   symbol: string
-  name?: string
   qty: number
   avg_price: number
-  current_price?: number
-  pnl?: number
-  pnl_pct?: number
+  current_price: number
+  pnl: number
+  pnl_pct: number
   updated_ts: string
+  raw?: any
 }
 
 export interface OrderIntent {
@@ -41,14 +41,14 @@ export interface Order {
 }
 
 export interface Fill {
-  exec_id: string
+  fill_id: string
   order_id: string
-  symbol?: string
+  kis_exec_id: string
+  ts: string
   qty: number
   price: number
   fee: number
   tax: number
-  timestamp: string
   seq: number
 }
 

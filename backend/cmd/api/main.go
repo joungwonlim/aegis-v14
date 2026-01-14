@@ -13,6 +13,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/api/handlers"
 	"github.com/wonny/aegis/v14/internal/api/router"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
+	exitrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
 )
@@ -62,7 +63,7 @@ func main() {
 
 	// Initialize repositories
 	holdingRepo := postgres.NewHoldingRepository(dbPool.Pool)
-	orderIntentRepo := postgres.NewOrderIntentRepository(dbPool.Pool)
+	orderIntentRepo := exitrepo.NewOrderIntentRepository(dbPool.Pool)
 	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 
@@ -85,7 +86,7 @@ func main() {
 	// HTTP server port
 	port := os.Getenv("API_PORT")
 	if port == "" {
-		port = "8080"
+		port = "8099"
 	}
 
 	// Create HTTP server

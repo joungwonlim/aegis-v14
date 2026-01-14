@@ -89,8 +89,8 @@ export default function RuntimeDashboard() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold">Aegis v14 Runtime</h1>
-          <p className="text-muted-foreground">Core Trading Engine Monitor</p>
+          <h1 className="text-3xl font-bold">Aegis v14 Runtime Monitor</h1>
+          <p className="text-muted-foreground">실시간 트레이딩 엔진 모니터링</p>
         </div>
         <div className="flex items-center gap-4">
           {lastUpdate && (
@@ -115,12 +115,12 @@ export default function RuntimeDashboard() {
         </Card>
       )}
 
-      {/* Holdings */}
+      {/* Portfolio - PriceSync */}
       <Card>
         <CardHeader>
-          <CardTitle>보유종목 (Holdings)</CardTitle>
+          <CardTitle>📊 Portfolio (PriceSync 되어야함)</CardTitle>
           <CardDescription>
-            현재 보유 중인 포지션 ({holdings.length}개)
+            현재 보유 포지션 및 실시간 가격 동기화 ({holdings.length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -128,7 +128,6 @@ export default function RuntimeDashboard() {
             <TableHeader>
               <TableRow>
                 <TableHead>종목코드</TableHead>
-                <TableHead>종목명</TableHead>
                 <TableHead className="text-right">수량</TableHead>
                 <TableHead className="text-right">평균단가</TableHead>
                 <TableHead className="text-right">현재가</TableHead>
@@ -140,7 +139,7 @@ export default function RuntimeDashboard() {
             <TableBody>
               {holdings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
                     보유종목이 없습니다
                   </TableCell>
                 </TableRow>
@@ -148,7 +147,6 @@ export default function RuntimeDashboard() {
                 holdings.map((holding) => (
                   <TableRow key={`${holding.account_id}-${holding.symbol}`}>
                     <TableCell className="font-mono">{holding.symbol}</TableCell>
-                    <TableCell>{holding.name || '-'}</TableCell>
                     <TableCell className="text-right">{formatNumber(holding.qty)}</TableCell>
                     <TableCell className="text-right">{formatNumber(holding.avg_price, 0)}</TableCell>
                     <TableCell className="text-right">{formatNumber(holding.current_price, 0)}</TableCell>
@@ -163,12 +161,12 @@ export default function RuntimeDashboard() {
         </CardContent>
       </Card>
 
-      {/* Order Intents */}
+      {/* Exit Engine - 청산 대상 종목 모니터링 */}
       <Card>
         <CardHeader>
-          <CardTitle>Order Intents (Exit 평가 결과)</CardTitle>
+          <CardTitle>🎯 Exit Engine - 청산 대상 종목 모니터링</CardTitle>
           <CardDescription>
-            Exit Engine이 생성한 주문 의도 ({intents.length}개)
+            Exit 규칙 평가 및 청산 주문 의도 ({intents.length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -211,12 +209,12 @@ export default function RuntimeDashboard() {
         </CardContent>
       </Card>
 
-      {/* Orders */}
+      {/* KIS Orders Execution */}
       <Card>
         <CardHeader>
-          <CardTitle>주문 (Orders)</CardTitle>
+          <CardTitle>📤 KIS Orders Execution</CardTitle>
           <CardDescription>
-            KIS에 제출된 주문 ({orders.length}개)
+            KIS에 제출된 전체 주문 내역 ({orders.length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -259,12 +257,60 @@ export default function RuntimeDashboard() {
         </CardContent>
       </Card>
 
-      {/* Fills */}
+      {/* KIS 미체결 list */}
       <Card>
         <CardHeader>
-          <CardTitle>체결 (Fills)</CardTitle>
+          <CardTitle>⏳ KIS 미체결 list</CardTitle>
           <CardDescription>
-            주문 체결 내역 ({fills.length}개)
+            미체결 또는 부분체결 주문 ({orders.filter(o => o.open_qty > 0).length}개)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>주문번호</TableHead>
+                <TableHead>종목코드</TableHead>
+                <TableHead className="text-right">주문수량</TableHead>
+                <TableHead className="text-right">미체결</TableHead>
+                <TableHead className="text-right">체결</TableHead>
+                <TableHead>상태</TableHead>
+                <TableHead>브로커상태</TableHead>
+                <TableHead>제출시각</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orders.filter(o => o.open_qty > 0).length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    미체결 주문이 없습니다
+                  </TableCell>
+                </TableRow>
+              ) : (
+                orders.filter(o => o.open_qty > 0).map((order) => (
+                  <TableRow key={order.order_id}>
+                    <TableCell className="font-mono text-sm">{order.order_id.slice(0, 8)}...</TableCell>
+                    <TableCell className="font-mono">{order.symbol || '-'}</TableCell>
+                    <TableCell className="text-right">{formatNumber(order.qty)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(order.open_qty)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(order.filled_qty)}</TableCell>
+                    <TableCell>{getStatusBadge(order.status)}</TableCell>
+                    <TableCell>{order.broker_status}</TableCell>
+                    <TableCell className="text-sm">{formatTimestamp(order.submitted_ts)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* KIS 체결 list */}
+      <Card>
+        <CardHeader>
+          <CardTitle>✅ KIS 체결 list</CardTitle>
+          <CardDescription>
+            완료된 체결 내역 ({fills.length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -273,7 +319,7 @@ export default function RuntimeDashboard() {
               <TableRow>
                 <TableHead>체결번호</TableHead>
                 <TableHead>주문번호</TableHead>
-                <TableHead>종목코드</TableHead>
+                <TableHead>KIS 체결번호</TableHead>
                 <TableHead className="text-right">수량</TableHead>
                 <TableHead className="text-right">가격</TableHead>
                 <TableHead className="text-right">수수료</TableHead>
@@ -290,15 +336,15 @@ export default function RuntimeDashboard() {
                 </TableRow>
               ) : (
                 fills.map((fill) => (
-                  <TableRow key={fill.exec_id}>
-                    <TableCell className="font-mono text-sm">{fill.exec_id.slice(0, 8)}...</TableCell>
+                  <TableRow key={fill.fill_id}>
+                    <TableCell className="font-mono text-sm">{fill.fill_id.slice(0, 8)}...</TableCell>
                     <TableCell className="font-mono text-sm">{fill.order_id.slice(0, 8)}...</TableCell>
-                    <TableCell className="font-mono">{fill.symbol || '-'}</TableCell>
+                    <TableCell className="font-mono text-sm">{fill.kis_exec_id}</TableCell>
                     <TableCell className="text-right">{formatNumber(fill.qty)}</TableCell>
                     <TableCell className="text-right">{formatNumber(fill.price, 0)}</TableCell>
                     <TableCell className="text-right">{formatNumber(fill.fee, 0)}</TableCell>
                     <TableCell className="text-right">{formatNumber(fill.tax, 0)}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(fill.timestamp)}</TableCell>
+                    <TableCell className="text-sm">{formatTimestamp(fill.ts)}</TableCell>
                   </TableRow>
                 ))
               )}
