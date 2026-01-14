@@ -214,8 +214,8 @@ v14/
 | **책임** | 포트폴리오 구성 (종목 선택, 비중 할당) |
 | **위치** | `backend/internal/strategy/portfolio/` |
 | **설계 문서** | `docs/modules/portfolio.md` |
-| **상태** | ⬜ TODO |
-| **개발 준비도** | 🔴 Blocked (설계 문서 미작성) |
+| **상태** | ✅ 설계 완료 |
+| **개발 준비도** | 🟢 Ready (Equal-Weight 할당, 비중 제약 설계 완료) |
 | **의존성** | `strategy.ranking` |
 | **제공 인터페이스** | `PortfolioService` |
 | **소유권** | Strategy Team |
@@ -280,18 +280,18 @@ v14/
 |--------|------|---------|------|--------|
 | Infrastructure | 2/3 | 0/3 | 1/3 | 67% |
 | Core Runtime | 4/4 | 0/4 | 0/4 | 100% ✅ |
-| Strategy | 3/4 | 0/4 | 1/4 | 75% |
+| Strategy | 4/4 | 0/4 | 0/4 | 100% ✅ |
 | Control | 0/2 | 0/2 | 2/2 | 0% |
 | API | 0/1 | 0/1 | 1/1 | 0% |
-| **Total** | **9/14** | **0/14** | **5/14** | **64%** |
+| **Total** | **10/14** | **0/14** | **4/14** | **71%** |
 
 ### 개발 준비도별 현황
 
 | 준비도 | 개수 | 모듈 |
 |--------|------|------|
-| 🟢 Ready | 9 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe, signals, ranking |
+| 🟢 Ready | 10 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe, signals, ranking, portfolio |
 | 🟡 Pending | 1 | cache |
-| 🔴 Blocked | 4 | portfolio, risk, monitoring, bff |
+| 🔴 Blocked | 3 | risk, monitoring, bff |
 
 ---
 
@@ -322,7 +322,7 @@ v14/
 ✅ universe (설계 완료)
 ✅ signals (설계 완료)
 ✅ ranking (설계 완료)
-⬜ portfolio
+✅ portfolio (설계 완료) ✨ Strategy Layer 100% 완료!
 ```
 
 ### Phase 5: Control Layer (P2)
