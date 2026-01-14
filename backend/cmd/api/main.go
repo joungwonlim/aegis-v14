@@ -8,16 +8,41 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/wonny/aegis/v14/internal/pkg/config"
+	"github.com/wonny/aegis/v14/internal/pkg/logger"
+)
+
+const (
+	serviceName    = "aegis-v14-api"
+	serviceVersion = "1.0.0"
 )
 
 func main() {
-	// Logger 초기화
-	zerolog.TimeFieldFormat = time.RFC3339
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load configuration")
+	}
 
-	log.Info().Msg("Starting Aegis v14 API Server...")
+	// Initialize logger
+	if err := logger.Init(logger.Config{
+		Level:          cfg.Logging.Level,
+		Format:         cfg.Logging.Format,
+		FileEnabled:    cfg.Logging.FileEnabled,
+		FilePath:       cfg.Logging.FilePath,
+		RotationSize:   cfg.Logging.RotationSize,
+		RetentionDays:  cfg.Logging.RetentionDays,
+		ServiceName:    serviceName,
+		ServiceVersion: serviceVersion,
+	}); err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize logger")
+	}
+
+	log.Info().
+		Str("version", serviceVersion).
+		Str("port", cfg.Server.Port).
+		Msg("🚀 Starting Aegis v14 API Server...")
 
 	// Context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -34,7 +59,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	<-quit
-	log.Info().Msg("Shutting down server...")
+	log.Info().Msg("📥 Shutting down server...")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer shutdownCancel()
@@ -42,7 +67,7 @@ func main() {
 	// TODO: Cleanup resources
 
 	<-shutdownCtx.Done()
-	log.Info().Msg("Server stopped")
+	log.Info().Msg("✅ Server stopped")
 }
 
 func run(ctx context.Context) error {

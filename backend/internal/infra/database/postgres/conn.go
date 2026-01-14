@@ -6,8 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/tracelog"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
+	applogger "github.com/wonny/aegis/v14/internal/pkg/logger"
 )
 
 // Pool wraps pgxpool.Pool
@@ -36,6 +39,31 @@ func NewPool(ctx context.Context, cfg *config.Config) (*Pool, error) {
 	poolConfig.MinConns = cfg.Database.MinConns
 	poolConfig.MaxConnLifetime = cfg.Database.MaxConnLifetime
 	poolConfig.MaxConnIdleTime = cfg.Database.MaxConnIdleTime
+
+	// Setup query logger (if file logging enabled)
+	if cfg.Logging.FileEnabled {
+		queryLogger := applogger.NewQueryLogger(
+			cfg.Logging.FilePath,
+			cfg.Logging.RotationSize,
+			cfg.Logging.RetentionDays,
+		)
+
+		// Add query tracer
+		poolConfig.ConnConfig.Tracer = NewQueryLogger(queryLogger)
+
+		// Add pgx logger adapter for connection-level logs
+		pgxLogger := NewPgxZerologAdapter(queryLogger)
+		logLevel := tracelog.LogLevelDebug
+		if cfg.Logging.Level == "info" {
+			logLevel = tracelog.LogLevelInfo
+		} else if cfg.Logging.Level == "warn" {
+			logLevel = tracelog.LogLevelWarn
+		}
+		poolConfig.ConnConfig.Tracer = &tracelog.TraceLog{
+			Logger:   pgxLogger,
+			LogLevel: logLevel,
+		}
+	}
 
 	// Connect
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)

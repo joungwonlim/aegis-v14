@@ -50,8 +50,12 @@ type RedisConfig struct {
 }
 
 type LoggingConfig struct {
-	Level  string
-	Format string
+	Level         string
+	Format        string
+	FileEnabled   bool
+	FilePath      string
+	RotationSize  int
+	RetentionDays int
 }
 
 type KISConfig struct {
@@ -103,8 +107,12 @@ func Load() (*Config, error) {
 			PoolTimeout:  30 * time.Second,
 		},
 		Logging: LoggingConfig{
-			Level:  getEnv("LOG_LEVEL", "debug"),
-			Format: getEnv("LOG_FORMAT", "console"),
+			Level:         getEnv("LOG_LEVEL", "debug"),
+			Format:        getEnv("LOG_FORMAT", "pretty"),
+			FileEnabled:   getBoolEnv("LOG_FILE_ENABLED", true),
+			FilePath:      getEnv("LOG_FILE_PATH", "./logs"),
+			RotationSize:  getIntEnv("LOG_ROTATION_SIZE", 100),
+			RetentionDays: getIntEnv("LOG_RETENTION_DAYS", 30),
 		},
 		KIS: KISConfig{
 			AppKey:       getEnv("KIS_APP_KEY", ""),
@@ -126,4 +134,26 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// getBoolEnv gets boolean environment variable with fallback
+func getBoolEnv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value == "true" || value == "1" || value == "yes"
+}
+
+// getIntEnv gets integer environment variable with fallback
+func getIntEnv(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	var result int
+	if _, err := fmt.Sscanf(value, "%d", &result); err != nil {
+		return fallback
+	}
+	return result
 }
