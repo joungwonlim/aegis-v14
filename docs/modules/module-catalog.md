@@ -186,8 +186,8 @@ v14/
 | **책임** | 팩터/이벤트 시그널 생성 (모멘텀, 가치, 이벤트 등) |
 | **위치** | `backend/internal/strategy/signals/` |
 | **설계 문서** | `docs/modules/signals.md` |
-| **상태** | ⬜ TODO |
-| **개발 준비도** | 🔴 Blocked (설계 문서 미작성) |
+| **상태** | ✅ 설계 완료 |
+| **개발 준비도** | 🟢 Ready (팩터 기반 평가 설계 완료) |
 | **의존성** | `strategy.universe`, `infra.database` |
 | **제공 인터페이스** | `SignalService` |
 | **소유권** | Strategy Team |
@@ -280,18 +280,18 @@ v14/
 |--------|------|---------|------|--------|
 | Infrastructure | 2/3 | 0/3 | 1/3 | 67% |
 | Core Runtime | 4/4 | 0/4 | 0/4 | 100% ✅ |
-| Strategy | 1/4 | 0/4 | 3/4 | 25% |
+| Strategy | 2/4 | 0/4 | 2/4 | 50% |
 | Control | 0/2 | 0/2 | 2/2 | 0% |
 | API | 0/1 | 0/1 | 1/1 | 0% |
-| **Total** | **7/14** | **0/14** | **7/14** | **50%** |
+| **Total** | **8/14** | **0/14** | **6/14** | **57%** |
 
 ### 개발 준비도별 현황
 
 | 준비도 | 개수 | 모듈 |
 |--------|------|------|
-| 🟢 Ready | 7 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe |
+| 🟢 Ready | 8 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe, signals |
 | 🟡 Pending | 1 | cache |
-| 🔴 Blocked | 6 | signals, ranking, portfolio, risk, monitoring, bff |
+| 🔴 Blocked | 5 | ranking, portfolio, risk, monitoring, bff |
 
 ---
 
@@ -320,7 +320,7 @@ v14/
 ### Phase 4: Strategy Layer (P2)
 ```
 ✅ universe (설계 완료)
-⬜ signals
+✅ signals (설계 완료)
 ⬜ ranking
 ⬜ portfolio
 ```
