@@ -44,6 +44,7 @@ func LoadConfigFromEnv() (*Config, error) {
 type Client struct {
 	Auth *AuthClient
 	REST *RESTClient
+	WS   *WebSocketClient
 }
 
 // NewClient creates a new KIS Client
@@ -51,9 +52,17 @@ func NewClient(config *Config) *Client {
 	auth := NewAuthClient(config.AppKey, config.AppSecret, config.BaseURL)
 	rest := NewRESTClient(auth, config.BaseURL)
 
+	// WebSocket URL from config (default if not set)
+	wsURL := os.Getenv("KIS_WEBSOCKET_URL")
+	if wsURL == "" {
+		wsURL = "ws://ops.koreainvestment.com:21000"
+	}
+	ws := NewWebSocketClient(config.AppKey, config.AppSecret, wsURL)
+
 	return &Client{
 		Auth: auth,
 		REST: rest,
+		WS:   ws,
 	}
 }
 
