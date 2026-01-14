@@ -186,3 +186,47 @@ func (s *Service) getBuiltInDefaultProfile() *reentry.ReentryProfile {
 		CreatedTS: time.Now(),
 	}
 }
+
+// ========================================
+// Public API Methods
+// ========================================
+
+// GetCandidate retrieves a candidate by ID
+func (s *Service) GetCandidate(candidateID uuid.UUID) (*reentry.ReentryCandidate, error) {
+	return s.candidateRepo.GetCandidate(s.ctx, candidateID)
+}
+
+// LoadCandidatesByState loads candidates by state
+func (s *Service) LoadCandidatesByState(states []string) ([]*reentry.ReentryCandidate, error) {
+	return s.candidateRepo.LoadCandidatesByState(s.ctx, states)
+}
+
+// LoadActiveCandidates loads all active candidates
+func (s *Service) LoadActiveCandidates() ([]*reentry.ReentryCandidate, error) {
+	return s.candidateRepo.LoadActiveCandidates(s.ctx)
+}
+
+// GetControl retrieves the singleton control
+func (s *Service) GetControl() (*reentry.ReentryControl, error) {
+	return s.controlRepo.GetControl(s.ctx)
+}
+
+// UpdateControl updates the control
+func (s *Service) UpdateControl(control *reentry.ReentryControl) error {
+	return s.controlRepo.UpdateControl(s.ctx, control)
+}
+
+// GetProfile retrieves a profile by ID
+func (s *Service) GetProfile(profileID string) (*reentry.ReentryProfile, error) {
+	return s.profileRepo.GetProfile(s.ctx, profileID)
+}
+
+// GetDefaultProfile retrieves the default profile
+func (s *Service) GetDefaultProfile() (*reentry.ReentryProfile, error) {
+	return s.profileRepo.GetDefaultProfile(s.ctx)
+}
+
+// ListProfiles lists all profiles
+func (s *Service) ListProfiles() ([]*reentry.ReentryProfile, error) {
+	return s.profileRepo.ListProfiles(s.ctx)
+}
