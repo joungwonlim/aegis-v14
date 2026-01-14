@@ -76,7 +76,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | Signals | `modules/signals.md` | ✅ 완료 | 팩터 기반 매매 신호 (Momentum, Quality, Value, Technical) |
 | Ranking | `modules/ranking.md` | ✅ 완료 | 리스크 조정 점수 산출 (Alpha + Risk, 다양성 제약) |
 | Portfolio | `modules/portfolio.md` | ✅ 완료 | 포트폴리오 구성 (Equal-Weight, 비중 제약, 리밸런싱) |
-| Risk | `modules/risk-management.md` | ⬜ TODO | 리스크 관리 |
+| Risk | `modules/risk-management.md` | ✅ 완료 | 리스크 관리 (Fail-Closed, 4-Level 한도) |
 
 ### 인프라 모듈
 
@@ -148,10 +148,10 @@ scripts/                         # 실행 스크립트 ✨ NEW
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 32/39 (Strategy Layer API 완성)
-진행률: 82%
+총 문서 수: 33/39 (Control Layer 50% 완성)
+진행률: 85%
 
-✅ 완료: 32
+✅ 완료: 33
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -180,6 +180,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - api/signals.md (Signals API, 최신/히스토리/종목별, 팩터 분석) ⭐ NEW
   - api/ranking.md (Ranking API, 리스크 조정 점수, 섹터별, 히스토리) ⭐ NEW
   - api/portfolio.md (Portfolio API, 생성/조회/활성화/비교) ⭐ NEW
+  - modules/risk-management.md (Risk Management 모듈, Fail-Closed, 4-Level 한도) ⭐ NEW
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
   - operations/database-setup.md (SSOT 기반 DB 설정, 권한 문제 Zero 보장)
   - operations/logging-strategy.md (구조화된 로깅, Request ID, 디버깅)
@@ -187,7 +188,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - scripts/db/ (DB 초기화 스크립트 6개)
 
 🚧 진행 중: 0
-⬜ TODO: 6
+⬜ TODO: 5
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅

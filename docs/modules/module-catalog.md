@@ -232,8 +232,8 @@ v14/
 | **책임** | 리스크 관리 (포지션 한도, 손실 한도, 집중도 관리) |
 | **위치** | `backend/internal/control/risk/` |
 | **설계 문서** | `docs/modules/risk-management.md` |
-| **상태** | ⬜ TODO |
-| **개발 준비도** | 🔴 Blocked (설계 문서 미작성) |
+| **상태** | ✅ 설계 완료 |
+| **개발 준비도** | 🟢 Ready (Fail-Closed 원칙, 4-Level 한도 체계 설계 완료) |
 | **의존성** | `strategy.portfolio`, `runtime.execution` |
 | **제공 인터페이스** | `RiskService` |
 | **소유권** | Control Team |
@@ -281,17 +281,17 @@ v14/
 | Infrastructure | 2/3 | 0/3 | 1/3 | 67% |
 | Core Runtime | 4/4 | 0/4 | 0/4 | 100% ✅ |
 | Strategy | 4/4 | 0/4 | 0/4 | 100% ✅ |
-| Control | 0/2 | 0/2 | 2/2 | 0% |
+| Control | 1/2 | 0/2 | 1/2 | 50% |
 | API | 0/1 | 0/1 | 1/1 | 0% |
-| **Total** | **10/14** | **0/14** | **4/14** | **71%** |
+| **Total** | **11/14** | **0/14** | **3/14** | **79%** |
 
 ### 개발 준비도별 현황
 
 | 준비도 | 개수 | 모듈 |
 |--------|------|------|
-| 🟢 Ready | 10 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe, signals, ranking, portfolio |
+| 🟢 Ready | 11 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe, signals, ranking, portfolio, risk |
 | 🟡 Pending | 1 | cache |
-| 🔴 Blocked | 3 | risk, monitoring, bff |
+| 🔴 Blocked | 2 | monitoring, bff |
 
 ---
 
