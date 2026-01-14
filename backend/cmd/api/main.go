@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/wonny/aegis/v14/internal/api"
+	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
 )
@@ -48,29 +51,55 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// TODO: Load configuration
-	// TODO: Initialize database connection
-	// TODO: Initialize Redis client
-	// TODO: Initialize services
-	// TODO: Initialize HTTP server
+	// Initialize database connection
+	dbPool, err := postgres.NewPool(ctx, cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+	defer dbPool.Close()
 
-	// Graceful shutdown
+	log.Info().Msg("✅ All dependencies initialized")
+
+	// Initialize HTTP router
+	router := api.NewRouter(cfg, dbPool, serviceVersion)
+
+	// Create HTTP server
+	addr := fmt.Sprintf(":%s", cfg.Server.Port)
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      router.Engine(),
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Info().
+			Str("address", addr).
+			Msg("🌐 HTTP server listening")
+
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Failed to start HTTP server")
+		}
+	}()
+
+	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
 	<-quit
+
 	log.Info().Msg("📥 Shutting down server...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 10*time.Second)
+	// Graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	// TODO: Cleanup resources
+	// Shutdown HTTP server
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Server forced to shutdown")
+	}
 
-	<-shutdownCtx.Done()
-	log.Info().Msg("✅ Server stopped")
-}
+	// Database connection will be closed by defer
 
-func run(ctx context.Context) error {
-	// Application logic will go here
-	return fmt.Errorf("not implemented")
+	log.Info().Msg("✅ Server stopped gracefully")
 }

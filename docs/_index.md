@@ -105,6 +105,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | 엔드포인트 | 문서 | 상태 | 설명 |
 |------------|------|------|------|
 | Common | `api/common.md` | ✅ 완료 | 공통 스펙 (응답 구조, 에러 코드, Pagination, CORS) |
+| Health Check | `api/health.md` | ✅ 완료 | Health Check API (liveness, readiness, detailed) |
 | Stocks | `api/stocks.md` | ⬜ TODO | 종목 조회/관리 |
 | Signals | `api/signals.md` | ⬜ TODO | 시그널 조회 |
 | Portfolio | `api/portfolio.md` | ⬜ TODO | 포트폴리오 조회/관리 |
@@ -145,10 +146,10 @@ scripts/                         # 실행 스크립트 ✨ NEW
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 23/37 (API 공통 스펙 추가)
-진행률: 62%
+총 문서 수: 24/38 (Health Check API 추가)
+진행률: 63%
 
-✅ 완료: 23
+✅ 완료: 24
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -166,7 +167,8 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - database/access-control.md (컬럼별 권한, DELETE 제거)
   - database/migration-stocks.md (stocks 테이블 마이그레이션 Phase 1~5, FK 제약조건)
   - database/setup-guide.md (DB 초기화 및 권한 설정, 권한 문제 방지)
-  - api/common.md (API 공통 스펙, 응답 구조, 에러 코드, Pagination) ⭐ NEW
+  - api/common.md (API 공통 스펙, 응답 구조, 에러 코드, Pagination)
+  - api/health.md (Health Check API, liveness/readiness/detailed) ⭐ NEW
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
   - operations/database-setup.md (SSOT 기반 DB 설정, 권한 문제 Zero 보장) ⭐ NEW
   - operations/logging-strategy.md (구조화된 로깅, Request ID, 디버깅) ⭐ NEW
