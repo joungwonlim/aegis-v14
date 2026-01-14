@@ -7,6 +7,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
+	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
 // Router holds all dependencies for API routing
@@ -16,6 +17,7 @@ type Router struct {
 	dbPool        *postgres.Pool
 	healthHandler *handlers.HealthHandler
 	stockHandler  *handlers.StockHandler
+	priceHandler  *handlers.PriceHandler
 }
 
 // NewRouter creates a new API router with all dependencies
@@ -28,10 +30,15 @@ func NewRouter(cfg *config.Config, dbPool *postgres.Pool, version string) *Route
 
 	// Create repositories
 	stockRepo := postgres.NewStockRepository(dbPool)
+	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
+
+	// Create services
+	priceService := pricesync.NewService(priceRepo)
 
 	// Create handlers
 	healthHandler := handlers.NewHealthHandler(dbPool, version)
 	stockHandler := handlers.NewStockHandler(stockRepo)
+	priceHandler := handlers.NewPriceHandler(priceService)
 
 	router := &Router{
 		engine:        engine,
@@ -39,6 +46,7 @@ func NewRouter(cfg *config.Config, dbPool *postgres.Pool, version string) *Route
 		dbPool:        dbPool,
 		healthHandler: healthHandler,
 		stockHandler:  stockHandler,
+		priceHandler:  priceHandler,
 	}
 
 	// Setup middlewares and routes
@@ -92,6 +100,14 @@ func (r *Router) setupRoutes() {
 		{
 			stocks.GET("", r.stockHandler.List)
 			stocks.GET("/:symbol", r.stockHandler.GetBySymbol)
+		}
+
+		// Prices API
+		prices := api.Group("/prices")
+		{
+			prices.GET("/:symbol", r.priceHandler.GetBestPrice)
+			prices.POST("/batch", r.priceHandler.BatchGetBestPrices)
+			prices.GET("/:symbol/freshness", r.priceHandler.GetFreshness)
 		}
 	}
 }
