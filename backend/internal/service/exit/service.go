@@ -146,3 +146,18 @@ func (s *Service) CreateManualIntent(ctx context.Context, positionID uuid.UUID, 
 
 	return s.intentRepo.CreateIntent(ctx, intent)
 }
+
+// GetControl retrieves the current exit control mode
+func (s *Service) GetControl(ctx context.Context) (*exit.ExitControl, error) {
+	return s.controlRepo.GetControl(ctx)
+}
+
+// UpdateControl updates the exit control mode
+func (s *Service) UpdateControl(ctx context.Context, mode string, reason *string, updatedBy string) error {
+	return s.controlRepo.UpdateControl(ctx, mode, reason, updatedBy)
+}
+
+// GetPositionState retrieves the FSM state for a position
+func (s *Service) GetPositionState(ctx context.Context, positionID uuid.UUID) (*exit.PositionState, error) {
+	return s.stateRepo.GetState(ctx, positionID)
+}
