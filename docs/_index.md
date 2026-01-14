@@ -108,8 +108,9 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | Health Check | `api/health.md` | ✅ 완료 | Health Check API (liveness, readiness, detailed) |
 | Stocks | `api/stocks.md` | ✅ 완료 | 종목 조회/관리 (목록, 상세, 필터링, 검색) |
 | Prices | `api/prices.md` | ✅ 완료 | 가격 조회 (Best Price, Batch, Freshness) |
-| Signals | `api/signals.md` | ⬜ TODO | 시그널 조회 |
-| Portfolio | `api/portfolio.md` | ⬜ TODO | 포트폴리오 조회/관리 |
+| Signals | `api/signals.md` | ✅ 완료 | 시그널 조회 (최신, 히스토리, 종목별, 스냅샷) |
+| Ranking | `api/ranking.md` | ✅ 완료 | 랭킹 조회 (리스크 조정 점수, 섹터별, 히스토리) |
+| Portfolio | `api/portfolio.md` | ✅ 완료 | 포트폴리오 생성/조회/활성화/비교 |
 | Orders | `api/orders.md` | ⬜ TODO | 주문 조회/실행 |
 | Performance | `api/performance.md` | ⬜ TODO | 성과 분석 조회 |
 
@@ -147,10 +148,10 @@ scripts/                         # 실행 스크립트 ✨ NEW
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 29/39 (Portfolio 설계 추가)
-진행률: 74%
+총 문서 수: 32/39 (Strategy Layer API 완성)
+진행률: 82%
 
-✅ 완료: 29
+✅ 완료: 32
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -174,7 +175,11 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - database/setup-guide.md (DB 초기화 및 권한 설정, 권한 문제 방지)
   - api/common.md (API 공통 스펙, 응답 구조, 에러 코드, Pagination)
   - api/health.md (Health Check API, liveness/readiness/detailed)
-  - api/stocks.md (Stocks API, 목록/상세/필터링/검색) ⭐ NEW
+  - api/stocks.md (Stocks API, 목록/상세/필터링/검색)
+  - api/prices.md (Prices API, 현재가 조회, Best Price, Batch, Freshness)
+  - api/signals.md (Signals API, 최신/히스토리/종목별, 팩터 분석) ⭐ NEW
+  - api/ranking.md (Ranking API, 리스크 조정 점수, 섹터별, 히스토리) ⭐ NEW
+  - api/portfolio.md (Portfolio API, 생성/조회/활성화/비교) ⭐ NEW
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
   - operations/database-setup.md (SSOT 기반 DB 설정, 권한 문제 Zero 보장)
   - operations/logging-strategy.md (구조화된 로깅, Request ID, 디버깅)
@@ -182,7 +187,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - scripts/db/ (DB 초기화 스크립트 6개)
 
 🚧 진행 중: 0
-⬜ TODO: 9
+⬜ TODO: 6
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
