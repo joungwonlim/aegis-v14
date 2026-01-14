@@ -104,12 +104,12 @@ scripts/                         # 실행 스크립트 ✨ NEW
 
 | 엔드포인트 | 문서 | 상태 | 설명 |
 |------------|------|------|------|
+| Common | `api/common.md` | ✅ 완료 | 공통 스펙 (응답 구조, 에러 코드, Pagination, CORS) |
 | Stocks | `api/stocks.md` | ⬜ TODO | 종목 조회/관리 |
 | Signals | `api/signals.md` | ⬜ TODO | 시그널 조회 |
 | Portfolio | `api/portfolio.md` | ⬜ TODO | 포트폴리오 조회/관리 |
 | Orders | `api/orders.md` | ⬜ TODO | 주문 조회/실행 |
 | Performance | `api/performance.md` | ⬜ TODO | 성과 분석 조회 |
-| Common | `api/common.md` | ⬜ TODO | 공통 스펙 (인증, 에러 코드 등) |
 
 ---
 
@@ -137,16 +137,18 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | 문서 | 상태 | 설명 |
 |------|------|------|
 | `operations/exit-engine-playbook.md` | ✅ 완료 | Exit Engine 운영 플레이북 (If-Then 시나리오, 긴급 대응, 모니터링) |
+| `operations/database-setup.md` | ✅ 완료 | 데이터베이스 설정 가이드 (SSOT, 권한 문제 Zero 보장, 자동 초기화) |
+| `operations/logging-strategy.md` | ✅ 완료 | 로깅 전략 (구조화된 로깅, Request ID, 파일 rotation, 디버깅 가이드) |
 
 ---
 
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 20/34 (Architecture 완성)
-진행률: 59%
+총 문서 수: 23/37 (API 공통 스펙 추가)
+진행률: 62%
 
-✅ 완료: 20
+✅ 완료: 23
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -163,10 +165,13 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - database/schema.md (22 tables, market.stocks 추가, 컬럼별 SSOT 명시)
   - database/access-control.md (컬럼별 권한, DELETE 제거)
   - database/migration-stocks.md (stocks 테이블 마이그레이션 Phase 1~5, FK 제약조건)
-  - database/setup-guide.md (DB 초기화 및 권한 설정, 권한 문제 방지) ⭐ NEW
+  - database/setup-guide.md (DB 초기화 및 권한 설정, 권한 문제 방지)
+  - api/common.md (API 공통 스펙, 응답 구조, 에러 코드, Pagination) ⭐ NEW
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
+  - operations/database-setup.md (SSOT 기반 DB 설정, 권한 문제 Zero 보장) ⭐ NEW
+  - operations/logging-strategy.md (구조화된 로깅, Request ID, 디버깅) ⭐ NEW
   - reviews/2026-01-13-ssot-review.md (SSOT 검증 아카이브)
-  - scripts/db/ (DB 초기화 스크립트 5개) ⭐ NEW
+  - scripts/db/ (DB 초기화 스크립트 5개)
 
 🚧 진행 중: 0
 ⬜ TODO: 14
