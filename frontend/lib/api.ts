@@ -11,7 +11,13 @@ export interface Holding {
   pnl: number
   pnl_pct: number
   updated_ts: string
-  raw?: any
+  raw?: {
+    symbol_name?: string
+    evaluate_amount?: string
+    purchase_amount?: string
+    evaluate_profit_loss?: string
+    evaluate_profit_loss_rate?: string
+  }
 }
 
 export interface OrderIntent {

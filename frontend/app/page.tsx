@@ -127,34 +127,46 @@ export default function RuntimeDashboard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>종목코드</TableHead>
-                <TableHead className="text-right">수량</TableHead>
-                <TableHead className="text-right">평균단가</TableHead>
-                <TableHead className="text-right">현재가</TableHead>
+                <TableHead>종목명</TableHead>
+                <TableHead className="text-right">보유수량</TableHead>
+                <TableHead className="text-right">매도가능</TableHead>
                 <TableHead className="text-right">평가손익</TableHead>
                 <TableHead className="text-right">수익률</TableHead>
+                <TableHead className="text-right">매입단가</TableHead>
+                <TableHead className="text-right">현재가</TableHead>
+                <TableHead className="text-right">평가금액</TableHead>
+                <TableHead className="text-right">매입금액</TableHead>
                 <TableHead>갱신시각</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {holdings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     보유종목이 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                holdings.map((holding) => (
-                  <TableRow key={`${holding.account_id}-${holding.symbol}`}>
-                    <TableCell className="font-mono">{holding.symbol}</TableCell>
-                    <TableCell className="text-right">{formatNumber(holding.qty)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(holding.avg_price, 0)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(holding.current_price, 0)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(holding.pnl, 0)}</TableCell>
-                    <TableCell className="text-right">{formatPercent(holding.pnl_pct)}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(holding.updated_ts)}</TableCell>
-                  </TableRow>
-                ))
+                holdings.map((holding) => {
+                  const symbolName = holding.raw?.symbol_name || holding.symbol
+                  const evaluateAmount = holding.raw?.evaluate_amount || (holding.qty * holding.current_price).toString()
+                  const purchaseAmount = holding.raw?.purchase_amount || (holding.qty * holding.avg_price).toString()
+
+                  return (
+                    <TableRow key={`${holding.account_id}-${holding.symbol}`}>
+                      <TableCell className="font-medium">{symbolName}</TableCell>
+                      <TableCell className="text-right">{formatNumber(holding.qty)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(holding.qty)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(holding.pnl, 0)}</TableCell>
+                      <TableCell className="text-right">{formatPercent(holding.pnl_pct)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(holding.avg_price, 0)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(holding.current_price, 0)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
+                      <TableCell className="text-sm">{formatTimestamp(holding.updated_ts)}</TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>

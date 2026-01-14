@@ -93,6 +93,19 @@ func main() {
 	log.Info().Msg("✅ PriceSync Manager started")
 
 	// ========================================
+	// 1.5. Initialize Holdings Sync Service
+	// ========================================
+	holdingsSync := NewHoldingsSyncService(
+		kisAdapter,
+		postgres.NewHoldingRepository(dbPool.Pool),
+		accountID,
+		30*time.Second, // Sync every 30 seconds
+	)
+
+	go holdingsSync.Start(ctx)
+	log.Info().Msg("✅ Holdings Sync Service started (interval: 30s)")
+
+	// ========================================
 	// 2. Initialize Execution Service
 	// ========================================
 	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
