@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/shopspring/decimal"
+	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
-	"aegis/internal/service/execution"
-	"aegis/internal/service/exit"
-	"aegis/internal/service/pricesync"
+	"github.com/wonny/aegis/v14/internal/service/execution"
+	exitservice "github.com/wonny/aegis/v14/internal/service/exit"
+	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
 const (
@@ -68,6 +70,15 @@ func main() {
 
 	log.Info().Msg("✅ KIS client initialized")
 
+	// Create KIS Execution Adapter
+	kisAdapter := kis.NewExecutionAdapter(kisClient)
+
+	// Get account ID from environment
+	accountID := os.Getenv("KIS_ACCOUNT_ID")
+	if accountID == "" {
+		log.Fatal().Msg("KIS_ACCOUNT_ID environment variable is required")
+	}
+
 	// ========================================
 	// 1. Initialize PriceSync Service
 	// ========================================
@@ -84,18 +95,23 @@ func main() {
 	// ========================================
 	// 2. Initialize Execution Service
 	// ========================================
-	orderIntentRepo := postgres.NewOrderIntentRepository(dbPool.Pool)
 	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 	holdingRepo := postgres.NewHoldingRepository(dbPool.Pool)
+	exitEventRepo := postgres.NewExitEventRepository(dbPool.Pool)
+	orderIntentRepo := postgres.NewOrderIntentRepository(dbPool.Pool)
+	positionRepo := postgres.NewPositionRepository(dbPool.Pool)
 
 	executionService := execution.NewService(
 		ctx,
-		kisClient,
-		orderIntentRepo,
 		orderRepo,
 		fillRepo,
 		holdingRepo,
+		exitEventRepo,
+		orderIntentRepo,
+		positionRepo,
+		kisAdapter,
+		accountID,
 	)
 
 	// Bootstrap execution service (sync holdings, orders, fills from KIS)
@@ -107,7 +123,7 @@ func main() {
 
 	// Start execution service loops
 	go func() {
-		if err := executionService.Start(ctx); err != nil {
+		if err := executionService.Start(); err != nil {
 			log.Error().Err(err).Msg("Execution Service failed")
 		}
 	}()
@@ -117,21 +133,89 @@ func main() {
 	// ========================================
 	// 3. Initialize Exit Engine
 	// ========================================
-	positionRepo := postgres.NewPositionRepository(dbPool.Pool)
 	positionStateRepo := postgres.NewPositionStateRepository(dbPool.Pool)
 	exitProfileRepo := postgres.NewExitProfileRepository(dbPool.Pool)
 	exitControlRepo := postgres.NewExitControlRepository(dbPool.Pool)
 	symbolOverrideRepo := postgres.NewSymbolExitOverrideRepository(dbPool.Pool)
 
-	exitService := exit.NewService(
-		ctx,
-		priceService,
-		orderIntentRepo,
+	// Create default exit profile
+	defaultProfile := &exit.ExitProfile{
+		ProfileID:   "default",
+		Name:        "Default Exit Profile",
+		Description: "Default exit rules for all positions",
+		Config: exit.ExitProfileConfig{
+			ATR: exit.ATRConfig{
+				Enabled: false,
+				Period:  14,
+			},
+			SL1: exit.TriggerConfig{
+				Enabled:       true,
+				ThresholdPct:  decimal.NewFromFloat(-3.0),
+				ExitPct:       decimal.NewFromFloat(0.5),
+				UseATRStop:    false,
+				OrderType:     "MKT",
+			},
+			SL2: exit.TriggerConfig{
+				Enabled:       true,
+				ThresholdPct:  decimal.NewFromFloat(-5.0),
+				ExitPct:       decimal.NewFromFloat(1.0),
+				UseATRStop:    false,
+				OrderType:     "MKT",
+			},
+			TP1: exit.TriggerConfig{
+				Enabled:       true,
+				ThresholdPct:  decimal.NewFromFloat(5.0),
+				ExitPct:       decimal.NewFromFloat(0.3),
+				UseATRStop:    false,
+				OrderType:     "LMT",
+			},
+			TP2: exit.TriggerConfig{
+				Enabled:       true,
+				ThresholdPct:  decimal.NewFromFloat(10.0),
+				ExitPct:       decimal.NewFromFloat(0.5),
+				UseATRStop:    false,
+				OrderType:     "LMT",
+			},
+			TP3: exit.TriggerConfig{
+				Enabled:       false,
+				ThresholdPct:  decimal.NewFromFloat(15.0),
+				ExitPct:       decimal.NewFromFloat(0.2),
+				UseATRStop:    false,
+				OrderType:     "LMT",
+			},
+			Trailing: exit.TrailingConfig{
+				Enabled:           true,
+				ActivationPct:     decimal.NewFromFloat(3.0),
+				TrailingPct:       decimal.NewFromFloat(1.5),
+				UseATRTrail:       false,
+				UsePartialExit:    true,
+				PartialExitPct:    decimal.NewFromFloat(0.5),
+				PartialActivation: decimal.NewFromFloat(5.0),
+			},
+			TimeStop: exit.TimeStopConfig{
+				Enabled:        false,
+				MaxHoldMinutes: 240,
+				ExitPct:        decimal.NewFromFloat(1.0),
+			},
+			HardStop: exit.HardStopConfig{
+				Enabled:      true,
+				ThresholdPct: decimal.NewFromFloat(-7.0),
+			},
+		},
+		IsActive:  true,
+		CreatedBy: "system",
+		CreatedTS: time.Now(),
+	}
+
+	exitService := exitservice.NewService(
 		positionRepo,
 		positionStateRepo,
-		exitProfileRepo,
 		exitControlRepo,
+		orderIntentRepo,
+		exitProfileRepo,
 		symbolOverrideRepo,
+		priceService,
+		defaultProfile,
 	)
 
 	// Start exit engine loop
