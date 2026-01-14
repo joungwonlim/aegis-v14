@@ -57,7 +57,7 @@ func ValidateSymbol(symbol string) bool {
 
 // ValidateMarket validates market value
 func ValidateMarket(market string) bool {
-	return market == "KOSPI" || market == "KOSDAQ" || market == "KONEX"
+	return market == "KOSPI" || market == "KOSDAQ" || market == "KONEX" || market == "ETF"
 }
 
 // ValidateStatus validates status value

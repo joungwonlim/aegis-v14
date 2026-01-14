@@ -30,7 +30,7 @@
 |----------|------|------|--------|------|
 | page | integer | N | 1 | 페이지 번호 (1부터 시작) |
 | limit | integer | N | 20 | 페이지 크기 (최소: 1, 최대: 100) |
-| market | string | N | - | 시장 필터 (KOSPI, KOSDAQ, KONEX) |
+| market | string | N | - | 시장 필터 (KOSPI, KOSDAQ, KONEX, ETF) |
 | status | string | N | ACTIVE | 상태 필터 (ACTIVE, SUSPENDED, DELISTED, ALL) |
 | is_tradable | boolean | N | - | 거래 가능 여부 필터 (true, false) |
 | search | string | N | - | 종목명 또는 코드 검색 (부분 일치) |
@@ -103,7 +103,7 @@ GET /api/stocks?market=KOSPI&status=ACTIVE&is_tradable=true&page=1&limit=20
   "error": {
     "code": "INVALID_PARAMETER",
     "message": "Invalid market value",
-    "details": "market must be one of: KOSPI, KOSDAQ, KONEX",
+    "details": "market must be one of: KOSPI, KOSDAQ, KONEX, ETF",
     "request_id": "550e8400-e29b-41d4-a716-446655440000",
     "timestamp": "2026-01-14T12:00:00Z"
   }
