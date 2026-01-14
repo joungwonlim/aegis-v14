@@ -9,6 +9,70 @@ import (
 	"github.com/wonny/aegis/v14/internal/domain/price"
 )
 
+// scaleTriggerPct scales trigger percentage based on ATR
+// Returns scaled percentage clamped between min and max
+// If minPct or maxPct is 0, no clamping is applied for that bound
+//
+// For SL (negative): MinPct is tighter (closer to 0), MaxPct is wider (further from 0)
+//   Example: MinPct=-3%, MaxPct=-8%, means -8% <= threshold <= -3%
+// For TP (positive): MinPct is tighter (closer to 0), MaxPct is wider (further from 0)
+//   Example: MinPct=+5%, MaxPct=+10%, means +5% <= threshold <= +10%
+func scaleTriggerPct(basePct, minPct, maxPct float64, atrFactor float64) float64 {
+	scaledPct := basePct * atrFactor
+
+	if basePct < 0 {
+		// SL (negative values): MinPct > MaxPct (e.g., -3% > -8%)
+		// Clamp to tighter stop (closer to 0)
+		if minPct != 0 && scaledPct > minPct {
+			return minPct
+		}
+		// Clamp to wider stop (further from 0)
+		if maxPct != 0 && scaledPct < maxPct {
+			return maxPct
+		}
+	} else {
+		// TP (positive values): MinPct < MaxPct (e.g., 5% < 10%)
+		// Clamp to tighter target (closer to 0)
+		if minPct != 0 && scaledPct < minPct {
+			return minPct
+		}
+		// Clamp to wider target (further from 0)
+		if maxPct != 0 && scaledPct > maxPct {
+			return maxPct
+		}
+	}
+
+	return scaledPct
+}
+
+// calculateATRFactor calculates ATR scaling factor
+// Returns factor clamped between factorMin and factorMax
+func calculateATRFactor(currentATR *decimal.Decimal, atrConfig exit.ATRConfig) float64 {
+	// If ATR not available, use factor 1.0 (no scaling)
+	if currentATR == nil || currentATR.IsZero() {
+		return 1.0
+	}
+
+	// If ATR Ref is 0, no scaling
+	if atrConfig.Ref == 0 {
+		return 1.0
+	}
+
+	// Calculate factor: current_atr / atr_ref
+	currentATRFloat, _ := currentATR.Float64()
+	factor := currentATRFloat / atrConfig.Ref
+
+	// Clamp to [factorMin, factorMax]
+	if factor < atrConfig.FactorMin {
+		return atrConfig.FactorMin
+	}
+	if factor > atrConfig.FactorMax {
+		return atrConfig.FactorMax
+	}
+
+	return factor
+}
+
 // evaluateTriggers evaluates all exit triggers in priority order
 // Returns the highest priority trigger that is hit, or nil if none
 //
@@ -32,6 +96,19 @@ func (s *Service) evaluateTriggers(
 	profile *exit.ExitProfile,
 	controlMode string,
 ) *exit.ExitTrigger {
+	// Calculate ATR factor for dynamic scaling
+	atrFactor := calculateATRFactor(state.ATR, profile.Config.ATR)
+
+	log.Debug().
+		Str("symbol", snapshot.Symbol).
+		Str("atr", func() string {
+			if state.ATR != nil {
+				return state.ATR.String()
+			}
+			return "nil"
+		}()).
+		Float64("atr_factor", atrFactor).
+		Msg("ATR factor calculated")
 	// Calculate P&L
 	// Use BidPrice for exit (conservative), fallback to BestPrice
 	var currentPriceInt int64
@@ -60,12 +137,12 @@ func (s *Service) evaluateTriggers(
 	}
 
 	// Priority 1: SL2 (Hard Stop Loss - full)
-	if trigger := s.evaluateSL2(snapshot, pnlPct, profile); trigger != nil {
+	if trigger := s.evaluateSL2(snapshot, pnlPct, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
 	// Priority 2: SL1 (Partial Stop Loss)
-	if trigger := s.evaluateSL1(snapshot, pnlPct, profile); trigger != nil {
+	if trigger := s.evaluateSL1(snapshot, pnlPct, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
@@ -84,17 +161,17 @@ func (s *Service) evaluateTriggers(
 	}
 
 	// Priority 4: TP3
-	if trigger := s.evaluateTP3(snapshot, pnlPct, profile); trigger != nil {
+	if trigger := s.evaluateTP3(snapshot, pnlPct, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
 	// Priority 5: TP2
-	if trigger := s.evaluateTP2(snapshot, pnlPct, profile); trigger != nil {
+	if trigger := s.evaluateTP2(snapshot, pnlPct, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
 	// Priority 6: TP1
-	if trigger := s.evaluateTP1(snapshot, pnlPct, profile); trigger != nil {
+	if trigger := s.evaluateTP1(snapshot, pnlPct, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
@@ -114,17 +191,23 @@ func (s *Service) evaluateTriggers(
 	return nil
 }
 
-// evaluateSL2 evaluates SL2 (full stop loss) trigger
-func (s *Service) evaluateSL2(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
-	// Calculate scaled threshold (ATR-based)
-	// For now, use base threshold
-	threshold := decimal.NewFromFloat(profile.Config.SL2.BasePct * 100) // Convert to %
+// evaluateSL2 evaluates SL2 (full stop loss) trigger with ATR scaling
+func (s *Service) evaluateSL2(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+	// Calculate ATR-scaled threshold
+	scaledPct := scaleTriggerPct(
+		profile.Config.SL2.BasePct,
+		profile.Config.SL2.MinPct,
+		profile.Config.SL2.MaxPct,
+		atrFactor,
+	)
+	threshold := decimal.NewFromFloat(scaledPct * 100) // Convert to %
 
 	if pnlPct.LessThanOrEqual(threshold) {
 		log.Info().
 			Str("symbol", snapshot.Symbol).
 			Str("pnl_pct", pnlPct.StringFixed(2)).
 			Str("threshold", threshold.StringFixed(2)).
+			Float64("atr_factor", atrFactor).
 			Msg("SL2 trigger hit")
 
 		return &exit.ExitTrigger{
@@ -137,10 +220,16 @@ func (s *Service) evaluateSL2(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 	return nil
 }
 
-// evaluateSL1 evaluates SL1 (partial stop loss) trigger
-func (s *Service) evaluateSL1(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
-	// Calculate scaled threshold
-	threshold := decimal.NewFromFloat(profile.Config.SL1.BasePct * 100) // Convert to %
+// evaluateSL1 evaluates SL1 (partial stop loss) trigger with ATR scaling
+func (s *Service) evaluateSL1(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+	// Calculate ATR-scaled threshold
+	scaledPct := scaleTriggerPct(
+		profile.Config.SL1.BasePct,
+		profile.Config.SL1.MinPct,
+		profile.Config.SL1.MaxPct,
+		atrFactor,
+	)
+	threshold := decimal.NewFromFloat(scaledPct * 100) // Convert to %
 
 	if pnlPct.LessThanOrEqual(threshold) {
 		// Partial exit
@@ -154,6 +243,7 @@ func (s *Service) evaluateSL1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			Str("symbol", snapshot.Symbol).
 			Str("pnl_pct", pnlPct.StringFixed(2)).
 			Str("threshold", threshold.StringFixed(2)).
+			Float64("atr_factor", atrFactor).
 			Int64("qty", qty).
 			Msg("SL1 trigger hit")
 
@@ -193,10 +283,16 @@ func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice deci
 	return nil
 }
 
-// evaluateTP1 evaluates TP1 (take profit 1) trigger
-func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
-	// Calculate scaled threshold
-	threshold := decimal.NewFromFloat(profile.Config.TP1.BasePct * 100) // Convert to %
+// evaluateTP1 evaluates TP1 (take profit 1) trigger with ATR scaling
+func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+	// Calculate ATR-scaled threshold
+	scaledPct := scaleTriggerPct(
+		profile.Config.TP1.BasePct,
+		profile.Config.TP1.MinPct,
+		profile.Config.TP1.MaxPct,
+		atrFactor,
+	)
+	threshold := decimal.NewFromFloat(scaledPct * 100) // Convert to %
 
 	if pnlPct.GreaterThanOrEqual(threshold) {
 		// Partial exit
@@ -210,6 +306,7 @@ func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			Str("symbol", snapshot.Symbol).
 			Str("pnl_pct", pnlPct.StringFixed(2)).
 			Str("threshold", threshold.StringFixed(2)).
+			Float64("atr_factor", atrFactor).
 			Int64("qty", qty).
 			Msg("TP1 trigger hit")
 
@@ -224,10 +321,16 @@ func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 	return nil
 }
 
-// evaluateTP2 evaluates TP2 (take profit 2) trigger
-func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
-	// Calculate scaled threshold
-	threshold := decimal.NewFromFloat(profile.Config.TP2.BasePct * 100) // Convert to %
+// evaluateTP2 evaluates TP2 (take profit 2) trigger with ATR scaling
+func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+	// Calculate ATR-scaled threshold
+	scaledPct := scaleTriggerPct(
+		profile.Config.TP2.BasePct,
+		profile.Config.TP2.MinPct,
+		profile.Config.TP2.MaxPct,
+		atrFactor,
+	)
+	threshold := decimal.NewFromFloat(scaledPct * 100) // Convert to %
 
 	if pnlPct.GreaterThanOrEqual(threshold) {
 		// Partial exit
@@ -241,6 +344,7 @@ func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			Str("symbol", snapshot.Symbol).
 			Str("pnl_pct", pnlPct.StringFixed(2)).
 			Str("threshold", threshold.StringFixed(2)).
+			Float64("atr_factor", atrFactor).
 			Int64("qty", qty).
 			Msg("TP2 trigger hit")
 
@@ -255,10 +359,16 @@ func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 	return nil
 }
 
-// evaluateTP3 evaluates TP3 (take profit 3) trigger
-func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
-	// Calculate scaled threshold
-	threshold := decimal.NewFromFloat(profile.Config.TP3.BasePct * 100) // Convert to %
+// evaluateTP3 evaluates TP3 (take profit 3) trigger with ATR scaling
+func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+	// Calculate ATR-scaled threshold
+	scaledPct := scaleTriggerPct(
+		profile.Config.TP3.BasePct,
+		profile.Config.TP3.MinPct,
+		profile.Config.TP3.MaxPct,
+		atrFactor,
+	)
+	threshold := decimal.NewFromFloat(scaledPct * 100) // Convert to %
 
 	if pnlPct.GreaterThanOrEqual(threshold) {
 		// Partial exit
@@ -272,6 +382,7 @@ func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			Str("symbol", snapshot.Symbol).
 			Str("pnl_pct", pnlPct.StringFixed(2)).
 			Str("threshold", threshold.StringFixed(2)).
+			Float64("atr_factor", atrFactor).
 			Int64("qty", qty).
 			Msg("TP3 trigger hit")
 

@@ -36,7 +36,7 @@ func TestEvaluateSL2(t *testing.T) {
 	t.Run("SL2 hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(-5.5) // -5.5%
 
-		trigger := svc.evaluateSL2(snapshot, pnlPct, profile)
+		trigger := svc.evaluateSL2(snapshot, pnlPct, profile, 1.0)
 
 		if trigger == nil {
 			t.Fatal("Expected SL2 trigger, got nil")
@@ -55,7 +55,7 @@ func TestEvaluateSL2(t *testing.T) {
 	t.Run("SL2 not hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(-4.0) // -4% (above SL2)
 
-		trigger := svc.evaluateSL2(snapshot, pnlPct, profile)
+		trigger := svc.evaluateSL2(snapshot, pnlPct, profile, 1.0)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -88,7 +88,7 @@ func TestEvaluateSL1(t *testing.T) {
 	t.Run("SL1 hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(-3.5) // -3.5%
 
-		trigger := svc.evaluateSL1(snapshot, pnlPct, profile)
+		trigger := svc.evaluateSL1(snapshot, pnlPct, profile, 1.0)
 
 		if trigger == nil {
 			t.Fatal("Expected SL1 trigger, got nil")
@@ -107,7 +107,7 @@ func TestEvaluateSL1(t *testing.T) {
 	t.Run("SL1 not hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(-2.0) // -2% (above SL1)
 
-		trigger := svc.evaluateSL1(snapshot, pnlPct, profile)
+		trigger := svc.evaluateSL1(snapshot, pnlPct, profile, 1.0)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -127,7 +127,7 @@ func TestEvaluateSL1(t *testing.T) {
 
 		pnlPct := decimal.NewFromFloat(-3.5) // -3.5%
 
-		trigger := svc.evaluateSL1(smallSnapshot, pnlPct, profile)
+		trigger := svc.evaluateSL1(smallSnapshot, pnlPct, profile, 1.0)
 
 		if trigger == nil {
 			t.Fatal("Expected SL1 trigger, got nil")
@@ -163,7 +163,7 @@ func TestEvaluateTP1(t *testing.T) {
 	t.Run("TP1 hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(7.5) // +7.5%
 
-		trigger := svc.evaluateTP1(snapshot, pnlPct, profile)
+		trigger := svc.evaluateTP1(snapshot, pnlPct, profile, 1.0)
 
 		if trigger == nil {
 			t.Fatal("Expected TP1 trigger, got nil")
@@ -182,7 +182,7 @@ func TestEvaluateTP1(t *testing.T) {
 	t.Run("TP1 not hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(5.0) // +5% (below TP1)
 
-		trigger := svc.evaluateTP1(snapshot, pnlPct, profile)
+		trigger := svc.evaluateTP1(snapshot, pnlPct, profile, 1.0)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -215,7 +215,7 @@ func TestEvaluateTP2(t *testing.T) {
 	t.Run("TP2 hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(10.5) // +10.5%
 
-		trigger := svc.evaluateTP2(snapshot, pnlPct, profile)
+		trigger := svc.evaluateTP2(snapshot, pnlPct, profile, 1.0)
 
 		if trigger == nil {
 			t.Fatal("Expected TP2 trigger, got nil")
@@ -234,7 +234,7 @@ func TestEvaluateTP2(t *testing.T) {
 	t.Run("TP2 not hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(8.0) // +8% (below TP2)
 
-		trigger := svc.evaluateTP2(snapshot, pnlPct, profile)
+		trigger := svc.evaluateTP2(snapshot, pnlPct, profile, 1.0)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -267,7 +267,7 @@ func TestEvaluateTP3(t *testing.T) {
 	t.Run("TP3 hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(17.0) // +17%
 
-		trigger := svc.evaluateTP3(snapshot, pnlPct, profile)
+		trigger := svc.evaluateTP3(snapshot, pnlPct, profile, 1.0)
 
 		if trigger == nil {
 			t.Fatal("Expected TP3 trigger, got nil")
@@ -286,7 +286,7 @@ func TestEvaluateTP3(t *testing.T) {
 	t.Run("TP3 not hit", func(t *testing.T) {
 		pnlPct := decimal.NewFromFloat(12.0) // +12% (below TP3)
 
-		trigger := svc.evaluateTP3(snapshot, pnlPct, profile)
+		trigger := svc.evaluateTP3(snapshot, pnlPct, profile, 1.0)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -515,6 +515,127 @@ func TestTriggerPriority(t *testing.T) {
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger (PAUSE_ALL), got %+v", trigger)
+		}
+	})
+}
+
+// TestATRScaling tests ATR dynamic scaling
+func TestATRScaling(t *testing.T) {
+	svc := &Service{}
+
+	snapshot := PositionSnapshot{
+		PositionID: uuid.New(),
+		Symbol:     "005930",
+		Qty:        100,
+		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour),
+		Version:    1,
+	}
+
+	profile := &exit.ExitProfile{
+		Config: exit.ExitProfileConfig{
+			SL2: exit.TriggerConfig{
+				BasePct: -0.05, // -5%
+				MinPct:  -0.03, // -3% (min loss, tighter stop)
+				MaxPct:  -0.08, // -8% (max loss, wider stop)
+				QtyPct:  1.00,
+			},
+			TP1: exit.TriggerConfig{
+				BasePct: 0.07, // +7%
+				MinPct:  0.05, // +5% (min gain, tighter target)
+				MaxPct:  0.10, // +10% (max gain, wider target)
+				QtyPct:  0.25,
+			},
+		},
+	}
+
+	t.Run("ATR factor 1.0 (normal volatility)", func(t *testing.T) {
+		// ATR factor = 1.0 (no scaling)
+		// SL2 threshold = -5% * 1.0 = -5%
+		pnlPct := decimal.NewFromFloat(-5.1) // -5.1% (trigger)
+
+		trigger := svc.evaluateSL2(snapshot, pnlPct, profile, 1.0)
+
+		if trigger == nil {
+			t.Fatal("Expected SL2 trigger, got nil")
+		}
+		if trigger.ReasonCode != exit.ReasonSL2 {
+			t.Errorf("Expected ReasonSL2, got %s", trigger.ReasonCode)
+		}
+	})
+
+	t.Run("ATR factor 1.5 (high volatility - wider stop)", func(t *testing.T) {
+		// ATR factor = 1.5 (high volatility)
+		// SL2 threshold = -5% * 1.5 = -7.5%
+		pnlPct := decimal.NewFromFloat(-6.0) // -6% (no trigger, wider stop)
+
+		trigger := svc.evaluateSL2(snapshot, pnlPct, profile, 1.5)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger (wider stop due to high volatility), got %+v", trigger)
+		}
+
+		// But -7.6% should trigger
+		pnlPct = decimal.NewFromFloat(-7.6)
+		trigger = svc.evaluateSL2(snapshot, pnlPct, profile, 1.5)
+
+		if trigger == nil {
+			t.Fatal("Expected SL2 trigger at -7.6%, got nil")
+		}
+	})
+
+	t.Run("ATR factor 0.7 (low volatility - tighter stop)", func(t *testing.T) {
+		// ATR factor = 0.7 (low volatility)
+		// SL2 threshold = -5% * 0.7 = -3.5%
+		// -3.5% is within bounds (MinPct=-3%, MaxPct=-8%), no clamping
+		// -3.6% triggers (less than or equal to -3.5%)
+		pnlPct := decimal.NewFromFloat(-3.6) // -3.6% (trigger)
+
+		trigger := svc.evaluateSL2(snapshot, pnlPct, profile, 0.7)
+
+		if trigger == nil {
+			t.Fatal("Expected SL2 trigger, got nil")
+		}
+
+		// But -3.4% should not trigger (greater than -3.5%)
+		pnlPct = decimal.NewFromFloat(-3.4)
+		trigger = svc.evaluateSL2(snapshot, pnlPct, profile, 0.7)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger at -3.4%% (not enough loss), got %+v", trigger)
+		}
+	})
+
+	t.Run("TP1 with high volatility (wider target)", func(t *testing.T) {
+		// ATR factor = 1.4 (high volatility)
+		// TP1 threshold = +7% * 1.4 = +9.8%
+		pnlPct := decimal.NewFromFloat(8.0) // +8% (no trigger, wider target)
+
+		trigger := svc.evaluateTP1(snapshot, pnlPct, profile, 1.4)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger (wider target due to high volatility), got %+v", trigger)
+		}
+
+		// But +10% should trigger
+		pnlPct = decimal.NewFromFloat(10.0)
+		trigger = svc.evaluateTP1(snapshot, pnlPct, profile, 1.4)
+
+		if trigger == nil {
+			t.Fatal("Expected TP1 trigger at +10%, got nil")
+		}
+	})
+
+	t.Run("TP1 clamped to MaxPct", func(t *testing.T) {
+		// ATR factor = 2.0 (extremely high volatility)
+		// TP1 threshold = +7% * 2.0 = +14%
+		// But clamped to MaxPct = +10%
+		pnlPct := decimal.NewFromFloat(10.1) // +10.1% (trigger at max bound)
+
+		trigger := svc.evaluateTP1(snapshot, pnlPct, profile, 2.0)
+
+		if trigger == nil {
+			t.Fatal("Expected TP1 trigger (clamped to MaxPct), got nil")
 		}
 	})
 }
