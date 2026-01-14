@@ -2,7 +2,7 @@
 
 > 모든 설계 문서는 이곳에 등록되어야 합니다.
 
-**Last Updated**: 2026-01-13
+**Last Updated**: 2026-01-14
 
 ---
 
@@ -14,15 +14,26 @@ docs/
 ├── architecture/                # 시스템 아키텍처 설계
 │   ├── system-overview.md       # 전체 시스템 개요
 │   ├── pick-to-execution-pipeline.md
-│   └── architecture-improvements.md  # 성능/안정성 개선안
+│   ├── architecture-improvements.md  # 성능/안정성 개선안
+│   └── module-dependencies.md   # 모듈 의존성 맵 ✨ NEW
 ├── modules/                     # 모듈별 설계
+│   └── module-catalog.md        # 모듈 카탈로그 (독립 작업 체계) ✨ NEW
 ├── database/                    # 데이터베이스 설계
+│   └── setup-guide.md           # DB 초기화 및 권한 설정 가이드 ✨ NEW
 ├── api/                         # API 설계
 ├── ui/                          # UI 설계
 ├── operations/                  # 운영 가이드
 │   └── exit-engine-playbook.md  # Exit Engine 운영 플레이북
 └── reviews/                     # 설계 검토 기록 (아카이브)
     └── 2026-01-13-ssot-review.md
+
+scripts/                         # 실행 스크립트 ✨ NEW
+└── db/                          # DB 초기화 스크립트
+    ├── 01_create_database.sql
+    ├── 02_create_schemas.sql
+    ├── 03_check_permissions.sql
+    ├── 04_fix_permissions.sql
+    └── 99_reset_all.sql
 ```
 
 ---
@@ -34,6 +45,7 @@ docs/
 | `architecture/system-overview.md` | ✅ 완료 | 전체 시스템 개요 (SSOT, 모듈 독립성, 멱등성) |
 | `architecture/pick-to-execution-pipeline.md` | ✅ 완료 | 다중 선정 모듈 → 단일 실행 시스템 파이프라인 |
 | `architecture/architecture-improvements.md` | ✅ 완료 | 성능 및 안정성 개선안 (P0~P2 우선순위, Redis 읽기 가속 - SSOT 원칙 준수) |
+| `architecture/module-dependencies.md` | ✅ 완료 | 모듈 의존성 맵 (레이어 구조, 의존성 방향, 순환 참조 방지) |
 | `architecture/data-flow.md` | ⬜ TODO | 데이터 흐름 다이어그램 |
 | `architecture/layer-design.md` | ⬜ TODO | 레이어 구조 설계 |
 | `architecture/tech-stack.md` | ⬜ TODO | 기술 스택 선정 및 근거 |
@@ -41,6 +53,11 @@ docs/
 ---
 
 ## 🧩 Modules (모듈 설계)
+
+| 문서 | 상태 | 설명 |
+|------|------|------|
+| `modules/module-catalog.md` | ✅ 완료 | 모듈 카탈로그 (독립 작업 체계, 14개 모듈 등록, 개발 준비도 추적) |
+| `modules/development-guide.md` | ⬜ TODO | 모듈별 개발 가이드 (독립 개발 환경, Mock/Stub 전략) |
 
 ### 핵심 모듈 (Quant Runtime)
 
@@ -77,6 +94,7 @@ docs/
 | `database/schema.md` | ✅ 완료 | 전체 테이블 스키마 정의 (market, trade, system schema, **stocks 추가**) |
 | `database/access-control.md` | ✅ 완료 | PostgreSQL RBAC 설계 (role 기반 접근 제어) |
 | `database/migration-stocks.md` | ✅ 완료 | market.stocks 테이블 마이그레이션 계획 (Phase 1~5, FK 제약조건) |
+| `database/setup-guide.md` | ✅ 완료 | DB 초기화 및 권한 설정 가이드 (권한 문제 방지, 트러블슈팅) |
 | `database/erd.md` | ⬜ TODO | ERD 상세 (schema.md에 포함되어 있음) |
 | `database/indexes.md` | ⬜ TODO | 인덱스 최적화 전략 (schema.md에 일부 포함) |
 
@@ -125,13 +143,15 @@ docs/
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 13/31 (계획 변경: Quant Runtime + Pick Pipeline + Operations)
-진행률: 42%
+총 문서 수: 17/34 (모듈 독립 작업 체계 추가)
+진행률: 50%
 
-✅ 완료: 13
+✅ 완료: 17
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
+  - architecture/module-dependencies.md (모듈 의존성 맵, 레이어 구조) ⭐ NEW
+  - modules/module-catalog.md (모듈 카탈로그, 14개 모듈 등록) ⭐ NEW
   - modules/price-sync.md
   - modules/exit-engine.md (Control Gate + Profile System, SSOT 강화, v10 사고 사례)
   - modules/reentry-engine.md (ExitEvent 기반 디커플링)
@@ -140,11 +160,13 @@ docs/
   - database/schema.md (22 tables, market.stocks 추가, 컬럼별 SSOT 명시)
   - database/access-control.md (컬럼별 권한, DELETE 제거)
   - database/migration-stocks.md (stocks 테이블 마이그레이션 Phase 1~5, FK 제약조건)
+  - database/setup-guide.md (DB 초기화 및 권한 설정, 권한 문제 방지) ⭐ NEW
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
   - reviews/2026-01-13-ssot-review.md (SSOT 검증 아카이브)
+  - scripts/db/ (DB 초기화 스크립트 5개) ⭐ NEW
 
 🚧 진행 중: 0
-⬜ TODO: 18
+⬜ TODO: 17
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
@@ -158,6 +180,7 @@ Exit 표준 룰 완료 (Hybrid % + ATR, 프로파일 3종, HardStop) ✅
 SSOT 검증 및 수정 완료 (문서 간 불일치 5건 해결) ✅
 아키텍처 개선안 작성 완료 (P0~P2 우선순위별 6건) ✅
 Exit Engine 운영 플레이북 작성 완료 (If-Then, 긴급 대응, 조정 우선순위) ✅
+모듈 독립 작업 체계 완료 (모듈 카탈로그, 의존성 맵, DB 권한 문제 해결) ✅
 ```
 
 ---
