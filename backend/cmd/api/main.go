@@ -10,12 +10,11 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"github.com/wonny/aegis/v14/internal/api"
+	"github.com/wonny/aegis/v14/internal/api/handlers"
+	"github.com/wonny/aegis/v14/internal/api/router"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
-	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
-	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
 const (
@@ -46,7 +45,6 @@ func main() {
 
 	log.Info().
 		Str("version", serviceVersion).
-		Str("port", cfg.Server.Port).
 		Msg("🚀 Starting Aegis v14 API Server...")
 
 	// Context with cancellation
@@ -60,57 +58,63 @@ func main() {
 	}
 	defer dbPool.Close()
 
-	// Initialize PriceSync components
-	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
-	priceService := pricesync.NewService(priceRepo)
+	log.Info().Msg("✅ Database connected")
 
-	// Initialize PriceSync Manager (optional, requires KIS credentials)
-	var priceSyncManager *pricesync.Manager
-	kisClient, err := kis.NewClientFromEnv()
-	if err != nil {
-		log.Warn().Err(err).Msg("KIS client not configured, price sync disabled (API still works)")
-	} else {
-		priceSyncManager = pricesync.NewManager(priceService, kisClient)
+	// Initialize repositories
+	holdingRepo := postgres.NewHoldingRepository(dbPool.Pool)
+	orderIntentRepo := postgres.NewOrderIntentRepository(dbPool.Pool)
+	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
+	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 
-		// Start PriceSync Manager
-		if err := priceSyncManager.Start(ctx); err != nil {
-			log.Error().Err(err).Msg("Failed to start PriceSync Manager")
-		} else {
-			log.Info().Msg("✅ PriceSync Manager started")
-		}
+	// Initialize handlers
+	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo)
+	intentsHandler := handlers.NewIntentsHandler(orderIntentRepo)
+	ordersHandler := handlers.NewOrdersHandler(orderRepo)
+	fillsHandler := handlers.NewFillsHandler(fillRepo)
+
+	// Initialize router
+	routerCfg := &router.Config{
+		HoldingsHandler: holdingsHandler,
+		IntentsHandler:  intentsHandler,
+		OrdersHandler:   ordersHandler,
+		FillsHandler:    fillsHandler,
 	}
 
-	log.Info().Msg("✅ All dependencies initialized")
+	httpRouter := router.NewRouter(routerCfg)
 
-	// Initialize HTTP router
-	router := api.NewRouter(cfg, dbPool, priceService, serviceVersion)
+	// HTTP server port
+	port := os.Getenv("API_PORT")
+	if port == "" {
+		port = "8080"
+	}
 
 	// Create HTTP server
-	addr := fmt.Sprintf(":%s", cfg.Server.Port)
+	addr := fmt.Sprintf(":%s", port)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      router.Engine(),
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
+		Handler:      httpRouter,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start server in goroutine
 	go func() {
 		log.Info().
 			Str("address", addr).
-			Msg("🌐 HTTP server listening")
+			Msg("🎯 API Server listening")
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("Failed to start HTTP server")
+			log.Fatal().Err(err).Msg("Failed to start API server")
 		}
 	}()
 
 	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
 
-	log.Info().Msg("📥 Shutting down server...")
+	log.Info().Msg("🛑 Shutdown signal received, stopping server...")
 
 	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -118,17 +122,8 @@ func main() {
 
 	// Shutdown HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Server forced to shutdown")
+		log.Error().Err(err).Msg("Server shutdown failed")
 	}
 
-	// Stop PriceSync Manager
-	if priceSyncManager != nil {
-		log.Info().Msg("Stopping PriceSync Manager...")
-		priceSyncManager.Stop()
-		log.Info().Msg("✅ PriceSync Manager stopped")
-	}
-
-	// Database connection will be closed by defer
-
-	log.Info().Msg("✅ Server stopped gracefully")
+	log.Info().Msg("👋 Aegis v14 API Server stopped")
 }
