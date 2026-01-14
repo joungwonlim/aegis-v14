@@ -172,8 +172,8 @@ v14/
 | **책임** | 투자 가능 종목 선정 (유동성, 시가총액, 거래량 필터) |
 | **위치** | `backend/internal/strategy/universe/` |
 | **설계 문서** | `docs/modules/universe.md` |
-| **상태** | ⬜ TODO |
-| **개발 준비도** | 🔴 Blocked (설계 문서 미작성) |
+| **상태** | ✅ 설계 완료 |
+| **개발 준비도** | 🟢 Ready |
 | **의존성** | `infra.database` |
 | **제공 인터페이스** | `UniverseService` |
 | **소유권** | Strategy Team |
@@ -280,18 +280,18 @@ v14/
 |--------|------|---------|------|--------|
 | Infrastructure | 2/3 | 0/3 | 1/3 | 67% |
 | Core Runtime | 4/4 | 0/4 | 0/4 | 100% ✅ |
-| Strategy | 0/4 | 0/4 | 4/4 | 0% |
+| Strategy | 1/4 | 0/4 | 3/4 | 25% |
 | Control | 0/2 | 0/2 | 2/2 | 0% |
 | API | 0/1 | 0/1 | 1/1 | 0% |
-| **Total** | **6/14** | **0/14** | **8/14** | **43%** |
+| **Total** | **7/14** | **0/14** | **7/14** | **50%** |
 
 ### 개발 준비도별 현황
 
 | 준비도 | 개수 | 모듈 |
 |--------|------|------|
-| 🟢 Ready | 6 | external-apis, database, price-sync, exit-engine, reentry-engine, execution |
+| 🟢 Ready | 7 | external-apis, database, price-sync, exit-engine, reentry-engine, execution, universe |
 | 🟡 Pending | 1 | cache |
-| 🔴 Blocked | 7 | universe, signals, ranking, portfolio, risk, monitoring, bff |
+| 🔴 Blocked | 6 | signals, ranking, portfolio, risk, monitoring, bff |
 
 ---
 
@@ -319,7 +319,7 @@ v14/
 
 ### Phase 4: Strategy Layer (P2)
 ```
-⬜ universe
+✅ universe (설계 완료)
 ⬜ signals
 ⬜ ranking
 ⬜ portfolio

@@ -72,7 +72,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 
 | 모듈 | 문서 | 상태 | 설명 |
 |------|------|------|------|
-| Universe | `modules/universe.md` | ⬜ TODO | 투자 가능 종목 선정 |
+| Universe | `modules/universe.md` | ✅ 완료 | 투자 가능 종목 선정 (Tier 구조, 필터링 기준, Snapshot) |
 | Signals | `modules/signals.md` | ⬜ TODO | 팩터/이벤트 시그널 |
 | Ranking | `modules/ranking.md` | ⬜ TODO | 종합 점수 산출 |
 | Portfolio | `modules/portfolio.md` | ⬜ TODO | 포트폴리오 구성 |
@@ -147,10 +147,10 @@ scripts/                         # 실행 스크립트 ✨ NEW
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 25/39 (Stocks API 추가)
-진행률: 64%
+총 문서 수: 26/39 (Universe 설계 추가)
+진행률: 67%
 
-✅ 완료: 25
+✅ 완료: 26
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -164,6 +164,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - modules/reentry-engine.md (ExitEvent 기반 디커플링)
   - modules/execution-service.md (ExitEvent 생성 SSOT)
   - modules/external-apis.md (KIS WS TR별 소유권 분리)
+  - modules/universe.md (투자 가능 종목 선정, Tier 구조, 필터링 기준, Snapshot) ⭐ NEW
   - database/schema.md (22 tables, market.stocks 추가, 컬럼별 SSOT 명시)
   - database/access-control.md (컬럼별 권한, DELETE 제거)
   - database/migration-stocks.md (stocks 테이블 마이그레이션 Phase 1~5, FK 제약조건)
@@ -178,7 +179,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - scripts/db/ (DB 초기화 스크립트 6개)
 
 🚧 진행 중: 0
-⬜ TODO: 13
+⬜ TODO: 12
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
