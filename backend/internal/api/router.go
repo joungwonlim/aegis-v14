@@ -21,7 +21,7 @@ type Router struct {
 }
 
 // NewRouter creates a new API router with all dependencies
-func NewRouter(cfg *config.Config, dbPool *postgres.Pool, version string) *Router {
+func NewRouter(cfg *config.Config, dbPool *postgres.Pool, priceService *pricesync.Service, version string) *Router {
 	// Set Gin mode
 	gin.SetMode(cfg.Server.Mode)
 
@@ -30,10 +30,6 @@ func NewRouter(cfg *config.Config, dbPool *postgres.Pool, version string) *Route
 
 	// Create repositories
 	stockRepo := postgres.NewStockRepository(dbPool)
-	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
-
-	// Create services
-	priceService := pricesync.NewService(priceRepo)
 
 	// Create handlers
 	healthHandler := handlers.NewHealthHandler(dbPool, version)

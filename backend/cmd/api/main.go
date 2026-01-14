@@ -12,8 +12,10 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/api"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
+	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
+	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
 const (
@@ -58,10 +60,30 @@ func main() {
 	}
 	defer dbPool.Close()
 
+	// Initialize PriceSync components
+	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
+	priceService := pricesync.NewService(priceRepo)
+
+	// Initialize PriceSync Manager (optional, requires KIS credentials)
+	var priceSyncManager *pricesync.Manager
+	kisClient, err := kis.NewClientFromEnv()
+	if err != nil {
+		log.Warn().Err(err).Msg("KIS client not configured, price sync disabled (API still works)")
+	} else {
+		priceSyncManager = pricesync.NewManager(priceService, kisClient)
+
+		// Start PriceSync Manager
+		if err := priceSyncManager.Start(ctx); err != nil {
+			log.Error().Err(err).Msg("Failed to start PriceSync Manager")
+		} else {
+			log.Info().Msg("✅ PriceSync Manager started")
+		}
+	}
+
 	log.Info().Msg("✅ All dependencies initialized")
 
 	// Initialize HTTP router
-	router := api.NewRouter(cfg, dbPool, serviceVersion)
+	router := api.NewRouter(cfg, dbPool, priceService, serviceVersion)
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
@@ -97,6 +119,13 @@ func main() {
 	// Shutdown HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Server forced to shutdown")
+	}
+
+	// Stop PriceSync Manager
+	if priceSyncManager != nil {
+		log.Info().Msg("Stopping PriceSync Manager...")
+		priceSyncManager.Stop()
+		log.Info().Msg("✅ PriceSync Manager stopped")
 	}
 
 	// Database connection will be closed by defer
