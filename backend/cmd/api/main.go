@@ -63,13 +63,14 @@ func main() {
 
 	// Initialize repositories
 	holdingRepo := postgres.NewHoldingRepository(dbPool.Pool)
+	positionRepo := exitrepo.NewPositionRepository(dbPool.Pool)
 	orderIntentRepo := exitrepo.NewOrderIntentRepository(dbPool.Pool)
 	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 
 	// Initialize handlers
-	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo)
-	intentsHandler := handlers.NewIntentsHandler(orderIntentRepo)
+	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo, positionRepo)
+	intentsHandler := handlers.NewIntentsHandler(orderIntentRepo, orderIntentRepo) // Reader and Writer
 	ordersHandler := handlers.NewOrdersHandler(orderRepo)
 	fillsHandler := handlers.NewFillsHandler(fillRepo)
 

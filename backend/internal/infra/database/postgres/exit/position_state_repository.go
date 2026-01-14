@@ -33,7 +33,9 @@ func (r *PositionStateRepository) GetState(ctx context.Context, positionID uuid.
 			atr,
 			cooldown_until,
 			last_eval_ts,
-			updated_ts
+			last_avg_price,
+			updated_ts,
+			breach_ticks
 		FROM trade.position_state
 		WHERE position_id = $1
 	`
@@ -47,7 +49,9 @@ func (r *PositionStateRepository) GetState(ctx context.Context, positionID uuid.
 		&state.ATR,
 		&state.CooldownUntil,
 		&state.LastEvalTS,
+		&state.LastAvgPrice,
 		&state.UpdatedTS,
+		&state.BreachTicks,
 	)
 
 	if err != nil {
@@ -172,6 +176,76 @@ func (r *PositionStateRepository) UpdateATR(ctx context.Context, positionID uuid
 	_, err := r.pool.Exec(ctx, query, atr, positionID)
 	if err != nil {
 		return fmt.Errorf("update atr: %w", err)
+	}
+
+	return nil
+}
+
+// IncrementBreachTicks increments breach tick counter (Phase 1: confirm_ticks)
+func (r *PositionStateRepository) IncrementBreachTicks(ctx context.Context, positionID uuid.UUID) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			breach_ticks = breach_ticks + 1,
+			updated_ts = NOW()
+		WHERE position_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID)
+	if err != nil {
+		return fmt.Errorf("increment breach_ticks: %w", err)
+	}
+
+	return nil
+}
+
+// ResetBreachTicks resets breach tick counter to 0
+func (r *PositionStateRepository) ResetBreachTicks(ctx context.Context, positionID uuid.UUID) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			breach_ticks = 0,
+			updated_ts = NOW()
+		WHERE position_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID)
+	if err != nil {
+		return fmt.Errorf("reset breach_ticks: %w", err)
+	}
+
+	return nil
+}
+
+// ResetStateToOpen resets state to OPEN phase (for 평단가 변경 시)
+// Resets: Phase=OPEN, HWM=null, StopFloor=null, BreachTicks=0, LastAvgPrice=newAvgPrice
+func (r *PositionStateRepository) ResetStateToOpen(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error {
+	query := `
+		INSERT INTO trade.position_state (
+			position_id,
+			phase,
+			hwm_price,
+			stop_floor_price,
+			atr,
+			cooldown_until,
+			last_eval_ts,
+			last_avg_price,
+			breach_ticks,
+			updated_ts
+		) VALUES ($1, $2, NULL, NULL, NULL, NULL, NULL, $3, 0, NOW())
+		ON CONFLICT (position_id) DO UPDATE
+		SET
+			phase = 'OPEN',
+			hwm_price = NULL,
+			stop_floor_price = NULL,
+			breach_ticks = 0,
+			last_avg_price = EXCLUDED.last_avg_price,
+			updated_ts = NOW()
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID, exit.PhaseOpen, newAvgPrice)
+	if err != nil {
+		return fmt.Errorf("reset state to open: %w", err)
 	}
 
 	return nil

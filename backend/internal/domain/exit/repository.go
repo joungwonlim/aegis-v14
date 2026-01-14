@@ -15,12 +15,18 @@ type PositionRepository interface {
 	// GetOpenPositions retrieves all OPEN positions for an account
 	GetOpenPositions(ctx context.Context, accountID string) ([]*Position, error)
 
+	// GetAllOpenPositions retrieves all OPEN positions (across all accounts)
+	GetAllOpenPositions(ctx context.Context) ([]*Position, error)
+
 	// UpdateStatus updates position status (Exit Engine owns this column)
 	// Uses optimistic locking with version check
 	UpdateStatus(ctx context.Context, positionID uuid.UUID, status string, expectedVersion int) error
 
 	// UpdateExitMode updates exit mode for a position (Exit Engine owns this column)
 	UpdateExitMode(ctx context.Context, positionID uuid.UUID, mode string, profileID *string) error
+
+	// UpdateExitModeBySymbol updates exit mode by account_id and symbol
+	UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string) error
 
 	// GetAvailableQty calculates available qty (position qty - locked qty from pending orders)
 	GetAvailableQty(ctx context.Context, positionID uuid.UUID) (int64, error)
@@ -45,6 +51,16 @@ type PositionStateRepository interface {
 
 	// UpdateATR updates cached ATR
 	UpdateATR(ctx context.Context, positionID uuid.UUID, atr decimal.Decimal) error
+
+	// IncrementBreachTicks increments breach tick counter (Phase 1: confirm_ticks)
+	IncrementBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// ResetBreachTicks resets breach tick counter to 0
+	ResetBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// ResetStateToOpen resets state to OPEN phase (for 평단가 변경 시)
+	// Resets: Phase=OPEN, HWM=null, StopFloor=null, BreachTicks=0, LastAvgPrice=newAvgPrice
+	ResetStateToOpen(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error
 }
 
 // ExitControlRepository manages global exit control (kill switch)
@@ -99,6 +115,12 @@ type OrderIntentRepository interface {
 
 	// GetRecentIntents retrieves recent intents (for monitoring)
 	GetRecentIntents(ctx context.Context, limit int) ([]*OrderIntent, error)
+
+	// ApproveIntent approves an intent (PENDING_APPROVAL → NEW)
+	ApproveIntent(ctx context.Context, intentID uuid.UUID) error
+
+	// RejectIntent rejects an intent (PENDING_APPROVAL → CANCELLED)
+	RejectIntent(ctx context.Context, intentID uuid.UUID) error
 }
 
 // ExitSignalRepository manages exit trigger evaluation records (debugging/backtest)

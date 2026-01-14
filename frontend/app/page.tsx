@@ -5,7 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { getHoldings, getOrderIntents, getOrders, getFills, type Holding, type OrderIntent, type Order, type Fill } from '@/lib/api'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import { getHoldings, getOrderIntents, getOrders, getFills, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill } from '@/lib/api'
+
+type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
+type SortOrder = 'asc' | 'desc'
 
 export default function RuntimeDashboard() {
   const [holdings, setHoldings] = useState<Holding[]>([])
@@ -15,28 +22,204 @@ export default function RuntimeDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [rulesDialogOpen, setRulesDialogOpen] = useState(false)
+  const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null)
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false)
+  const [sortField, setSortField] = useState<SortField | null>(null)
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+
+  // 총 평가금액 계산 (비중 계산용)
+  const totalEvaluation = holdings.reduce((sum, h) => {
+    const evalAmount = parseInt(h.raw?.evaluate_amount || '0')
+    return sum + evalAmount
+  }, 0)
+
+  // 정렬 핸들러
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // 같은 필드 클릭 시 정렬 순서 변경
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      // 다른 필드 클릭 시 해당 필드로 내림차순 정렬
+      setSortField(field)
+      setSortOrder('desc')
+    }
+  }
+
+  // 정렬된 holdings
+  const sortedHoldings = [...holdings].sort((a, b) => {
+    if (!sortField) return 0
+
+    let aValue: number | string = 0
+    let bValue: number | string = 0
+
+    const aEvalAmount = parseInt(a.raw?.evaluate_amount || '0')
+    const aPurchaseAmount = parseInt(a.raw?.purchase_amount || '0')
+    const aWeight = totalEvaluation > 0 ? (aEvalAmount / totalEvaluation) * 100 : 0
+
+    const bEvalAmount = parseInt(b.raw?.evaluate_amount || '0')
+    const bPurchaseAmount = parseInt(b.raw?.purchase_amount || '0')
+    const bWeight = totalEvaluation > 0 ? (bEvalAmount / totalEvaluation) * 100 : 0
+
+    switch (sortField) {
+      case 'symbol':
+        aValue = a.raw?.symbol_name || a.symbol
+        bValue = b.raw?.symbol_name || b.symbol
+        break
+      case 'qty':
+        aValue = a.qty
+        bValue = b.qty
+        break
+      case 'pnl':
+        aValue = typeof a.pnl === 'string' ? parseFloat(a.pnl) : a.pnl
+        bValue = typeof b.pnl === 'string' ? parseFloat(b.pnl) : b.pnl
+        break
+      case 'pnl_pct':
+        aValue = a.pnl_pct
+        bValue = b.pnl_pct
+        break
+      case 'avg_price':
+        aValue = typeof a.avg_price === 'string' ? parseFloat(a.avg_price) : a.avg_price
+        bValue = typeof b.avg_price === 'string' ? parseFloat(b.avg_price) : b.avg_price
+        break
+      case 'current_price':
+        aValue = typeof a.current_price === 'string' ? parseFloat(a.current_price) : a.current_price
+        bValue = typeof b.current_price === 'string' ? parseFloat(b.current_price) : b.current_price
+        break
+      case 'eval_amount':
+        aValue = aEvalAmount
+        bValue = bEvalAmount
+        break
+      case 'purchase_amount':
+        aValue = aPurchaseAmount
+        bValue = bPurchaseAmount
+        break
+      case 'weight':
+        aValue = aWeight
+        bValue = bWeight
+        break
+    }
+
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return sortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue)
+    }
+
+    return sortOrder === 'asc' ? (aValue as number) - (bValue as number) : (bValue as number) - (aValue as number)
+  })
+
+  // 합계 계산
+  const totals = holdings.reduce((acc, h) => {
+    const pnl = typeof h.pnl === 'string' ? parseFloat(h.pnl) : h.pnl
+    const evalAmount = parseInt(h.raw?.evaluate_amount || '0')
+    const purchaseAmount = parseInt(h.raw?.purchase_amount || '0')
+
+    return {
+      qty: acc.qty + h.qty,
+      pnl: acc.pnl + pnl,
+      evalAmount: acc.evalAmount + evalAmount,
+      purchaseAmount: acc.purchaseAmount + purchaseAmount,
+    }
+  }, { qty: 0, pnl: 0, evalAmount: 0, purchaseAmount: 0 })
+
+  const totalPnlPct = totals.purchaseAmount > 0 ? (totals.pnl / totals.purchaseAmount) * 100 : 0
 
   const loadData = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      const [holdingsData, intentsData, ordersData, fillsData] = await Promise.all([
+      const results = await Promise.allSettled([
         getHoldings(),
         getOrderIntents(),
         getOrders(),
         getFills(),
       ])
 
-      setHoldings(holdingsData)
-      setIntents(intentsData)
-      setOrders(ordersData)
-      setFills(fillsData)
+      // Extract successful results, handle null responses
+      if (results[0].status === 'fulfilled') setHoldings(results[0].value || [])
+      if (results[1].status === 'fulfilled') setIntents(results[1].value || [])
+      if (results[2].status === 'fulfilled') setOrders(results[2].value || [])
+      if (results[3].status === 'fulfilled') setFills(results[3].value || [])
+
+      // Collect errors from failed requests
+      const errors = results
+        .map((result, index) => {
+          if (result.status === 'rejected') {
+            const names = ['Holdings', 'Intents', 'Orders', 'Fills']
+            return names[index]
+          }
+          return null
+        })
+        .filter(Boolean)
+
+      if (errors.length > 0) {
+        setError(`일부 데이터를 불러올 수 없습니다: ${errors.join(', ')} (DB 스키마 불일치)`)
+      }
+
       setLastUpdate(new Date())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleApprove = async (intentId: string) => {
+    try {
+      await approveIntent(intentId)
+      await loadData() // Refresh data after approval
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve intent')
+    }
+  }
+
+  const handleReject = async (intentId: string) => {
+    try {
+      await rejectIntent(intentId)
+      await loadData() // Refresh data after rejection
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject intent')
+    }
+  }
+
+  const handleHoldingClick = (holding: Holding) => {
+    setSelectedHolding(holding)
+    setDetailSheetOpen(true)
+  }
+
+  const handleExitModeToggle = async (holding: Holding, enabled: boolean) => {
+    try {
+      const exitMode = enabled ? 'ENABLED' : 'DISABLED'
+      console.log('Updating exit mode:', { account_id: holding.account_id, symbol: holding.symbol, exitMode })
+
+      // Optimistic update - immediately update UI
+      const updatedHolding = { ...holding, exit_mode: exitMode }
+      setSelectedHolding(updatedHolding)
+      setHoldings(prev => prev.map(h =>
+        h.account_id === holding.account_id && h.symbol === holding.symbol
+          ? updatedHolding
+          : h
+      ))
+
+      const result = await updateExitMode(holding.account_id, holding.symbol, exitMode)
+      console.log('Update result:', result)
+
+      // Refresh data to ensure consistency with server
+      await loadData()
+
+      // Update selectedHolding with fresh data
+      const freshHoldings = await getHoldings()
+      const freshHolding = freshHoldings.find(h =>
+        h.account_id === holding.account_id && h.symbol === holding.symbol
+      )
+      if (freshHolding) {
+        setSelectedHolding(freshHolding)
+      }
+    } catch (err) {
+      console.error('Failed to update exit mode:', err)
+      setError(err instanceof Error ? err.message : 'Failed to update exit mode')
+      // Revert optimistic update on error
+      await loadData()
     }
   }
 
@@ -50,7 +233,9 @@ export default function RuntimeDashboard() {
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+      PENDING_APPROVAL: 'outline',
       NEW: 'secondary',
+      ACK: 'default',
       SUBMITTED: 'default',
       FILLED: 'default',
       PARTIAL: 'secondary',
@@ -70,8 +255,16 @@ export default function RuntimeDashboard() {
   const formatPercent = (value: number | undefined) => {
     if (value === undefined) return '-'
     const formatted = value.toFixed(2)
-    const color = value >= 0 ? 'text-green-600' : 'text-red-600'
-    return <span className={color}>{formatted}%</span>
+    const color = value >= 0 ? '#EA5455' : '#2196F3'
+    const sign = value > 0 ? '+' : ''
+    return <span style={{ color }}>{sign}{formatted}%</span>
+  }
+
+  const formatPnL = (value: number | undefined) => {
+    if (value === undefined) return '-'
+    const color = value >= 0 ? '#EA5455' : '#2196F3'
+    const sign = value > 0 ? '+' : ''
+    return <span style={{ color }}>{sign}{formatNumber(value, 0)}</span>
   }
 
   const formatTimestamp = (ts: string) => {
@@ -127,16 +320,106 @@ export default function RuntimeDashboard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>종목명</TableHead>
-                <TableHead className="text-right">보유수량</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('symbol')}
+                >
+                  <div className="flex items-center gap-1">
+                    종목명
+                    {sortField === 'symbol' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('qty')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    보유수량
+                    {sortField === 'qty' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="text-right">매도가능</TableHead>
-                <TableHead className="text-right">평가손익</TableHead>
-                <TableHead className="text-right">수익률</TableHead>
-                <TableHead className="text-right">매입단가</TableHead>
-                <TableHead className="text-right">현재가</TableHead>
-                <TableHead className="text-right">평가금액</TableHead>
-                <TableHead className="text-right">매입금액</TableHead>
-                <TableHead>갱신시각</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('pnl')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    평가손익
+                    {sortField === 'pnl' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('pnl_pct')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    수익률
+                    {sortField === 'pnl_pct' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('avg_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    매입단가
+                    {sortField === 'avg_price' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('current_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    현재가
+                    {sortField === 'current_price' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('eval_amount')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    평가금액
+                    {sortField === 'eval_amount' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('purchase_amount')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    매입금액
+                    {sortField === 'purchase_amount' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('weight')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    비중
+                    {sortField === 'weight' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -147,26 +430,53 @@ export default function RuntimeDashboard() {
                   </TableCell>
                 </TableRow>
               ) : (
-                holdings.map((holding) => {
-                  const symbolName = holding.raw?.symbol_name || holding.symbol
-                  const evaluateAmount = holding.raw?.evaluate_amount || (holding.qty * holding.current_price).toString()
-                  const purchaseAmount = holding.raw?.purchase_amount || (holding.qty * holding.avg_price).toString()
+                <>
+                  {sortedHoldings.map((holding) => {
+                    const symbolName = holding.raw?.symbol_name || holding.symbol
+                    const evaluateAmount = holding.raw?.evaluate_amount || (holding.qty * holding.current_price).toString()
+                    const purchaseAmount = holding.raw?.purchase_amount || (holding.qty * holding.avg_price).toString()
+                    const weight = totalEvaluation > 0 ? (parseInt(evaluateAmount) / totalEvaluation) * 100 : 0
 
-                  return (
-                    <TableRow key={`${holding.account_id}-${holding.symbol}`}>
-                      <TableCell className="font-medium">{symbolName}</TableCell>
-                      <TableCell className="text-right">{formatNumber(holding.qty)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(holding.qty)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(holding.pnl, 0)}</TableCell>
-                      <TableCell className="text-right">{formatPercent(holding.pnl_pct)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(holding.avg_price, 0)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(holding.current_price, 0)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
-                      <TableCell className="text-sm">{formatTimestamp(holding.updated_ts)}</TableCell>
-                    </TableRow>
-                  )
-                })
+                    // 문자열을 숫자로 변환
+                    const pnl = typeof holding.pnl === 'string' ? parseFloat(holding.pnl) : holding.pnl
+                    const currentPrice = typeof holding.current_price === 'string' ? parseFloat(holding.current_price) : holding.current_price
+                    const avgPrice = typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price
+                    const priceColor = pnl >= 0 ? '#EA5455' : '#2196F3'
+
+                    return (
+                      <TableRow key={`${holding.account_id}-${holding.symbol}`}>
+                        <TableCell
+                          className="font-medium cursor-pointer hover:text-blue-600 hover:underline"
+                          onClick={() => handleHoldingClick(holding)}
+                        >
+                          {symbolName}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(holding.qty)}</TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(holding.qty)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPnL(pnl)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(avgPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">{weight.toFixed(1)}%</TableCell>
+                      </TableRow>
+                    )
+                  })}
+                  {/* 합계 행 */}
+                  <TableRow className="font-semibold bg-muted/30">
+                    <TableCell className="font-bold">합계</TableCell>
+                    <TableCell className="text-right font-mono">{formatNumber(totals.qty)}</TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(totals.qty)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatPnL(totals.pnl)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatPercent(totalPnlPct)}</TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatNumber(totals.purchaseAmount, 0)}</TableCell>
+                    <TableCell className="text-right font-mono">100.0%</TableCell>
+                  </TableRow>
+                </>
               )}
             </TableBody>
           </Table>
@@ -176,10 +486,17 @@ export default function RuntimeDashboard() {
       {/* Exit Engine - 청산 대상 종목 모니터링 */}
       <Card>
         <CardHeader>
-          <CardTitle>🎯 Exit Engine - 청산 대상 종목 모니터링</CardTitle>
-          <CardDescription>
-            Exit 규칙 평가 및 청산 주문 의도 ({intents.length}개)
-          </CardDescription>
+          <div className="flex justify-between items-start">
+            <div className="space-y-1.5">
+              <CardTitle>🎯 Exit Engine - 청산 대상 종목 모니터링</CardTitle>
+              <CardDescription>
+                Exit 규칙 평가 및 청산 주문 의도 ({intents.length}개)
+              </CardDescription>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setRulesDialogOpen(true)}>
+              규칙 관리
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -226,43 +543,62 @@ export default function RuntimeDashboard() {
         <CardHeader>
           <CardTitle>📤 KIS Orders Execution</CardTitle>
           <CardDescription>
-            KIS에 제출된 전체 주문 내역 ({orders.length}개)
+            승인 대기 중인 Exit Intent ({intents.filter(i => i.status === 'PENDING_APPROVAL').length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>주문번호</TableHead>
                 <TableHead>종목코드</TableHead>
-                <TableHead className="text-right">주문수량</TableHead>
-                <TableHead className="text-right">미체결</TableHead>
-                <TableHead className="text-right">체결</TableHead>
-                <TableHead>상태</TableHead>
-                <TableHead>브로커상태</TableHead>
-                <TableHead>제출시각</TableHead>
+                <TableHead>타입</TableHead>
+                <TableHead className="text-right">수량</TableHead>
+                <TableHead>주문유형</TableHead>
+                <TableHead>사유</TableHead>
+                <TableHead>생성시각</TableHead>
+                <TableHead className="text-center">작업</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.length === 0 ? (
+              {intents.filter(i => i.status === 'PENDING_APPROVAL').length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
-                    주문이 없습니다
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    승인 대기 중인 Intent가 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                orders.map((order) => (
-                  <TableRow key={order.order_id}>
-                    <TableCell className="font-mono text-sm">{order.order_id.slice(0, 8)}...</TableCell>
-                    <TableCell className="font-mono">{order.symbol || '-'}</TableCell>
-                    <TableCell className="text-right">{formatNumber(order.qty)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(order.open_qty)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(order.filled_qty)}</TableCell>
-                    <TableCell>{getStatusBadge(order.status)}</TableCell>
-                    <TableCell>{order.broker_status}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(order.submitted_ts)}</TableCell>
-                  </TableRow>
-                ))
+                intents
+                  .filter(i => i.status === 'PENDING_APPROVAL')
+                  .map((intent) => (
+                    <TableRow key={intent.intent_id}>
+                      <TableCell className="font-mono">{intent.symbol}</TableCell>
+                      <TableCell>{intent.intent_type}</TableCell>
+                      <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
+                      <TableCell>{intent.order_type}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{intent.reason_code}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex gap-2 justify-center">
+                          <Button
+                            size="sm"
+                            onClick={() => handleApprove(intent.intent_id)}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            주문 실행
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleReject(intent.intent_id)}
+                          >
+                            삭제
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
               )}
             </TableBody>
           </Table>
@@ -364,6 +700,209 @@ export default function RuntimeDashboard() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Exit 규칙 관리 다이얼로그 */}
+      <Dialog open={rulesDialogOpen} onOpenChange={setRulesDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Exit 규칙 요약 (v14 원칙)</DialogTitle>
+            <DialogDescription>
+              실시간 Exit Engine 규칙 및 운영 원칙
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* 손절 규칙 */}
+            <div className="space-y-2">
+              <div className="font-semibold text-base flex items-center gap-2">
+                <span style={{ color: '#2196F3' }}>▼ 손절 (Stop Loss)</span>
+              </div>
+              <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                <div>• SL1 (-3%): 잔량의 50% 청산</div>
+                <div>• SL2 (-5%): 잔량의 100% 강제 청산</div>
+              </div>
+            </div>
+
+            {/* 익절 규칙 */}
+            <div className="space-y-2">
+              <div className="font-semibold text-base flex items-center gap-2">
+                <span style={{ color: '#EA5455' }}>▲ 익절 (Take Profit)</span>
+              </div>
+              <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                <div>• TP1 (+7%): 원본의 10% 청산 → <span className="font-semibold text-foreground">Stop Floor 활성화</span></div>
+                <div>• TP2 (+10%): 원본의 20% 청산 → 부분 트레일링 활성화</div>
+                <div>• TP3 (+15%): 원본의 30% 청산 → 잔량 트레일링 활성화</div>
+                <div className="text-xs mt-2 p-2 bg-muted rounded">
+                  ※ TP 합계 60%, 잔량 40%는 Stop Floor 및 Trailing으로 관리
+                </div>
+              </div>
+            </div>
+
+            {/* Stop Floor */}
+            <div className="space-y-2 border-l-4 border-yellow-500 pl-4 bg-yellow-50 dark:bg-yellow-950/20 p-3 rounded-r">
+              <div className="font-semibold text-base flex items-center gap-2">
+                <span className="text-yellow-600 dark:text-yellow-500">🛡️ Stop Floor (본전+0.6%)</span>
+              </div>
+              <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                <div>• <span className="font-semibold text-foreground">TP1 체결 시 즉시 활성화</span> (v14 핵심 안전장치)</div>
+                <div>• stop_floor_price = 평단가 × 1.006</div>
+                <div>• 가격이 Stop Floor 이하로 내려가면 → 잔량 전량 청산</div>
+                <div className="text-xs mt-2 p-2 bg-muted rounded">
+                  ※ TP1 이후 수익을 보호하고 손실 전환을 구조적으로 차단
+                </div>
+              </div>
+            </div>
+
+            {/* 트레일링 */}
+            <div className="space-y-2">
+              <div className="font-semibold text-base flex items-center gap-2">
+                <span>🎯 트레일링 (Trailing)</span>
+              </div>
+              <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                <div>• <span className="font-semibold text-foreground">트레일링 거리</span>: HWM 대비 -3%</div>
+                <div>• <span className="font-semibold text-foreground">TP2 이후</span>: HWM 대비 -3% 도달 시 → 원본의 20% 청산 (부분 트레일링)</div>
+                <div>• <span className="font-semibold text-foreground">TP3 이후</span>: HWM 대비 -3% 도달 시 → 잔량 전량 청산 (잔량 트레일링)</div>
+              </div>
+            </div>
+
+            {/* 운영 원칙 */}
+            <div className="space-y-2 pt-4 border-t border-border">
+              <div className="font-semibold text-sm text-muted-foreground">운영 원칙</div>
+              <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                <div>• 3초마다 OPEN 포지션 평가 (10초 초과 가격 데이터 사용 금지)</div>
+                <div>• 우선순위: SL2 → Stop Floor → SL1 → TP3 → TP2 → TP1 → Trailing</div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 종목 상세 정보 Sheet */}
+      <Sheet open={detailSheetOpen} onOpenChange={setDetailSheetOpen}>
+        <SheetContent className="w-[1600px] sm:w-[2160px]">
+          {selectedHolding && (() => {
+            const symbolName = selectedHolding.raw?.symbol_name || selectedHolding.symbol
+            const evaluateAmount = selectedHolding.raw?.evaluate_amount || (selectedHolding.qty * selectedHolding.current_price).toString()
+            const purchaseAmount = selectedHolding.raw?.purchase_amount || (selectedHolding.qty * selectedHolding.avg_price).toString()
+            const weight = totalEvaluation > 0 ? (parseInt(evaluateAmount) / totalEvaluation) * 100 : 0
+            const pnl = typeof selectedHolding.pnl === 'string' ? parseFloat(selectedHolding.pnl) : selectedHolding.pnl
+            const currentPrice = typeof selectedHolding.current_price === 'string' ? parseFloat(selectedHolding.current_price) : selectedHolding.current_price
+            const avgPrice = typeof selectedHolding.avg_price === 'string' ? parseFloat(selectedHolding.avg_price) : selectedHolding.avg_price
+            const priceColor = pnl >= 0 ? '#EA5455' : '#2196F3'
+
+            return (
+              <>
+                <SheetHeader>
+                  <SheetTitle className="text-2xl">{symbolName}</SheetTitle>
+                  <SheetDescription>
+                    종목 상세 정보
+                  </SheetDescription>
+                </SheetHeader>
+
+                {/* Exit Engine Switch */}
+                <div className="mt-6 flex items-center justify-between p-4 border rounded-lg">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="exit-mode" className="text-base font-semibold">
+                      Exit Engine
+                    </Label>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedHolding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
+                    </div>
+                  </div>
+                  <Switch
+                    id="exit-mode"
+                    checked={selectedHolding.exit_mode === 'ENABLED'}
+                    onCheckedChange={(checked) => handleExitModeToggle(selectedHolding, checked)}
+                  />
+                </div>
+
+                <div className="mt-6 space-y-6">
+                  {/* 현재가 */}
+                  <div className="space-y-2">
+                    <div className="text-3xl font-bold" style={{ color: priceColor }}>
+                      {formatNumber(currentPrice, 0)}원
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span style={{ color: priceColor }} className="text-lg font-semibold">
+                        {formatPnL(pnl)}
+                      </span>
+                      <span style={{ color: priceColor }} className="text-lg font-semibold">
+                        {formatPercent(selectedHolding.pnl_pct)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 구분선 */}
+                  <div className="border-t border-border"></div>
+
+                  {/* 보유 정보 */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">보유수량</span>
+                      <span className="font-mono font-semibold">{formatNumber(selectedHolding.qty)}주</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">매도가능</span>
+                      <span className="font-mono font-semibold">{formatNumber(selectedHolding.qty)}주</span>
+                    </div>
+                  </div>
+
+                  {/* 구분선 */}
+                  <div className="border-t border-border"></div>
+
+                  {/* 손익 정보 */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">평가손익</span>
+                      <span className="font-mono font-semibold">{formatPnL(pnl)}원</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">수익률</span>
+                      <span className="font-mono font-semibold">{formatPercent(selectedHolding.pnl_pct)}</span>
+                    </div>
+                  </div>
+
+                  {/* 구분선 */}
+                  <div className="border-t border-border"></div>
+
+                  {/* 가격 정보 */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">매입단가</span>
+                      <span className="font-mono font-semibold">{formatNumber(avgPrice, 0)}원</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">현재가</span>
+                      <span className="font-mono font-semibold" style={{ color: priceColor }}>
+                        {formatNumber(currentPrice, 0)}원
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 구분선 */}
+                  <div className="border-t border-border"></div>
+
+                  {/* 금액 정보 */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">평가금액</span>
+                      <span className="font-mono font-semibold">{formatNumber(parseInt(evaluateAmount), 0)}원</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">매입금액</span>
+                      <span className="font-mono font-semibold">{formatNumber(parseInt(purchaseAmount), 0)}원</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">비중</span>
+                      <span className="font-mono font-semibold">{weight.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )
+          })()}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

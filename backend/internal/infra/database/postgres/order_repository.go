@@ -220,3 +220,63 @@ func (r *OrderRepository) UpdateOrder(ctx context.Context, order *execution.Orde
 
 	return nil
 }
+
+// GetOrder retrieves an order by ID (alias for GetOrderByID to match interface)
+func (r *OrderRepository) GetOrder(ctx context.Context, orderID string) (*execution.Order, error) {
+	return r.GetOrderByID(ctx, orderID)
+}
+
+// LoadOpenOrders loads all SUBMITTED/PARTIAL orders
+func (r *OrderRepository) LoadOpenOrders(ctx context.Context) ([]*execution.Order, error) {
+	query := `
+		SELECT
+			order_id,
+			intent_id,
+			submitted_ts,
+			status,
+			broker_status,
+			qty,
+			open_qty,
+			filled_qty,
+			raw,
+			updated_ts
+		FROM trade.orders
+		WHERE status IN ('SUBMITTED', 'PARTIAL')
+		ORDER BY submitted_ts ASC
+	`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query open orders: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []*execution.Order
+	for rows.Next() {
+		order := &execution.Order{}
+		err := rows.Scan(
+			&order.OrderID,
+			&order.IntentID,
+			&order.SubmittedTS,
+			&order.Status,
+			&order.BrokerStatus,
+			&order.Qty,
+			&order.OpenQty,
+			&order.FilledQty,
+			&order.Raw,
+			&order.UpdatedTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan order: %w", err)
+		}
+		orders = append(orders, order)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return orders, nil
+}
+
+// GetRecentOrders retrieves recent orders (for monitoring)

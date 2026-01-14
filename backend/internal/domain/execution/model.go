@@ -62,6 +62,7 @@ type Holding struct {
 	Pnl          decimal.Decimal `json:"pnl"`           // 평가손익
 	PnlPct       float64         `json:"pnl_pct"`       // 수익률 (%)
 	UpdatedTS    time.Time       `json:"updated_ts"`    // 마지막 동기화 시각
+	ExitMode     string          `json:"exit_mode"`     // Exit Engine 모드 (ENABLED/DISABLED/MANUAL_ONLY)
 	Raw          map[string]any  `json:"raw"`           // KIS API 원본
 }
 

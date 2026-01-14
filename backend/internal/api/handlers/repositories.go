@@ -26,3 +26,9 @@ type FillReader interface {
 type IntentReader interface {
 	GetRecentIntents(ctx context.Context, limit int) ([]*exit.OrderIntent, error)
 }
+
+// IntentWriter is a write interface for order intents (approval/rejection)
+type IntentWriter interface {
+	ApproveIntent(ctx context.Context, intentID string) error
+	RejectIntent(ctx context.Context, intentID string) error
+}

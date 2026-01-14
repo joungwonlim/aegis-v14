@@ -46,9 +46,9 @@ func (s *Service) evaluateAllPositions(ctx context.Context) error {
 
 	log.Debug().Str("mode", control.Mode).Msg("Exit control mode")
 
-	// 2. Load OPEN positions (하드코딩된 accountID, 추후 개선)
-	// TODO: accountID를 config에서 로드
-	positions, err := s.posRepo.GetOpenPositions(ctx, "default")
+	// 2. Load OPEN positions (모든 계정)
+	// NOTE: 모든 OPEN positions를 조회 (account 필터링 없음)
+	positions, err := s.posRepo.GetAllOpenPositions(ctx)
 	if err != nil {
 		return fmt.Errorf("get open positions: %w", err)
 	}
@@ -106,18 +106,66 @@ func (s *Service) evaluatePositionWithRetry(ctx context.Context, pos *exit.Posit
 func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, controlMode string) error {
 	// 1. Create position snapshot (v10 방어: 평가 시작 시 snapshot)
 	snapshot := PositionSnapshot{
-		PositionID: pos.PositionID,
-		Symbol:     pos.Symbol,
-		Qty:        pos.Qty,
-		AvgPrice:   pos.AvgPrice,
-		EntryTS:    pos.EntryTS,
-		Version:    pos.Version,
+		PositionID:  pos.PositionID,
+		Symbol:      pos.Symbol,
+		Qty:         pos.Qty,
+		OriginalQty: pos.OriginalQty,
+		AvgPrice:    pos.AvgPrice,
+		EntryTS:     pos.EntryTS,
+		Version:     pos.Version,
 	}
 
 	// 2. Get position state (FSM)
 	state, err := s.stateRepo.GetState(ctx, pos.PositionID)
 	if err != nil {
 		return fmt.Errorf("get state: %w", err)
+	}
+
+	// 2.5. Check for 평단가 변경 (추가 매수 감지)
+	if state.LastAvgPrice != nil {
+		// Tolerance: 0.5% 이상 변경 시에만 리셋
+		// 계산 오차나 미세한 반올림 차이는 무시
+		diff := pos.AvgPrice.Sub(*state.LastAvgPrice).Abs()
+		threshold := state.LastAvgPrice.Mul(decimal.NewFromFloat(0.005)) // 0.5%
+
+		if diff.GreaterThan(threshold) {
+			log.Warn().
+				Str("symbol", pos.Symbol).
+				Str("old_avg_price", state.LastAvgPrice.String()).
+				Str("new_avg_price", pos.AvgPrice.String()).
+				Str("diff", diff.String()).
+				Str("threshold", threshold.String()).
+				Str("old_phase", state.Phase).
+				Msg("평단가 유의미한 변경 감지: Exit State를 OPEN으로 리셋 (추가매수로 인한 재진입)")
+
+			// State를 OPEN으로 리셋
+			err = s.stateRepo.ResetStateToOpen(ctx, pos.PositionID, pos.AvgPrice)
+			if err != nil {
+				return fmt.Errorf("reset state to open: %w", err)
+			}
+
+			// State 재로드
+			state, err = s.stateRepo.GetState(ctx, pos.PositionID)
+			if err != nil {
+				return fmt.Errorf("get state after reset: %w", err)
+			}
+		} else if diff.GreaterThan(decimal.Zero) {
+			// 미세한 변경 (threshold 이하): 로그만 남기고 무시
+			log.Debug().
+				Str("symbol", pos.Symbol).
+				Str("old_avg_price", state.LastAvgPrice.String()).
+				Str("new_avg_price", pos.AvgPrice.String()).
+				Str("diff", diff.String()).
+				Str("threshold", threshold.String()).
+				Msg("평단가 미세 변동 감지 (threshold 이하): 무시")
+		}
+	} else if state.LastAvgPrice == nil {
+		// 처음 평가하는 경우 LastAvgPrice 설정
+		state.LastAvgPrice = &pos.AvgPrice
+		err = s.stateRepo.ResetStateToOpen(ctx, pos.PositionID, pos.AvgPrice)
+		if err != nil {
+			log.Error().Err(err).Str("symbol", pos.Symbol).Msg("Failed to initialize last_avg_price")
+		}
 	}
 
 	// 3. Get current price (v10 방어: Freshness 검증)
@@ -187,12 +235,13 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 
 // PositionSnapshot represents a position snapshot at evaluation start (v10 방어)
 type PositionSnapshot struct {
-	PositionID uuid.UUID
-	Symbol     string
-	Qty        int64
-	AvgPrice   decimal.Decimal
-	EntryTS    time.Time
-	Version    int
+	PositionID  uuid.UUID
+	Symbol      string
+	Qty         int64
+	OriginalQty int64           // Original entry quantity (for TP % calculation)
+	AvgPrice    decimal.Decimal
+	EntryTS     time.Time
+	Version     int
 }
 
 // createIntentWithVersionCheck creates an intent with version check (v10 방어)
@@ -246,7 +295,7 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 		intentType = exit.IntentTypeExitFull
 	}
 
-	// 6. Create intent (멱등)
+	// 6. Create intent (멱등) - PENDING_APPROVAL 상태로 생성 (사용자 승인 대기)
 	actionKey := fmt.Sprintf("%s:%s", snapshot.PositionID.String(), trigger.ReasonCode)
 	intent := &exit.OrderIntent{
 		IntentID:   uuid.New(),
@@ -258,7 +307,7 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 		LimitPrice: trigger.LimitPrice,
 		ReasonCode: trigger.ReasonCode,
 		ActionKey:  actionKey,
-		Status:     exit.IntentStatusNew,
+		Status:     exit.IntentStatusPendingApproval, // 사용자 승인 대기
 	}
 
 	err = s.intentRepo.CreateIntent(ctx, intent)

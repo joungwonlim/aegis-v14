@@ -69,6 +69,65 @@ func (r *PositionRepository) GetPosition(ctx context.Context, positionID uuid.UU
 	return &pos, nil
 }
 
+// GetAllOpenPositions retrieves all OPEN positions (across all accounts)
+func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.Position, error) {
+	query := `
+		SELECT
+			position_id,
+			account_id,
+			symbol,
+			side,
+			qty,
+			avg_price,
+			entry_ts,
+			status,
+			COALESCE(exit_mode, 'ENABLED') AS exit_mode,
+			exit_profile_id,
+			strategy_id,
+			updated_ts,
+			version
+		FROM trade.positions
+		WHERE status = 'OPEN'
+		ORDER BY entry_ts ASC
+	`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query all open positions: %w", err)
+	}
+	defer rows.Close()
+
+	var positions []*exit.Position
+	for rows.Next() {
+		var pos exit.Position
+		err := rows.Scan(
+			&pos.PositionID,
+			&pos.AccountID,
+			&pos.Symbol,
+			&pos.Side,
+			&pos.Qty,
+			&pos.AvgPrice,
+			&pos.EntryTS,
+			&pos.Status,
+			&pos.ExitMode,
+			&pos.ExitProfileID,
+			&pos.StrategyID,
+			&pos.UpdatedTS,
+			&pos.Version,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan position: %w", err)
+		}
+		positions = append(positions, &pos)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return positions, nil
+}
+
 // GetOpenPositions retrieves all OPEN positions for an account
 func (r *PositionRepository) GetOpenPositions(ctx context.Context, accountID string) ([]*exit.Position, error) {
 	query := `
@@ -168,6 +227,62 @@ func (r *PositionRepository) UpdateExitMode(ctx context.Context, positionID uuid
 	return nil
 }
 
+// UpdateExitModeBySymbol updates exit mode by account_id and symbol
+// If position doesn't exist, creates it from holding data
+func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string) error {
+	// Use UPSERT: INSERT if not exists, UPDATE if exists
+	query := `
+		INSERT INTO trade.positions (
+			position_id,
+			account_id,
+			symbol,
+			side,
+			qty,
+			original_qty,
+			avg_price,
+			entry_ts,
+			status,
+			exit_mode,
+			exit_profile_id,
+			strategy_id,
+			updated_ts,
+			version
+		)
+		SELECT
+			gen_random_uuid(),
+			h.account_id,
+			h.symbol,
+			'LONG',
+			h.qty,
+			h.qty,
+			h.avg_price,
+			NOW(),
+			'OPEN',
+			$1,
+			NULL,
+			'MANUAL',
+			NOW(),
+			1
+		FROM trade.holdings h
+		WHERE h.account_id = $2 AND h.symbol = $3
+		ON CONFLICT (account_id, symbol)
+		DO UPDATE SET
+			exit_mode = EXCLUDED.exit_mode,
+			updated_ts = NOW()
+	`
+
+	result, err := r.pool.Exec(ctx, query, mode, accountID, symbol)
+	if err != nil {
+		return fmt.Errorf("upsert exit mode by symbol: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("holding not found for account_id=%s symbol=%s", accountID, symbol)
+	}
+
+	return nil
+}
+
 // GetAvailableQty calculates available qty (position qty - locked qty from pending orders)
 func (r *PositionRepository) GetAvailableQty(ctx context.Context, positionID uuid.UUID) (int64, error) {
 	query := `
@@ -197,4 +312,55 @@ func (r *PositionRepository) GetAvailableQty(ctx context.Context, positionID uui
 	}
 
 	return availableQty, nil
+}
+
+// GetPositionBySymbol retrieves a position by symbol and status
+func (r *PositionRepository) GetPositionBySymbol(ctx context.Context, accountID, symbol, status string) (*exit.Position, error) {
+	query := `
+		SELECT
+			position_id,
+			account_id,
+			symbol,
+			side,
+			qty,
+			avg_price,
+			entry_ts,
+			status,
+			exit_mode,
+			exit_profile_id,
+			strategy_id,
+			updated_ts,
+			version
+		FROM trade.positions
+		WHERE account_id = $1 AND symbol = $2 AND status = $3
+		ORDER BY updated_ts DESC
+		LIMIT 1
+	`
+
+	pos := &exit.Position{}
+	err := r.pool.QueryRow(ctx, query, accountID, symbol, status).Scan(
+		&pos.PositionID,
+		&pos.AccountID,
+		&pos.Symbol,
+		&pos.Side,
+		&pos.Qty,
+		&pos.AvgPrice,
+		&pos.EntryTS,
+		&pos.Status,
+		&pos.ExitMode,
+		&pos.ExitProfileID,
+		&pos.StrategyID,
+		&pos.UpdatedTS,
+		&pos.Version,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("position not found for symbol %s with status %s", symbol, status)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("get position by symbol: %w", err)
+	}
+
+	return pos, nil
 }

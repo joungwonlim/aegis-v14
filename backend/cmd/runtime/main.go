@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
+	exitpg "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
@@ -112,8 +113,8 @@ func main() {
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 	holdingRepo := postgres.NewHoldingRepository(dbPool.Pool)
 	exitEventRepo := postgres.NewExitEventRepository(dbPool.Pool)
-	orderIntentRepo := postgres.NewOrderIntentRepository(dbPool.Pool)
-	positionRepo := postgres.NewPositionRepository(dbPool.Pool)
+	orderIntentRepo := exitpg.NewOrderIntentRepository(dbPool.Pool)
+	positionRepo := exitpg.NewPositionRepository(dbPool.Pool)
 
 	executionService := execution.NewService(
 		ctx,
@@ -146,73 +147,67 @@ func main() {
 	// ========================================
 	// 3. Initialize Exit Engine
 	// ========================================
-	positionStateRepo := postgres.NewPositionStateRepository(dbPool.Pool)
-	exitProfileRepo := postgres.NewExitProfileRepository(dbPool.Pool)
-	exitControlRepo := postgres.NewExitControlRepository(dbPool.Pool)
-	symbolOverrideRepo := postgres.NewSymbolExitOverrideRepository(dbPool.Pool)
+	positionStateRepo := exitpg.NewPositionStateRepository(dbPool.Pool)
+	exitProfileRepo := exitpg.NewExitProfileRepository(dbPool.Pool)
+	exitControlRepo := exitpg.NewExitControlRepository(dbPool.Pool)
+	symbolOverrideRepo := exitpg.NewSymbolExitOverrideRepository(dbPool.Pool)
 
-	// Create default exit profile
+	// Create default exit profile (v14 고정 비율)
+	stopFloorProfit := 0.6 // 본전+0.6%
 	defaultProfile := &exit.ExitProfile{
 		ProfileID:   "default",
-		Name:        "Default Exit Profile",
-		Description: "Default exit rules for all positions",
+		Name:        "Default Exit Profile (v14)",
+		Description: "v14 exit rules: TP1(10% @ +7%), TP2(20% @ +10%), TP3(30% @ +15%), Stop Floor +0.6%",
 		Config: exit.ExitProfileConfig{
 			ATR: exit.ATRConfig{
-				Enabled: false,
-				Period:  14,
+				Ref:       0.02,
+				FactorMin: 1.0, // ATR 스케일링 비활성화 (고정 비율 사용)
+				FactorMax: 1.0,
 			},
 			SL1: exit.TriggerConfig{
-				Enabled:       true,
-				ThresholdPct:  decimal.NewFromFloat(-3.0),
-				ExitPct:       decimal.NewFromFloat(0.5),
-				UseATRStop:    false,
-				OrderType:     "MKT",
+				BasePct: -0.03,  // -3%
+				MinPct:  -0.03,  // 고정
+				MaxPct:  -0.03,
+				QtyPct:  0.5,    // 잔량의 50%
 			},
 			SL2: exit.TriggerConfig{
-				Enabled:       true,
-				ThresholdPct:  decimal.NewFromFloat(-5.0),
-				ExitPct:       decimal.NewFromFloat(1.0),
-				UseATRStop:    false,
-				OrderType:     "MKT",
+				BasePct: -0.05,  // -5%
+				MinPct:  -0.05,  // 고정
+				MaxPct:  -0.05,
+				QtyPct:  1.0,    // 잔량의 100%
 			},
 			TP1: exit.TriggerConfig{
-				Enabled:       true,
-				ThresholdPct:  decimal.NewFromFloat(5.0),
-				ExitPct:       decimal.NewFromFloat(0.3),
-				UseATRStop:    false,
-				OrderType:     "LMT",
+				BasePct:         0.07,   // +7%
+				MinPct:          0.07,   // 고정
+				MaxPct:          0.07,
+				QtyPct:          0.10,   // 원본의 10%
+				StopFloorProfit: &stopFloorProfit, // Stop Floor 활성화
 			},
 			TP2: exit.TriggerConfig{
-				Enabled:       true,
-				ThresholdPct:  decimal.NewFromFloat(10.0),
-				ExitPct:       decimal.NewFromFloat(0.5),
-				UseATRStop:    false,
-				OrderType:     "LMT",
+				BasePct: 0.10,   // +10%
+				MinPct:  0.10,   // 고정
+				MaxPct:  0.10,
+				QtyPct:  0.20,   // 원본의 20%
 			},
 			TP3: exit.TriggerConfig{
-				Enabled:       false,
-				ThresholdPct:  decimal.NewFromFloat(15.0),
-				ExitPct:       decimal.NewFromFloat(0.2),
-				UseATRStop:    false,
-				OrderType:     "LMT",
+				BasePct:       0.15,   // +15%
+				MinPct:        0.15,   // 고정
+				MaxPct:        0.15,
+				QtyPct:        0.30,   // 원본의 30%
+				StartTrailing: true,   // 트레일링 활성화
 			},
 			Trailing: exit.TrailingConfig{
-				Enabled:           true,
-				ActivationPct:     decimal.NewFromFloat(3.0),
-				TrailingPct:       decimal.NewFromFloat(1.5),
-				UseATRTrail:       false,
-				UsePartialExit:    true,
-				PartialExitPct:    decimal.NewFromFloat(0.5),
-				PartialActivation: decimal.NewFromFloat(5.0),
+				PctTrail: 0.03,  // HWM 대비 -3%
+				ATRK:     2.0,
 			},
 			TimeStop: exit.TimeStopConfig{
-				Enabled:        false,
-				MaxHoldMinutes: 240,
-				ExitPct:        decimal.NewFromFloat(1.0),
+				MaxHoldDays:      10,
+				NoMomentumDays:   3,
+				NoMomentumProfit: 0.02,
 			},
 			HardStop: exit.HardStopConfig{
-				Enabled:      true,
-				ThresholdPct: decimal.NewFromFloat(-7.0),
+				Enabled: true,
+				Pct:     -0.10,
 			},
 		},
 		IsActive:  true,

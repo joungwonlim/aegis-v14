@@ -49,9 +49,12 @@ func NewRouter(cfg *Config) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		// Holdings
 		r.Get("/holdings", cfg.HoldingsHandler.GetHoldings)
+		r.Put("/holdings/{account_id}/{symbol}/exit-mode", cfg.HoldingsHandler.UpdateExitMode)
 
 		// Order Intents
 		r.Get("/intents", cfg.IntentsHandler.GetIntents)
+		r.Post("/intents/{intent_id}/approve", cfg.IntentsHandler.ApproveIntent)
+		r.Post("/intents/{intent_id}/reject", cfg.IntentsHandler.RejectIntent)
 
 		// Orders
 		r.Get("/orders", cfg.OrdersHandler.GetOrders)

@@ -18,6 +18,7 @@ type Position struct {
 	Symbol        string          `json:"symbol"`
 	Side          string          `json:"side"`      // LONG (short later)
 	Qty           int64           `json:"qty"`       // Current quantity (Execution owns)
+	OriginalQty   int64           `json:"original_qty"` // Original entry quantity (for TP % calculation)
 	AvgPrice      decimal.Decimal `json:"avg_price"` // Average entry price (Execution owns)
 	EntryTS       time.Time       `json:"entry_ts"`
 	Status        string          `json:"status"`           // OPEN/CLOSING/CLOSED (Exit Engine owns)
@@ -55,7 +56,9 @@ type PositionState struct {
 	ATR            *decimal.Decimal `json:"atr"`              // ATR (cached, daily)
 	CooldownUntil  *time.Time       `json:"cooldown_until"`   // Re-entry cooldown
 	LastEvalTS     *time.Time       `json:"last_eval_ts"`
+	LastAvgPrice   *decimal.Decimal `json:"last_avg_price"`   // 마지막 평단가 (추가매수 감지용)
 	UpdatedTS      time.Time        `json:"updated_ts"`
+	BreachTicks    int              `json:"breach_ticks"` // Phase 1: 연속 breach 카운터 (confirm_ticks)
 }
 
 // FSM Phases
@@ -190,24 +193,27 @@ const (
 
 // Reason Codes
 const (
-	ReasonSL1         = "SL1"
-	ReasonSL2         = "SL2"
-	ReasonTP1         = "TP1"
-	ReasonTP2         = "TP2"
-	ReasonTP3         = "TP3"
-	ReasonTrail       = "TRAIL"
-	ReasonTime        = "TIME"
-	ReasonManual      = "MANUAL"
-	ReasonHardStop    = "HARDSTOP"
-	ReasonStopFloor   = "STOP_FLOOR"
+	ReasonSL1           = "SL1"
+	ReasonSL2           = "SL2"
+	ReasonTP1           = "TP1"
+	ReasonTP2           = "TP2"
+	ReasonTP3           = "TP3"
+	ReasonTrail         = "TRAIL"          // TP3 이후 잔량 전량 트레일
+	ReasonTrailPartial  = "TRAIL_PARTIAL"  // Phase 1: TP2 이후 원본 20% 부분 트레일 (단발)
+	ReasonTime          = "TIME"
+	ReasonManual        = "MANUAL"
+	ReasonHardStop      = "HARDSTOP"
+	ReasonStopFloor     = "STOP_FLOOR"
 )
 
 // Intent Status
 const (
-	IntentStatusNew      = "NEW"
-	IntentStatusAck      = "ACK"
-	IntentStatusRejected = "REJECTED"
-	IntentStatusFilled   = "FILLED"
+	IntentStatusPendingApproval = "PENDING_APPROVAL" // 사용자 승인 대기
+	IntentStatusNew             = "NEW"              // 승인됨, Execution 대기
+	IntentStatusAck             = "ACK"              // Execution에서 처리 시작
+	IntentStatusRejected        = "REJECTED"         // Execution 거부
+	IntentStatusFilled          = "FILLED"           // 체결 완료
+	IntentStatusCancelled       = "CANCELLED"        // 사용자가 취소
 )
 
 // ====================

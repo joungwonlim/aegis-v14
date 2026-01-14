@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -222,4 +223,126 @@ func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int)
 	}
 
 	return intents, nil
+}
+
+// LoadIntentsForPosition loads all intents for a position (for exit reason determination)
+func (r *OrderIntentRepository) LoadIntentsForPosition(ctx context.Context, positionID uuid.UUID, intentTypes []string, statuses []string, since time.Time) ([]*exit.OrderIntent, error) {
+	query := `
+		SELECT
+			intent_id,
+			position_id,
+			symbol,
+			intent_type,
+			qty,
+			order_type,
+			limit_price,
+			reason_code,
+			action_key,
+			status,
+			created_ts
+		FROM trade.order_intents
+		WHERE position_id = $1
+			AND created_ts >= $2
+	`
+
+	// Add intentTypes filter if provided
+	if len(intentTypes) > 0 {
+		query += " AND intent_type = ANY($3)"
+	}
+
+	// Add statuses filter if provided
+	if len(statuses) > 0 {
+		if len(intentTypes) > 0 {
+			query += " AND status = ANY($4)"
+		} else {
+			query += " AND status = ANY($3)"
+		}
+	}
+
+	query += " ORDER BY created_ts ASC"
+
+	// Build args based on filters
+	var args []interface{}
+	args = append(args, positionID, since)
+	if len(intentTypes) > 0 {
+		args = append(args, intentTypes)
+	}
+	if len(statuses) > 0 {
+		args = append(args, statuses)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query intents for position: %w", err)
+	}
+	defer rows.Close()
+
+	var intents []*exit.OrderIntent
+	for rows.Next() {
+		intent := &exit.OrderIntent{}
+		err := rows.Scan(
+			&intent.IntentID,
+			&intent.PositionID,
+			&intent.Symbol,
+			&intent.IntentType,
+			&intent.Qty,
+			&intent.OrderType,
+			&intent.LimitPrice,
+			&intent.ReasonCode,
+			&intent.ActionKey,
+			&intent.Status,
+			&intent.CreatedTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan intent: %w", err)
+		}
+		intents = append(intents, intent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return intents, nil
+}
+
+
+// ApproveIntent approves an intent (PENDING_APPROVAL → NEW)
+func (r *OrderIntentRepository) ApproveIntent(ctx context.Context, intentID uuid.UUID) error {
+	query := `
+		UPDATE trade.order_intents
+		SET status = $1
+		WHERE intent_id = $2 AND status = $3
+	`
+
+	result, err := r.pool.Exec(ctx, query, exit.IntentStatusNew, intentID, exit.IntentStatusPendingApproval)
+	if err != nil {
+		return fmt.Errorf("approve intent: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("intent not found or already processed")
+	}
+
+	return nil
+}
+
+// RejectIntent rejects an intent (PENDING_APPROVAL → CANCELLED)
+func (r *OrderIntentRepository) RejectIntent(ctx context.Context, intentID uuid.UUID) error {
+	query := `
+		UPDATE trade.order_intents
+		SET status = $1
+		WHERE intent_id = $2 AND status = $3
+	`
+
+	result, err := r.pool.Exec(ctx, query, exit.IntentStatusCancelled, intentID, exit.IntentStatusPendingApproval)
+	if err != nil {
+		return fmt.Errorf("reject intent: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("intent not found or already processed")
+	}
+
+	return nil
 }

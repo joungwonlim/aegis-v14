@@ -16,14 +16,16 @@ import (
 type RESTClient struct {
 	auth       *AuthClient
 	baseURL    string
+	isPaper    bool
 	httpClient *http.Client
 }
 
 // NewRESTClient creates a new RESTClient
-func NewRESTClient(auth *AuthClient, baseURL string) *RESTClient {
+func NewRESTClient(auth *AuthClient, baseURL string, isPaper bool) *RESTClient {
 	return &RESTClient{
 		auth:       auth,
 		baseURL:    baseURL,
+		isPaper:    isPaper,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -279,14 +281,14 @@ func (c *RESTClient) GetHoldings(ctx context.Context, accountNo string, accountP
 	q.Add("CTX_AREA_NK100", "")             // 연속조회키100
 	req.URL.RawQuery = q.Encode()
 
-	// Determine TR_ID based on environment (실전/모의투자)
-	trID := "TTTC8434R" // 실전투자
-	if c.auth.appKey != "" {
-		// 모의투자는 appkey가 "PS"로 시작
-		if len(c.auth.appKey) >= 2 && c.auth.appKey[:2] == "PS" {
-			trID = "VTTC8434R" // 모의투자
-		}
+	// Determine TR_ID based on isPaper flag (실전/모의투자)
+	trID := "TTTC8434R" // 실전투자 (default)
+	if c.isPaper {
+		trID = "VTTC8434R" // 모의투자
 	}
+
+	// Debug log
+	fmt.Printf("[DEBUG] isPaper: %v, TR_ID: %s\n", c.isPaper, trID)
 
 	// Add headers
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
