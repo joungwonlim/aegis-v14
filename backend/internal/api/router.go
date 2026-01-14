@@ -15,6 +15,7 @@ type Router struct {
 	config        *config.Config
 	dbPool        *postgres.Pool
 	healthHandler *handlers.HealthHandler
+	stockHandler  *handlers.StockHandler
 }
 
 // NewRouter creates a new API router with all dependencies
@@ -25,14 +26,19 @@ func NewRouter(cfg *config.Config, dbPool *postgres.Pool, version string) *Route
 	// Create Gin engine
 	engine := gin.New()
 
+	// Create repositories
+	stockRepo := postgres.NewStockRepository(dbPool)
+
 	// Create handlers
 	healthHandler := handlers.NewHealthHandler(dbPool, version)
+	stockHandler := handlers.NewStockHandler(stockRepo)
 
 	router := &Router{
 		engine:        engine,
 		config:        cfg,
 		dbPool:        dbPool,
 		healthHandler: healthHandler,
+		stockHandler:  stockHandler,
 	}
 
 	// Setup middlewares and routes
@@ -81,12 +87,12 @@ func (r *Router) setupRoutes() {
 		// Detailed health check
 		api.GET("/health/detailed", r.healthHandler.Detailed)
 
-		// TODO: Add more API routes
-		// stocks := api.Group("/stocks")
-		// {
-		// 	stocks.GET("", stockHandler.List)
-		// 	stocks.GET("/:code", stockHandler.Get)
-		// }
+		// Stocks API
+		stocks := api.Group("/stocks")
+		{
+			stocks.GET("", r.stockHandler.List)
+			stocks.GET("/:symbol", r.stockHandler.GetBySymbol)
+		}
 	}
 }
 

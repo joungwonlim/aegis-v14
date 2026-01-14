@@ -106,7 +106,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 |------------|------|------|------|
 | Common | `api/common.md` | ✅ 완료 | 공통 스펙 (응답 구조, 에러 코드, Pagination, CORS) |
 | Health Check | `api/health.md` | ✅ 완료 | Health Check API (liveness, readiness, detailed) |
-| Stocks | `api/stocks.md` | ⬜ TODO | 종목 조회/관리 |
+| Stocks | `api/stocks.md` | ✅ 완료 | 종목 조회/관리 (목록, 상세, 필터링, 검색) |
 | Signals | `api/signals.md` | ⬜ TODO | 시그널 조회 |
 | Portfolio | `api/portfolio.md` | ⬜ TODO | 포트폴리오 조회/관리 |
 | Orders | `api/orders.md` | ⬜ TODO | 주문 조회/실행 |
@@ -146,17 +146,17 @@ scripts/                         # 실행 스크립트 ✨ NEW
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 24/38 (Health Check API 추가)
-진행률: 63%
+총 문서 수: 25/39 (Stocks API 추가)
+진행률: 64%
 
-✅ 완료: 24
+✅ 완료: 25
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
   - architecture/module-dependencies.md (모듈 의존성 맵, 레이어 구조)
-  - architecture/data-flow.md (데이터 흐름, SSOT, Cache-Aside) ⭐ NEW
-  - architecture/layer-design.md (Go 프로젝트 구조, 5-Layer) ⭐ NEW
-  - architecture/tech-stack.md (Go/PostgreSQL/Next.js 선정 근거) ⭐ NEW
+  - architecture/data-flow.md (데이터 흐름, SSOT, Cache-Aside)
+  - architecture/layer-design.md (Go 프로젝트 구조, 5-Layer)
+  - architecture/tech-stack.md (Go/PostgreSQL/Next.js 선정 근거)
   - modules/module-catalog.md (모듈 카탈로그, 14개 모듈 등록)
   - modules/price-sync.md
   - modules/exit-engine.md (Control Gate + Profile System, SSOT 강화, v10 사고 사례)
@@ -168,15 +168,16 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - database/migration-stocks.md (stocks 테이블 마이그레이션 Phase 1~5, FK 제약조건)
   - database/setup-guide.md (DB 초기화 및 권한 설정, 권한 문제 방지)
   - api/common.md (API 공통 스펙, 응답 구조, 에러 코드, Pagination)
-  - api/health.md (Health Check API, liveness/readiness/detailed) ⭐ NEW
+  - api/health.md (Health Check API, liveness/readiness/detailed)
+  - api/stocks.md (Stocks API, 목록/상세/필터링/검색) ⭐ NEW
   - operations/exit-engine-playbook.md (If-Then 시나리오, 긴급 대응, 모니터링)
-  - operations/database-setup.md (SSOT 기반 DB 설정, 권한 문제 Zero 보장) ⭐ NEW
-  - operations/logging-strategy.md (구조화된 로깅, Request ID, 디버깅) ⭐ NEW
+  - operations/database-setup.md (SSOT 기반 DB 설정, 권한 문제 Zero 보장)
+  - operations/logging-strategy.md (구조화된 로깅, Request ID, 디버깅)
   - reviews/2026-01-13-ssot-review.md (SSOT 검증 아카이브)
-  - scripts/db/ (DB 초기화 스크립트 5개)
+  - scripts/db/ (DB 초기화 스크립트 6개)
 
 🚧 진행 중: 0
-⬜ TODO: 14
+⬜ TODO: 13
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
