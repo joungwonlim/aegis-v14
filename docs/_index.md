@@ -46,9 +46,9 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | `architecture/pick-to-execution-pipeline.md` | ✅ 완료 | 다중 선정 모듈 → 단일 실행 시스템 파이프라인 |
 | `architecture/architecture-improvements.md` | ✅ 완료 | 성능 및 안정성 개선안 (P0~P2 우선순위, Redis 읽기 가속 - SSOT 원칙 준수) |
 | `architecture/module-dependencies.md` | ✅ 완료 | 모듈 의존성 맵 (레이어 구조, 의존성 방향, 순환 참조 방지) |
-| `architecture/data-flow.md` | ⬜ TODO | 데이터 흐름 다이어그램 |
-| `architecture/layer-design.md` | ⬜ TODO | 레이어 구조 설계 |
-| `architecture/tech-stack.md` | ⬜ TODO | 기술 스택 선정 및 근거 |
+| `architecture/data-flow.md` | ✅ 완료 | 데이터 흐름 다이어그램 (SSOT, Cache-Aside, 이벤트 기반) |
+| `architecture/layer-design.md` | ✅ 완료 | 레이어 구조 설계 (Go 프로젝트 구조, 5-Layer Architecture) |
+| `architecture/tech-stack.md` | ✅ 완료 | 기술 스택 선정 및 근거 (Go, PostgreSQL, Next.js) |
 
 ---
 
@@ -143,10 +143,10 @@ scripts/                         # 실행 스크립트 ✨ NEW
 ## 📊 설계 진행 현황
 
 ```
-총 문서 수: 17/34 (모듈 독립 작업 체계 추가)
-진행률: 50%
+총 문서 수: 20/34 (Architecture 완성)
+진행률: 59%
 
-✅ 완료: 17
+✅ 완료: 20
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
@@ -166,7 +166,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - scripts/db/ (DB 초기화 스크립트 5개) ⭐ NEW
 
 🚧 진행 중: 0
-⬜ TODO: 17
+⬜ TODO: 14
 
 핵심 Quant Runtime 완료 (PriceSync, Exit, Reentry, Execution) ✅
 외부 API 연동 설계 완료 (KIS, Naver) ✅
@@ -181,6 +181,7 @@ SSOT 검증 및 수정 완료 (문서 간 불일치 5건 해결) ✅
 아키텍처 개선안 작성 완료 (P0~P2 우선순위별 6건) ✅
 Exit Engine 운영 플레이북 작성 완료 (If-Then, 긴급 대응, 조정 우선순위) ✅
 모듈 독립 작업 체계 완료 (모듈 카탈로그, 의존성 맵, DB 권한 문제 해결) ✅
+Architecture 설계 완성 (데이터 흐름, 레이어 구조, 기술 스택) ✅
 ```
 
 ---
