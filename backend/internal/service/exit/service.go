@@ -1,0 +1,148 @@
+package exit
+
+import (
+	"context"
+	"sync"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
+	"github.com/wonny/aegis/v14/internal/domain/exit"
+	"github.com/wonny/aegis/v14/internal/service/pricesync"
+)
+
+// Service implements Exit Engine business logic
+type Service struct {
+	// Repositories
+	posRepo       exit.PositionRepository
+	stateRepo     exit.PositionStateRepository
+	controlRepo   exit.ExitControlRepository
+	intentRepo    exit.OrderIntentRepository
+
+	// Dependencies
+	priceSync     *pricesync.Service
+
+	// Default profile (loaded from config)
+	defaultProfile *exit.ExitProfile
+
+	// State
+	mu        sync.RWMutex
+	isRunning bool
+
+	// Context
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// NewService creates a new Exit service
+func NewService(
+	posRepo exit.PositionRepository,
+	stateRepo exit.PositionStateRepository,
+	controlRepo exit.ExitControlRepository,
+	intentRepo exit.OrderIntentRepository,
+	priceSync *pricesync.Service,
+	defaultProfile *exit.ExitProfile,
+) *Service {
+	return &Service{
+		posRepo:        posRepo,
+		stateRepo:      stateRepo,
+		controlRepo:    controlRepo,
+		intentRepo:     intentRepo,
+		priceSync:      priceSync,
+		defaultProfile: defaultProfile,
+		isRunning:      false,
+	}
+}
+
+// Start starts the Exit evaluation loop
+func (s *Service) Start(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.isRunning {
+		log.Warn().Msg("Exit Service already running")
+		return nil
+	}
+
+	s.ctx, s.cancel = context.WithCancel(ctx)
+	s.isRunning = true
+
+	log.Info().Msg("Starting Exit Service...")
+
+	// Start evaluation loop
+	go s.evaluationLoop()
+
+	log.Info().Msg("✅ Exit Service started")
+
+	return nil
+}
+
+// Stop stops the Exit evaluation loop
+func (s *Service) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.isRunning {
+		return
+	}
+
+	log.Info().Msg("Stopping Exit Service...")
+
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	s.isRunning = false
+
+	log.Info().Msg("✅ Exit Service stopped")
+}
+
+// IsRunning returns whether Exit Service is running
+func (s *Service) IsRunning() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.isRunning
+}
+
+// CreateManualIntent creates a manual exit intent
+func (s *Service) CreateManualIntent(ctx context.Context, positionID uuid.UUID, qty int64, orderType string) error {
+	// Get position
+	pos, err := s.posRepo.GetPosition(ctx, positionID)
+	if err != nil {
+		return err
+	}
+
+	// Check exit mode
+	if pos.ExitMode == exit.ExitModeDisabled {
+		return exit.ErrExitDisabled
+	}
+
+	// Check available qty
+	availableQty, err := s.posRepo.GetAvailableQty(ctx, positionID)
+	if err != nil {
+		return err
+	}
+
+	if availableQty <= 0 {
+		return exit.ErrNoAvailableQty
+	}
+
+	// Clamp qty
+	if qty > availableQty {
+		qty = availableQty
+	}
+
+	// Create intent
+	intent := &exit.OrderIntent{
+		IntentID:   uuid.New(),
+		PositionID: positionID,
+		Symbol:     pos.Symbol,
+		IntentType: exit.IntentTypeExitFull,
+		Qty:        qty,
+		OrderType:  orderType,
+		ReasonCode: exit.ReasonManual,
+		ActionKey:  positionID.String() + ":MANUAL",
+		Status:     exit.IntentStatusNew,
+	}
+
+	return s.intentRepo.CreateIntent(ctx, intent)
+}

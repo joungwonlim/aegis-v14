@@ -1,0 +1,262 @@
+package exit
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
+	"github.com/shopspring/decimal"
+	"github.com/wonny/aegis/v14/internal/domain/exit"
+)
+
+const (
+	evaluationInterval = 3 * time.Second  // 1~5초 권장
+	maxRetries         = 3                // 최대 재평가 횟수
+	freshnessThreshold = 10 * time.Second // 가격 신선도 임계값
+)
+
+// evaluationLoop runs the main exit evaluation loop (1~5초 주기)
+func (s *Service) evaluationLoop() {
+	ticker := time.NewTicker(evaluationInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Evaluate all positions
+			if err := s.evaluateAllPositions(s.ctx); err != nil {
+				log.Error().Err(err).Msg("Exit evaluation failed")
+			}
+
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// evaluateAllPositions evaluates all OPEN positions for exit triggers
+func (s *Service) evaluateAllPositions(ctx context.Context) error {
+	// 1. Check Control Gate
+	control, err := s.controlRepo.GetControl(ctx)
+	if err != nil {
+		return fmt.Errorf("get control: %w", err)
+	}
+
+	log.Debug().Str("mode", control.Mode).Msg("Exit control mode")
+
+	// 2. Load OPEN positions (하드코딩된 accountID, 추후 개선)
+	// TODO: accountID를 config에서 로드
+	positions, err := s.posRepo.GetOpenPositions(ctx, "default")
+	if err != nil {
+		return fmt.Errorf("get open positions: %w", err)
+	}
+
+	log.Debug().Int("count", len(positions)).Msg("Evaluating positions")
+
+	// 3. Evaluate each position
+	for _, pos := range positions {
+		// Skip disabled positions
+		if pos.ExitMode == exit.ExitModeDisabled {
+			log.Debug().Str("symbol", pos.Symbol).Msg("Position exit disabled, skipping")
+			continue
+		}
+
+		// Evaluate position with retry
+		if err := s.evaluatePositionWithRetry(ctx, pos, control.Mode, 0); err != nil {
+			log.Error().
+				Err(err).
+				Str("symbol", pos.Symbol).
+				Str("position_id", pos.PositionID.String()).
+				Msg("Position evaluation failed")
+		}
+	}
+
+	return nil
+}
+
+// evaluatePositionWithRetry evaluates a position with retry on version conflict
+func (s *Service) evaluatePositionWithRetry(ctx context.Context, pos *exit.Position, controlMode string, attempt int) error {
+	if attempt >= maxRetries {
+		return exit.ErrMaxRetriesExceeded
+	}
+
+	err := s.evaluatePosition(ctx, pos, controlMode)
+	if err == exit.ErrPositionChanged {
+		// Version conflict, retry with updated position
+		log.Warn().
+			Str("symbol", pos.Symbol).
+			Int("attempt", attempt+1).
+			Msg("Position changed, retrying evaluation")
+
+		// Reload position
+		updatedPos, err := s.posRepo.GetPosition(ctx, pos.PositionID)
+		if err != nil {
+			return err
+		}
+
+		return s.evaluatePositionWithRetry(ctx, updatedPos, controlMode, attempt+1)
+	}
+
+	return err
+}
+
+// evaluatePosition evaluates a single position for exit triggers
+func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, controlMode string) error {
+	// 1. Create position snapshot (v10 방어: 평가 시작 시 snapshot)
+	snapshot := PositionSnapshot{
+		PositionID: pos.PositionID,
+		Symbol:     pos.Symbol,
+		Qty:        pos.Qty,
+		AvgPrice:   pos.AvgPrice,
+		Version:    pos.Version,
+	}
+
+	// 2. Get position state (FSM)
+	state, err := s.stateRepo.GetState(ctx, pos.PositionID)
+	if err != nil {
+		return fmt.Errorf("get state: %w", err)
+	}
+
+	// 3. Get current price (v10 방어: Freshness 검증)
+	bestPrice, err := s.priceSync.GetBestPrice(ctx, pos.Symbol)
+	if err != nil {
+		return fmt.Errorf("get best price: %w", err)
+	}
+
+	// 4. Check price freshness (v10 방어: 타임스탬프 검증)
+	// Check if price is stale (from BestPrice)
+	if bestPrice.IsStale {
+		log.Warn().
+			Str("symbol", pos.Symbol).
+			Msg("Price is stale, skipping evaluation (Fail-Closed)")
+		return exit.ErrStalePrice
+	}
+
+	// Check timestamp age
+	age := time.Since(bestPrice.BestTS)
+	if age > freshnessThreshold {
+		log.Warn().
+			Str("symbol", pos.Symbol).
+			Float64("age_seconds", age.Seconds()).
+			Msg("Price too old, skipping evaluation")
+		return exit.ErrStalePrice
+	}
+
+	// 5. Resolve exit profile (Position > Symbol > Default)
+	profile := s.resolveExitProfile(ctx, pos)
+	if profile == nil {
+		log.Warn().Str("symbol", pos.Symbol).Msg("No exit profile, using default")
+		profile = s.defaultProfile
+	}
+
+	// 6. Evaluate triggers (우선순위 순서)
+	trigger := s.evaluateTriggers(snapshot, state, bestPrice, profile, controlMode)
+	if trigger == nil {
+		// No trigger hit
+		return nil
+	}
+
+	// 7. Create intent (v10 방어: Intent 생성 직전 DB 재확인)
+	return s.createIntentWithVersionCheck(ctx, snapshot, trigger)
+}
+
+// PositionSnapshot represents a position snapshot at evaluation start (v10 방어)
+type PositionSnapshot struct {
+	PositionID uuid.UUID
+	Symbol     string
+	Qty        int64
+	AvgPrice   decimal.Decimal
+	Version    int
+}
+
+// createIntentWithVersionCheck creates an intent with version check (v10 방어)
+func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot PositionSnapshot, trigger *exit.ExitTrigger) error {
+	// 1. Re-check position version (v10 방어: 버전 기반 낙관적 잠금)
+	pos, err := s.posRepo.GetPosition(ctx, snapshot.PositionID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Version mismatch detection
+	if pos.Version != snapshot.Version {
+		log.Warn().
+			Str("symbol", snapshot.Symbol).
+			Int("old_version", snapshot.Version).
+			Int("new_version", pos.Version).
+			Str("old_avg_price", snapshot.AvgPrice.String()).
+			Str("new_avg_price", pos.AvgPrice.String()).
+			Msg("Position changed during evaluation, need re-evaluation")
+		return exit.ErrPositionChanged
+	}
+
+	// 3. Get available qty (v10 방어: Locked Qty 차감)
+	availableQty, err := s.posRepo.GetAvailableQty(ctx, snapshot.PositionID)
+	if err != nil {
+		return err
+	}
+
+	if availableQty <= 0 {
+		log.Warn().
+			Str("symbol", snapshot.Symbol).
+			Int64("available_qty", availableQty).
+			Msg("No available qty, intent creation skipped")
+		return exit.ErrNoAvailableQty
+	}
+
+	// 4. Clamp qty to available
+	qty := trigger.Qty
+	if qty > availableQty {
+		log.Warn().
+			Str("symbol", snapshot.Symbol).
+			Int64("trigger_qty", trigger.Qty).
+			Int64("available_qty", availableQty).
+			Msg("Clamping qty to available")
+		qty = availableQty
+	}
+
+	// 5. Determine intent type
+	intentType := exit.IntentTypeExitPartial
+	if qty == pos.Qty {
+		intentType = exit.IntentTypeExitFull
+	}
+
+	// 6. Create intent (멱등)
+	actionKey := fmt.Sprintf("%s:%s", snapshot.PositionID.String(), trigger.ReasonCode)
+	intent := &exit.OrderIntent{
+		IntentID:   uuid.New(),
+		PositionID: snapshot.PositionID,
+		Symbol:     snapshot.Symbol,
+		IntentType: intentType,
+		Qty:        qty,
+		OrderType:  trigger.OrderType,
+		LimitPrice: trigger.LimitPrice,
+		ReasonCode: trigger.ReasonCode,
+		ActionKey:  actionKey,
+		Status:     exit.IntentStatusNew,
+	}
+
+	err = s.intentRepo.CreateIntent(ctx, intent)
+	if err == exit.ErrIntentExists {
+		// Idempotent (already exists)
+		log.Debug().
+			Str("symbol", snapshot.Symbol).
+			Str("action_key", actionKey).
+			Msg("Intent already exists (idempotent)")
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("create intent: %w", err)
+	}
+
+	log.Info().
+		Str("symbol", snapshot.Symbol).
+		Str("reason", trigger.ReasonCode).
+		Int64("qty", qty).
+		Str("type", intentType).
+		Msg("Exit intent created")
+
+	return nil
+}
