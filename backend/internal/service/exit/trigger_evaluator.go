@@ -73,10 +73,14 @@ func (s *Service) evaluateTriggers(
 	}
 
 	// Priority 3: TP3
-	// TODO: Implement TP3 evaluation
+	if trigger := s.evaluateTP3(snapshot, pnlPct, profile); trigger != nil {
+		return trigger
+	}
 
 	// Priority 4: TP2
-	// TODO: Implement TP2 evaluation
+	if trigger := s.evaluateTP2(snapshot, pnlPct, profile); trigger != nil {
+		return trigger
+	}
 
 	// Priority 5: TP1
 	if trigger := s.evaluateTP1(snapshot, pnlPct, profile); trigger != nil {
@@ -84,10 +88,16 @@ func (s *Service) evaluateTriggers(
 	}
 
 	// Priority 6: TRAIL (only in TRAILING_ACTIVE phase)
-	// TODO: Implement TRAIL evaluation
+	if state.Phase == exit.PhaseTrailingActive {
+		if trigger := s.evaluateTrailing(snapshot, currentPrice, state, profile); trigger != nil {
+			return trigger
+		}
+	}
 
 	// Priority 7: TIME
-	// TODO: Implement TIME evaluation
+	if trigger := s.evaluateTimeStop(snapshot, profile); trigger != nil {
+		return trigger
+	}
 
 	// No trigger hit
 	return nil
@@ -173,6 +183,112 @@ func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			// TODO: Calculate limit price with slippage
 		}
 	}
+
+	return nil
+}
+
+// evaluateTP2 evaluates TP2 (take profit 2) trigger
+func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
+	// Calculate scaled threshold
+	threshold := decimal.NewFromFloat(profile.Config.TP2.BasePct * 100) // Convert to %
+
+	if pnlPct.GreaterThanOrEqual(threshold) {
+		// Partial exit
+		qtyPct := profile.Config.TP2.QtyPct
+		qty := int64(float64(snapshot.Qty) * qtyPct)
+		if qty < 1 {
+			qty = 1
+		}
+
+		log.Info().
+			Str("symbol", snapshot.Symbol).
+			Str("pnl_pct", pnlPct.StringFixed(2)).
+			Str("threshold", threshold.StringFixed(2)).
+			Int64("qty", qty).
+			Msg("TP2 trigger hit")
+
+		return &exit.ExitTrigger{
+			ReasonCode: exit.ReasonTP2,
+			Qty:        qty,
+			OrderType:  exit.OrderTypeLMT,
+			// TODO: Calculate limit price with slippage
+		}
+	}
+
+	return nil
+}
+
+// evaluateTP3 evaluates TP3 (take profit 3) trigger
+func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
+	// Calculate scaled threshold
+	threshold := decimal.NewFromFloat(profile.Config.TP3.BasePct * 100) // Convert to %
+
+	if pnlPct.GreaterThanOrEqual(threshold) {
+		// Partial exit
+		qtyPct := profile.Config.TP3.QtyPct
+		qty := int64(float64(snapshot.Qty) * qtyPct)
+		if qty < 1 {
+			qty = 1
+		}
+
+		log.Info().
+			Str("symbol", snapshot.Symbol).
+			Str("pnl_pct", pnlPct.StringFixed(2)).
+			Str("threshold", threshold.StringFixed(2)).
+			Int64("qty", qty).
+			Msg("TP3 trigger hit")
+
+		return &exit.ExitTrigger{
+			ReasonCode: exit.ReasonTP3,
+			Qty:        qty,
+			OrderType:  exit.OrderTypeLMT,
+			// TODO: Calculate limit price with slippage
+		}
+	}
+
+	return nil
+}
+
+// evaluateTrailing evaluates trailing stop trigger (only in TRAILING_ACTIVE phase)
+func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState, profile *exit.ExitProfile) *exit.ExitTrigger {
+	// Check if HWM is set
+	if state.HWMPrice == nil {
+		log.Warn().Str("symbol", snapshot.Symbol).Msg("TRAILING_ACTIVE but HWM not set, skipping")
+		return nil
+	}
+
+	// Calculate trailing stop price
+	trailingPct := decimal.NewFromFloat(profile.Config.Trailing.PctTrail) // e.g., 0.04 (4%)
+	trailingStopPrice := state.HWMPrice.Mul(decimal.NewFromInt(1).Sub(trailingPct))
+
+	if currentPrice.LessThanOrEqual(trailingStopPrice) {
+		log.Info().
+			Str("symbol", snapshot.Symbol).
+			Str("current_price", currentPrice.String()).
+			Str("hwm_price", state.HWMPrice.String()).
+			Str("trailing_stop_price", trailingStopPrice.String()).
+			Msg("Trailing stop trigger hit")
+
+		return &exit.ExitTrigger{
+			ReasonCode: exit.ReasonTrail,
+			Qty:        snapshot.Qty, // Full qty (remaining)
+			OrderType:  exit.OrderTypeMKT,
+		}
+	}
+
+	return nil
+}
+
+// evaluateTimeStop evaluates time-based exit trigger
+func (s *Service) evaluateTimeStop(snapshot PositionSnapshot, profile *exit.ExitProfile) *exit.ExitTrigger {
+	// Check if max hold days is configured
+	if profile.Config.TimeStop.MaxHoldDays <= 0 {
+		return nil
+	}
+
+	// TODO: Calculate time-based exit
+	// Need to check position entry time vs current time
+	// For now, skip implementation (requires Position.EntryTS from snapshot)
 
 	return nil
 }
