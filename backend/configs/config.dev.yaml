@@ -1,0 +1,8 @@
+# Development Configuration
+
+server:
+  mode: debug
+
+logging:
+  level: debug
+  format: console

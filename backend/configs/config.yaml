@@ -1,0 +1,42 @@
+# Aegis v14 Configuration
+
+server:
+  port: 8099
+  mode: debug  # debug, release, test
+  read_timeout: 30s
+  write_timeout: 30s
+
+database:
+  host: localhost
+  port: 5432
+  name: aegis_v14
+  user: aegis_v14
+  password: aegis_v14_won
+  max_conns: 25
+  min_conns: 5
+  max_conn_lifetime: 1h
+  max_conn_idle_time: 30m
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 10
+  min_idle_conns: 5
+  pool_timeout: 30s
+
+logging:
+  level: debug  # debug, info, warn, error
+  format: json  # json, console
+  output: stdout  # stdout, file
+
+kis:
+  app_key: ""
+  secret_key: ""
+  base_url: "https://openapi.koreainvestment.com:9443"
+  websocket_url: "ws://ops.koreainvestment.com:21000"
+
+naver:
+  base_url: "https://finance.naver.com"
+  user_agent: "Mozilla/5.0"

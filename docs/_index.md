@@ -150,8 +150,11 @@ scripts/                         # 실행 스크립트 ✨ NEW
   - architecture/system-overview.md (Router SSOT 추가)
   - architecture/pick-to-execution-pipeline.md
   - architecture/architecture-improvements.md (성능/안정성 개선안 P0~P2)
-  - architecture/module-dependencies.md (모듈 의존성 맵, 레이어 구조) ⭐ NEW
-  - modules/module-catalog.md (모듈 카탈로그, 14개 모듈 등록) ⭐ NEW
+  - architecture/module-dependencies.md (모듈 의존성 맵, 레이어 구조)
+  - architecture/data-flow.md (데이터 흐름, SSOT, Cache-Aside) ⭐ NEW
+  - architecture/layer-design.md (Go 프로젝트 구조, 5-Layer) ⭐ NEW
+  - architecture/tech-stack.md (Go/PostgreSQL/Next.js 선정 근거) ⭐ NEW
+  - modules/module-catalog.md (모듈 카탈로그, 14개 모듈 등록)
   - modules/price-sync.md
   - modules/exit-engine.md (Control Gate + Profile System, SSOT 강화, v10 사고 사례)
   - modules/reentry-engine.md (ExitEvent 기반 디커플링)

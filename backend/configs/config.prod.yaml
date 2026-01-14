@@ -1,0 +1,14 @@
+# Production Configuration
+
+server:
+  mode: release
+
+database:
+  max_conns: 50
+
+redis:
+  pool_size: 20
+
+logging:
+  level: info
+  format: json
