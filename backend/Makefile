@@ -63,8 +63,13 @@ docker-ps: ## Show running containers
 	$(DOCKER_COMPOSE) ps
 
 # Database
-db-init: ## Initialize database (run scripts/db/01 and 02)
-	@echo "Initializing database..."
+db-init: ## Initialize database (automated script)
+	@echo "Running automated database initialization..."
+	./scripts/init-dev.sh
+	@echo "✅ Database initialized!"
+
+db-init-manual: ## Initialize database manually (run scripts/db/01 and 02)
+	@echo "Initializing database manually..."
 	psql -U postgres -f ../scripts/db/01_create_database.sql
 	psql -U aegis_v14 -d aegis_v14 -f ../scripts/db/02_create_schemas.sql
 	@echo "Database initialized!"
