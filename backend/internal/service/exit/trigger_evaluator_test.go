@@ -2,6 +2,7 @@ package exit
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -19,6 +20,7 @@ func TestEvaluateSL2(t *testing.T) {
 		Symbol:     "005930",
 		Qty:        100,
 		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour), // 1 day ago
 		Version:    1,
 	}
 
@@ -70,6 +72,7 @@ func TestEvaluateSL1(t *testing.T) {
 		Symbol:     "005930",
 		Qty:        100,
 		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour), // 1 day ago
 		Version:    1,
 	}
 
@@ -118,6 +121,7 @@ func TestEvaluateSL1(t *testing.T) {
 			Symbol:     "005930",
 			Qty:        1,
 			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-24 * time.Hour),
 			Version:    1,
 		}
 
@@ -143,6 +147,7 @@ func TestEvaluateTP1(t *testing.T) {
 		Symbol:     "005930",
 		Qty:        100,
 		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour), // 1 day ago
 		Version:    1,
 	}
 
@@ -185,6 +190,110 @@ func TestEvaluateTP1(t *testing.T) {
 	})
 }
 
+// TestEvaluateTP2 tests TP2 trigger evaluation
+func TestEvaluateTP2(t *testing.T) {
+	svc := &Service{}
+
+	snapshot := PositionSnapshot{
+		PositionID: uuid.New(),
+		Symbol:     "005930",
+		Qty:        100,
+		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour), // 1 day ago
+		Version:    1,
+	}
+
+	profile := &exit.ExitProfile{
+		Config: exit.ExitProfileConfig{
+			TP2: exit.TriggerConfig{
+				BasePct: 0.10, // +10%
+				QtyPct:  0.25, // 25%
+			},
+		},
+	}
+
+	t.Run("TP2 hit", func(t *testing.T) {
+		pnlPct := decimal.NewFromFloat(10.5) // +10.5%
+
+		trigger := svc.evaluateTP2(snapshot, pnlPct, profile)
+
+		if trigger == nil {
+			t.Fatal("Expected TP2 trigger, got nil")
+		}
+		if trigger.ReasonCode != exit.ReasonTP2 {
+			t.Errorf("Expected ReasonTP2, got %s", trigger.ReasonCode)
+		}
+		if trigger.Qty != 25 {
+			t.Errorf("Expected qty 25 (25%% of 100), got %d", trigger.Qty)
+		}
+		if trigger.OrderType != exit.OrderTypeLMT {
+			t.Errorf("Expected LMT order, got %s", trigger.OrderType)
+		}
+	})
+
+	t.Run("TP2 not hit", func(t *testing.T) {
+		pnlPct := decimal.NewFromFloat(8.0) // +8% (below TP2)
+
+		trigger := svc.evaluateTP2(snapshot, pnlPct, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger, got %+v", trigger)
+		}
+	})
+}
+
+// TestEvaluateTP3 tests TP3 trigger evaluation
+func TestEvaluateTP3(t *testing.T) {
+	svc := &Service{}
+
+	snapshot := PositionSnapshot{
+		PositionID: uuid.New(),
+		Symbol:     "005930",
+		Qty:        100,
+		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour), // 1 day ago
+		Version:    1,
+	}
+
+	profile := &exit.ExitProfile{
+		Config: exit.ExitProfileConfig{
+			TP3: exit.TriggerConfig{
+				BasePct: 0.16, // +16%
+				QtyPct:  0.20, // 20%
+			},
+		},
+	}
+
+	t.Run("TP3 hit", func(t *testing.T) {
+		pnlPct := decimal.NewFromFloat(17.0) // +17%
+
+		trigger := svc.evaluateTP3(snapshot, pnlPct, profile)
+
+		if trigger == nil {
+			t.Fatal("Expected TP3 trigger, got nil")
+		}
+		if trigger.ReasonCode != exit.ReasonTP3 {
+			t.Errorf("Expected ReasonTP3, got %s", trigger.ReasonCode)
+		}
+		if trigger.Qty != 20 {
+			t.Errorf("Expected qty 20 (20%% of 100), got %d", trigger.Qty)
+		}
+		if trigger.OrderType != exit.OrderTypeLMT {
+			t.Errorf("Expected LMT order, got %s", trigger.OrderType)
+		}
+	})
+
+	t.Run("TP3 not hit", func(t *testing.T) {
+		pnlPct := decimal.NewFromFloat(12.0) // +12% (below TP3)
+
+		trigger := svc.evaluateTP3(snapshot, pnlPct, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger, got %+v", trigger)
+		}
+	})
+}
+
 // TestEvaluateStopFloor tests Stop Floor trigger evaluation
 func TestEvaluateStopFloor(t *testing.T) {
 	svc := &Service{}
@@ -194,6 +303,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 		Symbol:     "005930",
 		Qty:        75, // Remaining after TP1 (25% exit)
 		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour),
 		Version:    2,
 	}
 
@@ -263,6 +373,7 @@ func TestEvaluateTrailing(t *testing.T) {
 		Symbol:     "005930",
 		Qty:        50, // Remaining after TP1+TP2+TP3
 		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour),
 		Version:    4,
 	}
 
@@ -341,6 +452,7 @@ func TestTriggerPriority(t *testing.T) {
 		Symbol:     "005930",
 		Qty:        100,
 		AvgPrice:   decimal.NewFromInt(70000),
+		EntryTS:    time.Now().Add(-24 * time.Hour), // 1 day ago
 		Version:    1,
 	}
 
@@ -403,6 +515,251 @@ func TestTriggerPriority(t *testing.T) {
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger (PAUSE_ALL), got %+v", trigger)
+		}
+	})
+}
+
+// TestEvaluateTimeStop tests TIME_STOP trigger evaluation
+func TestEvaluateTimeStop(t *testing.T) {
+	svc := &Service{}
+
+	currentPrice := decimal.NewFromInt(72000) // +2.86% from 70000
+
+	t.Run("Max hold days exceeded", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-31 * 24 * time.Hour), // 31 days ago
+			Version:    1,
+		}
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays: 30,
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase: exit.PhaseOpen,
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, currentPrice, profile)
+
+		if trigger == nil {
+			t.Fatal("Expected TIME_STOP trigger (max hold days), got nil")
+		}
+		if trigger.ReasonCode != exit.ReasonTime {
+			t.Errorf("Expected ReasonTime, got %s", trigger.ReasonCode)
+		}
+		if trigger.Qty != 100 {
+			t.Errorf("Expected full qty 100, got %d", trigger.Qty)
+		}
+		if trigger.OrderType != exit.OrderTypeMKT {
+			t.Errorf("Expected MKT order, got %s", trigger.OrderType)
+		}
+	})
+
+	t.Run("Max hold days not exceeded", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-20 * 24 * time.Hour), // 20 days ago
+			Version:    1,
+		}
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays: 30,
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase: exit.PhaseOpen,
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, currentPrice, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger (within max hold days), got %+v", trigger)
+		}
+	})
+
+	t.Run("No momentum with HWM", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-11 * 24 * time.Hour), // 11 days ago
+			Version:    1,
+		}
+
+		hwmPrice := decimal.NewFromInt(70280) // Only +0.4% max profit
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays:      30,
+					NoMomentumDays:   10,
+					NoMomentumProfit: 0.01, // Require 1% min profit
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase:    exit.PhaseTrailingActive,
+			HWMPrice: &hwmPrice,
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, currentPrice, profile)
+
+		if trigger == nil {
+			t.Fatal("Expected TIME_STOP trigger (no momentum with HWM), got nil")
+		}
+		if trigger.ReasonCode != exit.ReasonTime {
+			t.Errorf("Expected ReasonTime, got %s", trigger.ReasonCode)
+		}
+	})
+
+	t.Run("No momentum without HWM (current price)", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-11 * 24 * time.Hour), // 11 days ago
+			Version:    1,
+		}
+
+		lowCurrentPrice := decimal.NewFromInt(70280) // Only +0.4% current profit
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays:      30,
+					NoMomentumDays:   10,
+					NoMomentumProfit: 0.01, // Require 1% min profit
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase:    exit.PhaseOpen,
+			HWMPrice: nil, // No HWM, use current price
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, lowCurrentPrice, profile)
+
+		if trigger == nil {
+			t.Fatal("Expected TIME_STOP trigger (no momentum, no HWM), got nil")
+		}
+		if trigger.ReasonCode != exit.ReasonTime {
+			t.Errorf("Expected ReasonTime, got %s", trigger.ReasonCode)
+		}
+	})
+
+	t.Run("No momentum not triggered (sufficient profit)", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-11 * 24 * time.Hour), // 11 days ago
+			Version:    1,
+		}
+
+		hwmPrice := decimal.NewFromInt(71000) // +1.43% max profit (above threshold)
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays:      30,
+					NoMomentumDays:   10,
+					NoMomentumProfit: 0.01, // Require 1% min profit
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase:    exit.PhaseTrailingActive,
+			HWMPrice: &hwmPrice,
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, currentPrice, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger (sufficient profit), got %+v", trigger)
+		}
+	})
+
+	t.Run("No momentum not triggered (insufficient days)", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-8 * 24 * time.Hour), // Only 8 days ago
+			Version:    1,
+		}
+
+		hwmPrice := decimal.NewFromInt(70280) // Only +0.4% max profit
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays:      30,
+					NoMomentumDays:   10, // Need 10 days
+					NoMomentumProfit: 0.01,
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase:    exit.PhaseTrailingActive,
+			HWMPrice: &hwmPrice,
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, currentPrice, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger (insufficient days), got %+v", trigger)
+		}
+	})
+
+	t.Run("MaxHoldDays disabled (0)", func(t *testing.T) {
+		snapshot := PositionSnapshot{
+			PositionID: uuid.New(),
+			Symbol:     "005930",
+			Qty:        100,
+			AvgPrice:   decimal.NewFromInt(70000),
+			EntryTS:    time.Now().Add(-100 * 24 * time.Hour), // 100 days ago
+			Version:    1,
+		}
+
+		profile := &exit.ExitProfile{
+			Config: exit.ExitProfileConfig{
+				TimeStop: exit.TimeStopConfig{
+					MaxHoldDays: 0, // Disabled
+				},
+			},
+		}
+
+		state := &exit.PositionState{
+			Phase: exit.PhaseOpen,
+		}
+
+		trigger := svc.evaluateTimeStop(snapshot, state, currentPrice, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger (MaxHoldDays disabled), got %+v", trigger)
 		}
 	})
 }

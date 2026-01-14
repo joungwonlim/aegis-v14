@@ -1,6 +1,8 @@
 package exit
 
 import (
+	"time"
+
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
@@ -104,7 +106,7 @@ func (s *Service) evaluateTriggers(
 	}
 
 	// Priority 8: TIME
-	if trigger := s.evaluateTimeStop(snapshot, profile); trigger != nil {
+	if trigger := s.evaluateTimeStop(snapshot, state, currentPrice, profile); trigger != nil {
 		return trigger
 	}
 
@@ -315,15 +317,60 @@ func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decim
 }
 
 // evaluateTimeStop evaluates time-based exit trigger
-func (s *Service) evaluateTimeStop(snapshot PositionSnapshot, profile *exit.ExitProfile) *exit.ExitTrigger {
+func (s *Service) evaluateTimeStop(snapshot PositionSnapshot, state *exit.PositionState, currentPrice decimal.Decimal, profile *exit.ExitProfile) *exit.ExitTrigger {
 	// Check if max hold days is configured
 	if profile.Config.TimeStop.MaxHoldDays <= 0 {
 		return nil
 	}
 
-	// TODO: Calculate time-based exit
-	// Need to check position entry time vs current time
-	// For now, skip implementation (requires Position.EntryTS from snapshot)
+	// Calculate holding days
+	holdingDays := int(time.Since(snapshot.EntryTS).Hours() / 24)
+
+	// Condition 1: Max hold days exceeded
+	if holdingDays >= profile.Config.TimeStop.MaxHoldDays {
+		log.Info().
+			Str("symbol", snapshot.Symbol).
+			Int("holding_days", holdingDays).
+			Int("max_hold_days", profile.Config.TimeStop.MaxHoldDays).
+			Msg("TIME_STOP: Max hold days exceeded")
+
+		return &exit.ExitTrigger{
+			ReasonCode: exit.ReasonTime,
+			Qty:        snapshot.Qty, // Full qty (remaining)
+			OrderType:  exit.OrderTypeMKT,
+		}
+	}
+
+	// Condition 2: No momentum (optional)
+	if profile.Config.TimeStop.NoMomentumDays > 0 {
+		// Calculate max profit during holding period
+		var maxProfitPct decimal.Decimal
+		if state.HWMPrice != nil {
+			// HWM exists, calculate max profit from HWM
+			maxProfitPct = state.HWMPrice.Sub(snapshot.AvgPrice).Div(snapshot.AvgPrice)
+		} else {
+			// No HWM, use current price
+			maxProfitPct = currentPrice.Sub(snapshot.AvgPrice).Div(snapshot.AvgPrice)
+		}
+
+		noMomentumThreshold := decimal.NewFromFloat(profile.Config.TimeStop.NoMomentumProfit)
+
+		if holdingDays >= profile.Config.TimeStop.NoMomentumDays && maxProfitPct.LessThan(noMomentumThreshold) {
+			log.Info().
+				Str("symbol", snapshot.Symbol).
+				Int("holding_days", holdingDays).
+				Int("no_momentum_days", profile.Config.TimeStop.NoMomentumDays).
+				Str("max_profit_pct", maxProfitPct.StringFixed(4)).
+				Str("threshold", noMomentumThreshold.StringFixed(4)).
+				Msg("TIME_STOP: No momentum")
+
+			return &exit.ExitTrigger{
+				ReasonCode: exit.ReasonTime,
+				Qty:        snapshot.Qty, // Full qty (remaining)
+				OrderType:  exit.OrderTypeMKT,
+			}
+		}
+	}
 
 	return nil
 }

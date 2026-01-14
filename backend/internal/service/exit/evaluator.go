@@ -110,6 +110,7 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 		Symbol:     pos.Symbol,
 		Qty:        pos.Qty,
 		AvgPrice:   pos.AvgPrice,
+		EntryTS:    pos.EntryTS,
 		Version:    pos.Version,
 	}
 
@@ -190,6 +191,7 @@ type PositionSnapshot struct {
 	Symbol     string
 	Qty        int64
 	AvgPrice   decimal.Decimal
+	EntryTS    time.Time
 	Version    int
 }
 
