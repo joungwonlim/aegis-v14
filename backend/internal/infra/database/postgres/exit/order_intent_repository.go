@@ -168,3 +168,58 @@ func (r *OrderIntentRepository) UpdateIntentStatus(ctx context.Context, intentID
 
 	return nil
 }
+
+// GetRecentIntents retrieves recent intents (for API)
+func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int) ([]*exit.OrderIntent, error) {
+	query := `
+		SELECT
+			intent_id,
+			position_id,
+			symbol,
+			intent_type,
+			qty,
+			order_type,
+			limit_price,
+			reason_code,
+			action_key,
+			status,
+			created_ts
+		FROM trade.order_intents
+		ORDER BY created_ts DESC
+		LIMIT $1
+	`
+
+	rows, err := r.pool.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent intents: %w", err)
+	}
+	defer rows.Close()
+
+	var intents []*exit.OrderIntent
+	for rows.Next() {
+		intent := &exit.OrderIntent{}
+		err := rows.Scan(
+			&intent.IntentID,
+			&intent.PositionID,
+			&intent.Symbol,
+			&intent.IntentType,
+			&intent.Qty,
+			&intent.OrderType,
+			&intent.LimitPrice,
+			&intent.ReasonCode,
+			&intent.ActionKey,
+			&intent.Status,
+			&intent.CreatedTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan intent: %w", err)
+		}
+		intents = append(intents, intent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return intents, nil
+}
