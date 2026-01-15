@@ -103,24 +103,16 @@ frontend/components/stock-detail-sheet/
 - shadcn/ui Sheet 기반
 - Tabs로 탭 전환
 - StockSymbol 컴포넌트로 종목 표시
-- v10 스타일 수평 레이아웃
+- 간결한 수평 레이아웃
 - **SheetHeader 구조** (sticky, 모든 탭에서 보임):
-  - **수평 레이아웃 (flex items-center gap-3)**:
+  - **수평 레이아웃 (flex items-start gap-3)**:
     - 왼쪽: 종목 로고 (size="lg")
-    - 중앙: 종목 정보 (flex-1)
-      - 종목명 (text-lg) + 보유 표시 (녹색 점) + 종목코드 + 마켓 배지 (인라인)
-      - 섹터 (text-xs, 회색)
-      - 회사 설명 (Phase 2 예정)
-    - 오른쪽: 아이콘 버튼 그룹 (h-9 w-9, h-5 w-5)
-      - Star: 관심종목 (Phase 2)
-      - Settings: Exit Rule 상세 설정
-      - BarChart3: 차트 보기 (Phase 2)
-      - ExternalLink: 외부 링크 (Phase 2)
-  - **현재가 표시** (mt-3):
-    - 현재가 (text-2xl, 빨강/파랑)
-    - TrendingUp/Down 아이콘 + 전일대비 + 등락률 (인라인)
-  - **Exit Engine 스위치** (mt-3, 보유 종목만):
-    - Switch + 활성화 상태 텍스트
+    - 중앙: 종목 정보 + 현재가 (flex-1)
+      - 종목명 (text-lg) + 보유 표시 (녹색 점) + 종목코드 (인라인)
+      - 현재가 (text-2xl, 빨강/파랑) + "원"
+      - TrendingUp/Down 아이콘 + ▲/▼ + 전일대비 + 등락률
+    - 오른쪽: Exit Engine 스위치 (보유 종목만)
+      - Label + Switch + 활성화 상태 텍스트
 - **Exit Rule 다이얼로그**:
   - Settings 버튼 클릭 시 열림
   - Exit Engine 스위치 (중복, 빠른 접근용)
