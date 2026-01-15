@@ -6,7 +6,7 @@ v10의 StockDetailSheet 기능을 v14에 모듈 단위로 포팅한 독립 모�
 
 - **책임**: 종목 상세 정보 표시 (Sheet UI)
 - **위치**: `frontend/components/stock-detail-sheet/`
-- **Phase**: Phase 1 (Holding, Price, Order 탭) 완료
+- **Phase**: Phase 1 완료 (Holding, Price, Order 탭 + 빠른 주문 기능)
 
 ---
 
@@ -21,7 +21,7 @@ frontend/components/stock-detail-sheet/
 ├── tabs/
 │   ├── holding-tab.tsx            # ✅ Phase 1: 보유 정보 탭
 │   ├── price-tab.tsx              # ✅ Phase 1: 가격 정보 탭
-│   └── order-tab.tsx              # ✅ Phase 1: 주문 탭
+│   └── order-tab.tsx              # ✅ Phase 1: 주문 탭 (주문 목록 + 빠른 주문)
 └── hooks/
     └── use-stock-price.ts         # ✅ Phase 1: 가격 정보 조회 훅
 ```
@@ -69,13 +69,28 @@ frontend/components/stock-detail-sheet/
 - 체결 주문 목록 (해당 종목만 필터링)
 - 매수/매도 구분 표시
 - 주문가, 체결가, 수량 표시
+- **빠른 주문 기능** ✅
+  - 매수/매도 선택
+  - 지정가/시장가 주문 선택
+  - 주문수량/가격 입력
+  - 현재가 동기화 버튼
+  - 주문 총액 자동 계산
+  - 실시간 주문 제출 (KIS API 연동)
+  - 성공/실패 결과 메시지 표시
+  - 중복 실행 방지
 
 **데이터 소스**:
 - v14 기존 `KisUnfilledOrders`
 - v14 기존 `KisFilledOrders`
+- v14 기존 `KisAdapter.SubmitOrder` (주문 제출)
+
+**API 엔드포인트**:
+- `POST /api/kis/orders` - KIS 주문 제출
 
 **구현 파일**:
 - `tabs/order-tab.tsx`
+- `lib/api.ts` (placeKISOrder 함수)
+- Backend: `internal/api/handlers/kis_orders.go` (PlaceOrder 핸들러)
 
 ### 4. 기본 컴포넌트 ✅
 

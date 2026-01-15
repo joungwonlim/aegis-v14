@@ -118,6 +118,7 @@ export function StockDetailSheet({
             <OrderTab
               symbol={stock.symbol}
               symbolName={stock.symbolName}
+              currentPrice={priceInfo?.currentPrice || 0}
               unfilledOrders={unfilledOrders}
               executedOrders={executedOrders}
             />

@@ -12,10 +12,11 @@ import (
 
 // Config holds router configuration
 type Config struct {
-	HoldingsHandler *handlers.HoldingsHandler
-	IntentsHandler  *handlers.IntentsHandler
-	OrdersHandler   *handlers.OrdersHandler
-	FillsHandler    *handlers.FillsHandler
+	HoldingsHandler   *handlers.HoldingsHandler
+	IntentsHandler    *handlers.IntentsHandler
+	OrdersHandler     *handlers.OrdersHandler
+	FillsHandler      *handlers.FillsHandler
+	KISOrdersHandler  *handlers.KISOrdersHandler
 }
 
 // NewRouter creates a new HTTP router
@@ -61,6 +62,11 @@ func NewRouter(cfg *Config) http.Handler {
 
 		// Fills
 		r.Get("/fills", cfg.FillsHandler.GetFills)
+
+		// KIS Orders (직접 KIS API에서 가져옴)
+		r.Get("/kis/unfilled-orders", cfg.KISOrdersHandler.GetUnfilledOrders)
+		r.Get("/kis/filled-orders", cfg.KISOrdersHandler.GetFilledOrders)
+		r.Post("/kis/orders", cfg.KISOrdersHandler.PlaceOrder)
 	})
 
 	return r

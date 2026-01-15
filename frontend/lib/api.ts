@@ -25,12 +25,13 @@ export interface OrderIntent {
   intent_id: string
   position_id: string
   symbol: string
+  symbol_name?: string // 종목명 (optional)
   intent_type: string // EXIT_PARTIAL, EXIT_FULL
   qty: number
   order_type: string // MKT, LMT
   limit_price?: number
   reason_code: string // SL1, SL2, TP1, TP2, TRAILING, etc.
-  status: string // PENDING_APPROVAL, NEW, ACK, REJECTED, FILLED, CANCELLED
+  status: string // PENDING_APPROVAL, NEW, ACK, REJECTED, FILLED, CANCELLED, SUBMITTED
   created_ts: string
 }
 
@@ -57,6 +58,43 @@ export interface Fill {
   fee: number
   tax: number
   seq: number
+}
+
+export interface KISUnfilledOrder {
+  OrderID: string
+  Symbol: string
+  Qty: number
+  OpenQty: number
+  FilledQty: number
+  Status: string
+  Raw: {
+    stock_name?: string
+    order_side?: string
+    order_price?: string
+    avg_exec_price?: string
+    order_time?: string
+  }
+}
+
+export interface KISFill {
+  ExecID: string
+  OrderID: string
+  Symbol: string
+  Qty: number
+  Price: string
+  Fee: string
+  Tax: string
+  Timestamp: string
+  Seq: number
+  Raw: {
+    stock_name?: string
+    order_side?: string
+    order_qty?: string
+    order_price?: string
+    exec_amount?: string
+    cancel_yn?: string
+    order_type?: string
+  }
 }
 
 export async function getHoldings(): Promise<Holding[]> {
@@ -163,4 +201,85 @@ export async function updateExitMode(accountId: string, symbol: string, exitMode
   }
 
   return response.json()
+}
+
+export async function getKISUnfilledOrders(): Promise<KISUnfilledOrder[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/kis/unfilled-orders`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('KIS Unfilled Orders API Error:', response.status, errorText)
+      throw new Error(`Failed to fetch KIS unfilled orders: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    console.log('KIS Unfilled Orders:', data)
+    return data
+  } catch (error) {
+    console.error('KIS Unfilled Orders fetch error:', error)
+    throw error
+  }
+}
+
+export async function getKISFilledOrders(): Promise<KISFill[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/kis/filled-orders`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('KIS Filled Orders API Error:', response.status, errorText)
+      throw new Error(`Failed to fetch KIS filled orders: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    console.log('KIS Filled Orders:', data)
+    return data
+  } catch (error) {
+    console.error('KIS Filled Orders fetch error:', error)
+    throw error
+  }
+}
+
+export interface PlaceOrderRequest {
+  symbol: string      // 종목코드 (6자리)
+  side: string        // 'buy' 또는 'sell'
+  order_type: string  // 'limit' 또는 'market'
+  qty: number         // 주문수량
+  price: number       // 주문가격 (시장가일 경우 0)
+}
+
+export interface PlaceOrderResponse {
+  success: boolean
+  order_id?: string
+  error?: string
+}
+
+export async function placeKISOrder(req: PlaceOrderRequest): Promise<PlaceOrderResponse> {
+  const response = await fetch(`${API_BASE_URL}/kis/orders`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(req),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('KIS Place Order API Error:', response.status, errorText)
+    throw new Error(`Failed to place order: ${response.statusText}`)
+  }
+
+  const data: PlaceOrderResponse = await response.json()
+  return data
 }
