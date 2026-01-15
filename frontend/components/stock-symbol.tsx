@@ -45,11 +45,10 @@ export function StockSymbol({
   const getMarketLabel = () => {
     if (!market) return null
 
-    // market이 "KOSPI" 또는 "KOSDAQ" 포함 여부 확인
-    if (market.includes('KOSPI')) return 'KOSPI'
-    if (market.includes('KOSDAQ')) return 'KOSDAQ'
+    // UNKNOWN은 표시하지 않음
+    if (market === 'UNKNOWN') return null
 
-    return null
+    return market
   }
 
   const marketLabel = getMarketLabel()

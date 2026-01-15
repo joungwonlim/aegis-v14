@@ -118,6 +118,7 @@ func (a *ExecutionAdapter) GetHoldings(ctx context.Context, accountID string) ([
 				"purchase_amount":       h.PurchaseAmount,
 				"evaluate_profit_loss":  h.EvaluateProfitLoss,
 				"evaluate_profit_loss_rate": h.EvaluateProfitLossRate,
+				"market":                h.GetMarket(), // KOSPI/KOSDAQ/UNKNOWN
 			},
 		})
 	}

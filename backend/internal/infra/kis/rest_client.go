@@ -249,6 +249,25 @@ type HoldingOutput struct {
 	PurchaseAmount      string `json:"pchs_amt"`       // 매입금액
 }
 
+// GetMarket infers market type from symbol code
+// KOSPI: 000000~099999 (generally starting with 0)
+// KOSDAQ: 100000~399999 (generally starting with 1-3)
+func (h *HoldingOutput) GetMarket() string {
+	if len(h.Symbol) != 6 {
+		return "UNKNOWN"
+	}
+
+	firstChar := h.Symbol[0]
+	switch {
+	case firstChar == '0':
+		return "KOSPI"
+	case firstChar >= '1' && firstChar <= '3':
+		return "KOSDAQ"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 // GetHoldings fetches current holdings (보유종목 조회)
 func (c *RESTClient) GetHoldings(ctx context.Context, accountNo string, accountProductCode string) ([]HoldingOutput, error) {
 	// Get access token

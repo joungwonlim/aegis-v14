@@ -18,6 +18,7 @@ export interface Holding {
     purchase_amount?: string
     evaluate_profit_loss?: string
     evaluate_profit_loss_rate?: string
+    market?: string // KOSPI, KOSDAQ, UNKNOWN
   }
 }
 
