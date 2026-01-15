@@ -25,8 +25,8 @@ export default function RuntimeDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [rulesDialogOpen, setRulesDialogOpen] = useState(false)
-  const [sortField, setSortField] = useState<SortField | null>(null)
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [sortField, setSortField] = useState<SortField>('eval_amount') // 기본 정렬: 평가금액
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc') // 내림차순 (높은 순)
   const [intentSortField, setIntentSortField] = useState<IntentSortField | null>(null)
   const [intentSortOrder, setIntentSortOrder] = useState<SortOrder>('desc')
 

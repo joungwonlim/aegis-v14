@@ -121,7 +121,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | 문서 | 상태 | 설명 |
 |------|------|------|
 | `modules/stock-detail-sheet.md` | ✅ 완료 | StockDetailSheet 모듈 (v10 포팅, Phase 1 완료) |
-| `ui/pages.md` | ⬜ TODO | 페이지 구조 |
+| `ui/pages.md` | ✅ 완료 | 페이지 구조 (Dashboard, Portfolio 기본 정렬 정책: 평가금액 내림차순) |
 | `ui/components.md` | ⬜ TODO | 컴포넌트 계층 |
 | `ui/state-management.md` | ⬜ TODO | 상태 관리 전략 |
 | `ui/api-integration.md` | ⬜ TODO | API 연동 방안 |
