@@ -149,10 +149,11 @@ func (s *Service) GetFreshness(ctx context.Context, symbol string) ([]price.Fres
 }
 
 // IsMarketOpen checks if Korean stock market is currently open
-// TODO: Implement proper market hours check
-// KRX hours: 09:00 ~ 15:30 (weekdays, excluding holidays)
+// KRX hours:
+//   - 08:30-09:00: 동시호가 (Pre-market, 시간외 단일가)
+//   - 09:00-15:30: 정규장 (Regular trading)
+//   - 15:30-16:00: 시간외 단일가 (After-hours)
 func IsMarketOpen(t time.Time) bool {
-	// Simplified version: check if weekday and between 9:00 and 15:30
 	loc, _ := time.LoadLocation("Asia/Seoul")
 	seoulTime := t.In(loc)
 
@@ -166,16 +167,16 @@ func IsMarketOpen(t time.Time) bool {
 	hour := seoulTime.Hour()
 	minute := seoulTime.Minute()
 
-	// Market opens at 09:00
-	if hour < 9 {
+	// Market opens at 08:30 (동시호가 시작)
+	if hour < 8 {
+		return false
+	}
+	if hour == 8 && minute < 30 {
 		return false
 	}
 
-	// Market closes at 15:30
-	if hour > 15 {
-		return false
-	}
-	if hour == 15 && minute >= 30 {
+	// Market closes at 16:00 (시간외 종료)
+	if hour >= 16 {
 		return false
 	}
 
