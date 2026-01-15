@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	exitpg "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
@@ -151,6 +150,7 @@ func main() {
 	exitProfileRepo := exitpg.NewExitProfileRepository(dbPool.Pool)
 	exitControlRepo := exitpg.NewExitControlRepository(dbPool.Pool)
 	symbolOverrideRepo := exitpg.NewSymbolExitOverrideRepository(dbPool.Pool)
+	exitSignalRepo := exitpg.NewExitSignalRepository(dbPool.Pool)
 
 	// Create default exit profile (v14 고정 비율)
 	stopFloorProfit := 0.6 // 본전+0.6%
@@ -222,6 +222,7 @@ func main() {
 		orderIntentRepo,
 		exitProfileRepo,
 		symbolOverrideRepo,
+		exitSignalRepo,
 		priceService,
 		defaultProfile,
 	)

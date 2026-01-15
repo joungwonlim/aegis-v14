@@ -174,19 +174,25 @@ func (r *OrderIntentRepository) UpdateIntentStatus(ctx context.Context, intentID
 func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int) ([]*exit.OrderIntent, error) {
 	query := `
 		SELECT
-			intent_id,
-			position_id,
-			symbol,
-			intent_type,
-			qty,
-			order_type,
-			limit_price,
-			reason_code,
-			action_key,
-			status,
-			created_ts
-		FROM trade.order_intents
-		ORDER BY created_ts DESC
+			i.intent_id,
+			i.position_id,
+			i.symbol,
+			COALESCE(h.raw->>'symbol_name', h.raw->>'prdt_name', i.symbol) AS symbol_name,
+			i.intent_type,
+			i.qty,
+			i.order_type,
+			i.limit_price,
+			i.reason_code,
+			i.action_key,
+			i.status,
+			i.created_ts
+		FROM trade.order_intents i
+		LEFT JOIN LATERAL (
+			SELECT raw FROM trade.holdings
+			WHERE symbol = i.symbol
+			LIMIT 1
+		) h ON true
+		ORDER BY i.created_ts DESC
 		LIMIT $1
 	`
 
@@ -203,6 +209,7 @@ func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int)
 			&intent.IntentID,
 			&intent.PositionID,
 			&intent.Symbol,
+			&intent.SymbolName,
 			&intent.IntentType,
 			&intent.Qty,
 			&intent.OrderType,
@@ -306,6 +313,61 @@ func (r *OrderIntentRepository) LoadIntentsForPosition(ctx context.Context, posi
 	return intents, nil
 }
 
+
+// LoadNewIntents loads all intents with status=NEW
+func (r *OrderIntentRepository) LoadNewIntents(ctx context.Context) ([]*exit.OrderIntent, error) {
+	query := `
+		SELECT
+			intent_id,
+			position_id,
+			symbol,
+			intent_type,
+			qty,
+			order_type,
+			limit_price,
+			reason_code,
+			action_key,
+			status,
+			created_ts
+		FROM trade.order_intents
+		WHERE status = $1
+		ORDER BY created_ts ASC
+	`
+
+	rows, err := r.pool.Query(ctx, query, exit.IntentStatusNew)
+	if err != nil {
+		return nil, fmt.Errorf("query new intents: %w", err)
+	}
+	defer rows.Close()
+
+	var intents []*exit.OrderIntent
+	for rows.Next() {
+		intent := &exit.OrderIntent{}
+		err := rows.Scan(
+			&intent.IntentID,
+			&intent.PositionID,
+			&intent.Symbol,
+			&intent.IntentType,
+			&intent.Qty,
+			&intent.OrderType,
+			&intent.LimitPrice,
+			&intent.ReasonCode,
+			&intent.ActionKey,
+			&intent.Status,
+			&intent.CreatedTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan intent: %w", err)
+		}
+		intents = append(intents, intent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return intents, nil
+}
 
 // ApproveIntent approves an intent (PENDING_APPROVAL → NEW)
 func (r *OrderIntentRepository) ApproveIntent(ctx context.Context, intentID uuid.UUID) error {

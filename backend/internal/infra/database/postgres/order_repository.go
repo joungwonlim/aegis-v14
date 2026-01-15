@@ -228,6 +228,14 @@ func (r *OrderRepository) GetOrder(ctx context.Context, orderID string) (*execut
 
 // LoadOpenOrders loads all SUBMITTED/PARTIAL orders
 func (r *OrderRepository) LoadOpenOrders(ctx context.Context) ([]*execution.Order, error) {
+	return r.LoadOrdersByStatus(ctx, []string{
+		execution.OrderStatusSubmitted,
+		execution.OrderStatusPartial,
+	})
+}
+
+// LoadOrdersByStatus loads orders by status
+func (r *OrderRepository) LoadOrdersByStatus(ctx context.Context, statuses []string) ([]*execution.Order, error) {
 	query := `
 		SELECT
 			order_id,
@@ -241,13 +249,13 @@ func (r *OrderRepository) LoadOpenOrders(ctx context.Context) ([]*execution.Orde
 			raw,
 			updated_ts
 		FROM trade.orders
-		WHERE status IN ('SUBMITTED', 'PARTIAL')
-		ORDER BY submitted_ts ASC
+		WHERE status = ANY($1)
+		ORDER BY submitted_ts DESC
 	`
 
-	rows, err := r.pool.Query(ctx, query)
+	rows, err := r.pool.Query(ctx, query, statuses)
 	if err != nil {
-		return nil, fmt.Errorf("query open orders: %w", err)
+		return nil, fmt.Errorf("query orders: %w", err)
 	}
 	defer rows.Close()
 
@@ -277,6 +285,84 @@ func (r *OrderRepository) LoadOpenOrders(ctx context.Context) ([]*execution.Orde
 	}
 
 	return orders, nil
+}
+
+// UpsertOrder creates or updates an order (idempotent)
+func (r *OrderRepository) UpsertOrder(ctx context.Context, order *execution.Order) error {
+	query := `
+		INSERT INTO trade.orders (
+			order_id, intent_id, submitted_ts, status, broker_status,
+			qty, open_qty, filled_qty, raw, updated_ts
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (order_id) DO UPDATE SET
+			status = EXCLUDED.status,
+			broker_status = EXCLUDED.broker_status,
+			open_qty = EXCLUDED.open_qty,
+			filled_qty = EXCLUDED.filled_qty,
+			raw = EXCLUDED.raw,
+			updated_ts = EXCLUDED.updated_ts
+	`
+
+	_, err := r.pool.Exec(ctx, query,
+		order.OrderID,
+		order.IntentID,
+		order.SubmittedTS,
+		order.Status,
+		order.BrokerStatus,
+		order.Qty,
+		order.OpenQty,
+		order.FilledQty,
+		order.Raw,
+		order.UpdatedTS,
+	)
+
+	if err != nil {
+		return fmt.Errorf("upsert order: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateOrderStatus updates order status
+func (r *OrderRepository) UpdateOrderStatus(ctx context.Context, orderID string, status string) error {
+	query := `
+		UPDATE trade.orders
+		SET status = $1, updated_ts = NOW()
+		WHERE order_id = $2
+	`
+
+	result, err := r.pool.Exec(ctx, query, status, orderID)
+	if err != nil {
+		return fmt.Errorf("update status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return execution.ErrOrderNotFound
+	}
+
+	return nil
+}
+
+// UpdateFilledQty increments filled_qty and updates open_qty
+func (r *OrderRepository) UpdateFilledQty(ctx context.Context, orderID string, filledQty int64) error {
+	query := `
+		UPDATE trade.orders
+		SET filled_qty = filled_qty + $1,
+		    open_qty = qty - (filled_qty + $1),
+		    updated_ts = NOW()
+		WHERE order_id = $2
+	`
+
+	result, err := r.pool.Exec(ctx, query, filledQty, orderID)
+	if err != nil {
+		return fmt.Errorf("update filled qty: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return execution.ErrOrderNotFound
+	}
+
+	return nil
 }
 
 // GetRecentOrders retrieves recent orders (for monitoring)

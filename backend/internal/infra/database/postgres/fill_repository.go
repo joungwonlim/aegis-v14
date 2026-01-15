@@ -59,6 +59,34 @@ func (r *FillRepository) CreateFill(ctx context.Context, fill *execution.Fill) e
 	return nil
 }
 
+// UpsertFill creates or updates a fill (idempotent by fill_id)
+func (r *FillRepository) UpsertFill(ctx context.Context, fill *execution.Fill) error {
+	query := `
+		INSERT INTO trade.fills (
+			fill_id, order_id, kis_exec_id, ts, qty, price, fee, tax, seq
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (order_id, kis_exec_id) DO NOTHING
+	`
+
+	_, err := r.pool.Exec(ctx, query,
+		fill.FillID,
+		fill.OrderID,
+		fill.KisExecID,
+		fill.TS,
+		fill.Qty,
+		fill.Price,
+		fill.Fee,
+		fill.Tax,
+		fill.Seq,
+	)
+
+	if err != nil {
+		return fmt.Errorf("upsert fill: %w", err)
+	}
+
+	return nil
+}
+
 // GetFillsByOrderID retrieves fills for an order
 func (r *FillRepository) GetFillsByOrderID(ctx context.Context, orderID string) ([]*execution.Fill, error) {
 	query := `
@@ -188,6 +216,25 @@ func (r *FillRepository) GetLastCursor(ctx context.Context) (*execution.FillCurs
 	}
 
 	return cursor, nil
+}
+
+// SaveCursor saves the sync cursor
+func (r *FillRepository) SaveCursor(ctx context.Context, cursor execution.FillCursor) error {
+	query := `
+		INSERT INTO trade.fill_cursors (id, last_ts, last_seq, updated_ts)
+		VALUES (1, $1, $2, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			last_ts = EXCLUDED.last_ts,
+			last_seq = EXCLUDED.last_seq,
+			updated_ts = EXCLUDED.updated_ts
+	`
+
+	_, err := r.pool.Exec(ctx, query, cursor.LastTS, cursor.LastSeq)
+	if err != nil {
+		return fmt.Errorf("save cursor: %w", err)
+	}
+
+	return nil
 }
 
 // LoadFills loads all fills for an order
