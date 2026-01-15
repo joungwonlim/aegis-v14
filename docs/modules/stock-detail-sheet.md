@@ -105,12 +105,12 @@ frontend/components/stock-detail-sheet/
 - StockSymbol 컴포넌트로 종목 표시
 - 간결한 수평 레이아웃
 - **SheetHeader 구조** (sticky, 모든 탭에서 보임):
-  - **수평 레이아웃 (flex items-start gap-3)**:
-    - 왼쪽: 종목 로고 (size="lg")
-    - 중앙: 종목 정보 + 현재가 (flex-1)
-      - 종목명 (text-lg) + 보유 표시 (녹색 점) + 종목코드 (인라인)
-      - 현재가 (text-2xl, 빨강/파랑) + "원"
-      - TrendingUp/Down 아이콘 + ▲/▼ + 전일대비 + 등락률
+  - **수평 레이아웃 (flex items-start gap-3 justify-between)**:
+    - 왼쪽: 종목 로고 + 가격정보 (flex items-center gap-3)
+      - StockSymbol (size="lg")
+      - 가격정보 (2줄):
+        - 1줄: 현재가 (text-2xl, font-bold) + "원"
+        - 2줄: ▲/▼ + 전일대비 + (등락률%) (text-sm, 빨강/파랑)
     - 오른쪽: Exit Engine 스위치 (보유 종목만)
       - Label + Switch + 활성화 상태 텍스트
 - **Exit Rule 다이얼로그**:

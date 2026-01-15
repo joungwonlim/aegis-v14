@@ -78,61 +78,39 @@ export function StockDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader className="sticky top-0 z-10 border-b pb-4 bg-background">
-          <div className="flex items-start gap-3">
-            {/* Stock Logo */}
-            <StockSymbol
-              symbol={stock.symbol}
-              symbolName={stock.symbolName}
-              size="lg"
-            />
+          <div className="flex items-start gap-3 justify-between">
 
-            <div className="flex-1 min-w-0">
-              {/* 종목명 + 보유 표시 + 종목코드 */}
-              <div className="flex items-center gap-2">
-                <SheetTitle className="text-lg">
-                  {stock.symbolName}
-                </SheetTitle>
-                {holding && (
-                  <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="보유 종목" />
-                )}
-                <span className="text-xs text-muted-foreground">{stock.symbol}</span>
-              </div>
+            <div className="flex items-center gap-3">
+              {/* Stock Logo */}
+              <StockSymbol
+                symbol={stock.symbol}
+                symbolName={stock.symbolName}
+                size="lg"
+              />
 
-              {/* 현재가 (종목명 아래) */}
-              {priceInfo && (
-                <div className="mt-2">
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className="text-2xl font-bold"
+              {/* 가격정보 */}
+              <div>
+                {priceInfo ? (
+                  <>
+                    <div className="text-2xl font-bold">
+                      {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}원
+                    </div>
+                    <div
+                      className="text-sm"
                       style={{
                         color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
                       }}
                     >
-                      {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}원
-                    </span>
-                  </div>
-                  <div
-                    className="flex items-center gap-1 mt-1"
-                    style={{
-                      color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
-                    }}
-                  >
-                    {(priceInfo.changeRate || 0) >= 0 ? (
-                      <TrendingUp className="h-4 w-4" />
-                    ) : (
-                      <TrendingDown className="h-4 w-4" />
-                    )}
-                    <span className="text-sm">
                       {(priceInfo.changeRate || 0) >= 0 ? '▲' : '▼'}
                       {Math.floor(Math.abs(priceInfo.changePrice || 0)).toLocaleString()}
-                    </span>
-                    <span className="text-sm">
-                      ({(priceInfo.changeRate || 0) >= 0 ? '+' : ''}
-                      {(priceInfo.changeRate || 0).toFixed(2)}%)
-                    </span>
-                  </div>
-                </div>
-              )}
+                      {' '}
+                      ({(priceInfo.changeRate || 0) >= 0 ? '+' : ''}{(priceInfo.changeRate || 0).toFixed(2)}%)
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-muted-foreground">가격 정보 로딩 중...</div>
+                )}
+              </div>
             </div>
 
             {/* Exit Engine 스위치 (오른쪽 정렬) */}
