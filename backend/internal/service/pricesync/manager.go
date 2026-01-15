@@ -47,6 +47,14 @@ func NewManager(service *Service, kisClient *kis.Client, priorityManager *Priori
 	}
 }
 
+// SetPriorityManager sets or updates the priority manager
+func (m *Manager) SetPriorityManager(pm *PriorityManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.priorityManager = pm
+	log.Info().Msg("PriorityManager configured")
+}
+
 // Start starts all price sync components
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()

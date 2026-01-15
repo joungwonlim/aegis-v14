@@ -88,18 +88,14 @@ func main() {
 	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
 	priceService := pricesync.NewService(priceRepo)
 
-	// Create repository adapters for PriorityManager (will be fully initialized after repos are ready)
-	// Note: positionRepo will be created later, so we'll create PriorityManager after section 2
-
-	// We need to initialize PriorityManager after repositories are ready (section 2)
-	// For now, just start PriceSync service and manager (will be configured later)
-	priceSyncManager := pricesync.NewManager(priceService, kisClient, nil) // nil PriorityManager for now
+	// Note: PriorityManager will be configured later after Position/Order repositories are ready
+	priceSyncManager := pricesync.NewManager(priceService, kisClient, nil)
 
 	if err := priceSyncManager.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start PriceSync Manager")
 	}
 
-	log.Info().Msg("✅ PriceSync Manager started (priority manager will be configured after repositories are ready)")
+	log.Info().Msg("✅ PriceSync Manager started")
 
 	// ========================================
 	// 1.5. Initialize Holdings Sync Service
@@ -261,9 +257,8 @@ func main() {
 		systemAdapter,
 	)
 
-	// Update PriceSyncManager with PriorityManager
-	// Note: This is a workaround - in production, we'd refactor Manager to allow late binding
-	priceSyncManager = pricesync.NewManager(priceService, kisClient, priorityManager)
+	// Set PriorityManager to existing running Manager
+	priceSyncManager.SetPriorityManager(priorityManager)
 
 	// Initialize subscriptions based on current positions/watchlist
 	if err := priceSyncManager.InitializeSubscriptions(ctx); err != nil {
