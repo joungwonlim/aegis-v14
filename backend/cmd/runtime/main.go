@@ -204,9 +204,9 @@ func main() {
 				ATRK:     2.0,
 			},
 			TimeStop: exit.TimeStopConfig{
-				MaxHoldDays:      10,
-				NoMomentumDays:   3,
-				NoMomentumProfit: 0.02,
+				MaxHoldDays:      0, // 비활성화 (0 = disabled)
+				NoMomentumDays:   0,
+				NoMomentumProfit: 0,
 			},
 			HardStop: exit.HardStopConfig{
 				Enabled: true,
