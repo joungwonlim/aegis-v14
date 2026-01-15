@@ -232,7 +232,7 @@ func (r *PositionStateRepository) ResetStateToOpen(ctx context.Context, position
 			last_avg_price,
 			breach_ticks,
 			updated_ts
-		) VALUES ($1, $2, NULL, NULL, NULL, NULL, NULL, $3, 0, NOW())
+		) VALUES ($1, $2, NULL, NULL, NULL, NULL, NOW(), $3, 0, NOW())
 		ON CONFLICT (position_id) DO UPDATE
 		SET
 			phase = 'OPEN',
@@ -240,6 +240,7 @@ func (r *PositionStateRepository) ResetStateToOpen(ctx context.Context, position
 			stop_floor_price = NULL,
 			breach_ticks = 0,
 			last_avg_price = EXCLUDED.last_avg_price,
+			last_eval_ts = NOW(),
 			updated_ts = NOW()
 	`
 
