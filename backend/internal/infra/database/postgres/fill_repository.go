@@ -59,13 +59,13 @@ func (r *FillRepository) CreateFill(ctx context.Context, fill *execution.Fill) e
 	return nil
 }
 
-// UpsertFill creates or updates a fill (idempotent by fill_id)
+// UpsertFill creates or updates a fill (idempotent by order_id, kis_exec_id, seq)
 func (r *FillRepository) UpsertFill(ctx context.Context, fill *execution.Fill) error {
 	query := `
 		INSERT INTO trade.fills (
 			fill_id, order_id, kis_exec_id, ts, qty, price, fee, tax, seq
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (order_id, kis_exec_id) DO NOTHING
+		ON CONFLICT (order_id, kis_exec_id, seq) DO NOTHING
 	`
 
 	_, err := r.pool.Exec(ctx, query,

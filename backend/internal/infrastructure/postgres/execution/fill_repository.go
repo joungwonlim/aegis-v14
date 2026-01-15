@@ -21,13 +21,13 @@ func NewFillRepository(db *pgxpool.Pool) *FillRepository {
 	return &FillRepository{db: db}
 }
 
-// UpsertFill creates or updates a fill (idempotent by fill_id)
+// UpsertFill creates or updates a fill (idempotent by order_id, kis_exec_id, seq)
 func (r *FillRepository) UpsertFill(ctx context.Context, fill *execution.Fill) error {
 	query := `
 		INSERT INTO trade.fills (
 			fill_id, order_id, kis_exec_id, ts, qty, price, fee, tax, seq
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (order_id, kis_exec_id) DO NOTHING
+		ON CONFLICT (order_id, kis_exec_id, seq) DO NOTHING
 	`
 
 	_, err := r.db.Exec(ctx, query,
@@ -226,4 +226,48 @@ func (r *FillRepository) SaveCursor(ctx context.Context, cursor execution.FillCu
 	}
 
 	return nil
+}
+
+// GetRecentFills retrieves recent fills (for monitoring/API)
+func (r *FillRepository) GetRecentFills(ctx context.Context, limit int) ([]*execution.Fill, error) {
+	query := `
+		SELECT fill_id, order_id, kis_exec_id, ts, qty, price, fee, tax, seq
+		FROM trade.fills
+		ORDER BY ts DESC, seq DESC
+		LIMIT $1
+	`
+
+	rows, err := r.db.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent fills: %w", err)
+	}
+	defer rows.Close()
+
+	var fills []*execution.Fill
+	for rows.Next() {
+		var fill execution.Fill
+
+		err := rows.Scan(
+			&fill.FillID,
+			&fill.OrderID,
+			&fill.KisExecID,
+			&fill.TS,
+			&fill.Qty,
+			&fill.Price,
+			&fill.Fee,
+			&fill.Tax,
+			&fill.Seq,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan fill: %w", err)
+		}
+
+		fills = append(fills, &fill)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return fills, nil
 }
