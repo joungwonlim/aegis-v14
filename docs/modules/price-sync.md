@@ -270,85 +270,188 @@ flowchart TD
 | REST | 10,000ms | 30,000ms |
 | NAVER | 30,000ms | 60,000ms |
 
-### 2. WS Subscription Manager (40 제한)
+### 2. WS Subscription Manager (40 제한) - v10 개선 적용 ✨
 
-```mermaid
-flowchart TD
-    A[Positions/Candidates Update] --> B[Recompute Priority]
-    B --> C[Build Desired Set]
-    C --> D{Count <= 40?}
-    D -->|yes| E[Subscribe Missing]
-    D -->|no| F[Evict Lowest Priority]
-    F --> E
-    E --> G[Unsubscribe Evicted]
-```
+#### PriorityManager 모듈 (v10에서 검증됨)
 
-**동적 우선순위 계산 알고리즘:**
+**책임**:
+- 시스템 내 모든 종목의 우선순위 실시간 계산
+- WS 40개 구독 대상 동적 선정
+- REST Tier 할당 자동화
+
+**Repository 인터페이스**:
 
 ```go
-func calculatePriority(symbol string, portfolio Portfolio, brain BrainState) int {
+// PriorityManager가 사용하는 외부 데이터 소스
+type PriorityManagerDeps struct {
+    PositionRepo  PositionRepository   // trade.positions
+    OrderRepo     OrderRepository      // trade.orders (활성 주문)
+    WatchlistRepo WatchlistRepository  // user.watchlist (관심 종목)
+    SystemRepo    SystemRepository     // system.priority_config (지수 등)
+}
+
+type PositionRepository interface {
+    GetOpenPositions(ctx context.Context) ([]Position, error)
+    GetClosingPositions(ctx context.Context) ([]Position, error)
+}
+
+type OrderRepository interface {
+    GetActiveOrderSymbols(ctx context.Context) ([]string, error)
+}
+
+type WatchlistRepository interface {
+    GetWatchlistSymbols(ctx context.Context, userID string) ([]string, error)
+}
+
+type SystemRepository interface {
+    GetSystemSymbols(ctx context.Context) ([]string, error) // KOSPI200, KOSDAQ150 ETF
+}
+```
+
+**동적 우선순위 계산 알고리즘** (v10 검증):
+
+```go
+type SymbolPriority struct {
+    Symbol      string
+    IsHolding   bool  // 보유 포지션
+    IsClosing   bool  // 청산 진행 중
+    IsOrder     bool  // 활성 주문
+    IsWatchlist bool  // 관심 종목
+    IsSystem    bool  // 시스템 필수 (지수 등)
+    Score       int   // 최종 점수
+}
+
+func (pm *PriorityManager) CalculatePriority(symbol string) int {
     score := 0
 
-    // P0: 보유 포지션 (절대 보호)
-    if portfolio.HasPosition(symbol) {
+    // P0: 보유 포지션 (최우선 - 절대 보호)
+    if pm.isHolding(symbol) {
         score += 10000
 
         // 청산 진행 중이면 추가 점수
-        if portfolio.IsClosing(symbol) {
-            score += 5000
+        if pm.isClosing(symbol) {
+            score += 5000  // Total: 15000
         }
     }
 
-    // P1: Trailing 활성 (절대 보호)
-    if portfolio.IsTrailingActive(symbol) {
-        score += 8000
+    // P1: 활성 주문 (높은 우선순위)
+    if pm.isOrder(symbol) {
+        score += 5000
     }
 
-    // P2: Reentry 후보 (보호)
-    if brain.IsReentryCandidate(symbol) {
-        state := brain.GetReentryState(symbol)
-        if state == "READY" {
-            score += 5000  // 진입 준비 완료
-        } else if state == "WATCH" {
-            score += 3000  // 관찰 중
-        }
+    // P2: 관심 종목 (중간 우선순위)
+    if pm.isWatchlist(symbol) {
+        score += 1000
     }
 
-    // P3: Brain intent (의도가 높을수록)
-    intent := brain.GetIntent(symbol)
-    if intent != nil {
-        score += int(intent.Score * 30)  // 0~100 → 0~3000
-    }
-
-    // P4: 당일 랭킹 (상위일수록)
-    rank := brain.GetRank(symbol)
-    if rank > 0 && rank <= 200 {
-        score += 200 - rank  // 1위 = 199점, 200위 = 0점
+    // P3: 시스템 필수 (지수 ETF 등)
+    if pm.isSystem(symbol) {
+        score += 500
     }
 
     return score
 }
 ```
 
-**우선순위 등급:**
+**우선순위 등급** (v10 기반 단순화):
 
-| Priority | Score Range | 대상 | 보호 |
-|----------|-------------|------|------|
-| P0 | 10000+ | OPEN/CLOSING 보유 종목 | 절대 보호 |
-| P1 | 8000~9999 | TRAILING_ACTIVE 포지션 | 절대 보호 |
-| P2 | 3000~7999 | Reentry WATCH/READY 후보 | 보호 |
-| P3 | 1~2999 | Brain intent 또는 랭킹 상위 | 해지 가능 |
-| P4 | 0 | 기타 | 우선 해지 |
+| Priority | Score Range | 대상 | 보호 수준 | 용도 |
+|----------|-------------|------|----------|------|
+| P0 | 10000+ | OPEN 보유 포지션 | 절대 보호 | WS 구독 (최우선) |
+| P0+ | 15000+ | CLOSING 청산 진행 중 | 절대 보호 | WS 구독 (긴급) |
+| P1 | 5000~9999 | 활성 주문 종목 | 보호 | WS 구독 |
+| P2 | 1000~4999 | 관심 종목 | 조건부 보호 | REST Tier0/1 |
+| P3 | 500~999 | 시스템 필수 (지수) | 조건부 보호 | REST Tier1 |
+| P4 | 0~499 | 기타 | 해지 가능 | REST Tier2 |
 
-**재계산 트리거:**
-- 포지션 상태 변경 (진입/청산)
-- Reentry 후보 상태 변경 (WATCH/READY)
-- Brain intent 업데이트 (매 분석 사이클)
-- 수동 watchlist 변경
+**구독 대상 선정 로직**:
 
-**교체 정책:**
-- 40 초과 시 score 낮은 순서대로 해지
-- P0/P1 (score 8000+)은 절대 해지 금지
+```go
+func (pm *PriorityManager) RefreshSubscriptions(ctx context.Context) error {
+    // 1. 모든 종목 우선순위 계산
+    allSymbols := pm.collectAllSymbols(ctx)
+    priorities := make([]*SymbolPriority, 0, len(allSymbols))
+
+    for _, symbol := range allSymbols {
+        p := &SymbolPriority{
+            Symbol:      symbol,
+            IsHolding:   pm.isHolding(symbol),
+            IsClosing:   pm.isClosing(symbol),
+            IsOrder:     pm.isOrder(symbol),
+            IsWatchlist: pm.isWatchlist(symbol),
+            IsSystem:    pm.isSystem(symbol),
+        }
+        p.Score = pm.CalculatePriority(symbol)
+        priorities = append(priorities, p)
+    }
+
+    // 2. Score 기준 정렬 (높은 순)
+    sort.Slice(priorities, func(i, j int) bool {
+        return priorities[i].Score > priorities[j].Score
+    })
+
+    // 3. WS 40개 선정
+    wsSymbols := make([]string, 0, 40)
+    for i := 0; i < len(priorities) && i < 40; i++ {
+        wsSymbols = append(wsSymbols, priorities[i].Symbol)
+    }
+
+    // 4. REST Tier 할당
+    tier0Symbols := []string{}  // 41~80위 (WS 백업)
+    tier1Symbols := []string{}  // 81~180위
+    tier2Symbols := []string{}  // 181위~
+
+    for i := 40; i < len(priorities); i++ {
+        if i < 80 {
+            tier0Symbols = append(tier0Symbols, priorities[i].Symbol)
+        } else if i < 180 {
+            tier1Symbols = append(tier1Symbols, priorities[i].Symbol)
+        } else {
+            tier2Symbols = append(tier2Symbols, priorities[i].Symbol)
+        }
+    }
+
+    // 5. Manager에 적용
+    pm.manager.SetWSSubscriptions(wsSymbols)
+    pm.manager.SetTier0Symbols(tier0Symbols)
+    pm.manager.SetTier1Symbols(tier1Symbols)
+    pm.manager.SetTier2Symbols(tier2Symbols)
+
+    log.Info("Subscriptions refreshed",
+        "ws_count", len(wsSymbols),
+        "tier0_count", len(tier0Symbols),
+        "tier1_count", len(tier1Symbols),
+        "tier2_count", len(tier2Symbols))
+
+    return nil
+}
+```
+
+**재계산 트리거**:
+1. **초기**: Runtime 시작 시 (필수)
+2. **주기**: 5분마다 (백그라운드)
+3. **이벤트**:
+   - Position 상태 변경 (OPEN → CLOSING → CLOSED)
+   - Order 생성/체결/취소
+   - Watchlist 추가/제거
+
+**교체 정책**:
+- WS 40개 초과 시 score 낮은 순서대로 해지
+- P0/P0+ (score 10000+)는 절대 해지 불가
+- P1 (score 5000+)는 WS 구독 최대한 보호
+
+```mermaid
+flowchart TD
+    A[Event Trigger] --> B[Collect All Symbols]
+    B --> C[Calculate Priority for Each]
+    C --> D[Sort by Score DESC]
+    D --> E{Top 40 Changed?}
+    E -->|No| F[Keep Current]
+    E -->|Yes| G[Subscribe New 40]
+    G --> H[Unsubscribe Evicted]
+    H --> I[Update REST Tiers]
+    I --> J[Log Changes]
+```
 
 ### 3. REST Poller (Tiering)
 

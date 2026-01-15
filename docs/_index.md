@@ -63,7 +63,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 
 | 모듈 | 문서 | 상태 | 설명 |
 |------|------|------|------|
-| PriceSync | `modules/price-sync.md` | ✅ 완료 | 현재가 동기화 (KIS WS/REST, Naver) |
+| PriceSync | `modules/price-sync.md` | ✅ 완료 | 현재가 동기화 (KIS WS/REST, Naver, **v10 PriorityManager 추가**) |
 | Exit Engine | `modules/exit-engine.md` | ✅ 완료 | 자동 청산 (Hybrid % + ATR 표준, Control Gate, Profile System, **v10 사고 사례 추가**) |
 | Reentry Engine | `modules/reentry-engine.md` | ✅ 완료 | 재진입 전략 (ExitEvent 기반, Control Gate) |
 | Execution | `modules/execution-service.md` | ✅ 완료 | 주문 제출/체결 관리 (ExitEvent 생성 SSOT) |
