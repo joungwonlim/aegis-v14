@@ -3,7 +3,7 @@ package signals
 import (
 	"sort"
 
-	"aegis/internal/domain/signals"
+	"github.com/wonny/aegis/v14/internal/domain/signals"
 )
 
 // Ranker 신호 순위 매기기

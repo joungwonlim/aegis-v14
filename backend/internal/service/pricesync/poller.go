@@ -5,7 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
+	"github.com/wonny/aegis/v14/internal/infra/naver"
 )
 
 // Tier represents polling tier with different intervals
@@ -34,13 +36,20 @@ func DefaultTierConfigs() map[Tier]TierConfig {
 
 // RESTPoller handles REST API polling with tiering
 type RESTPoller struct {
-	kisClient *kis.RESTClient
-	service   *Service
+	kisClient   *kis.RESTClient
+	naverClient *naver.Client // Fallback source
+	service     *Service
 
 	// Tier management
 	tierConfigs map[Tier]TierConfig
 	tiers       map[Tier][]string // tier -> symbols
 	tierMu      sync.RWMutex
+
+	// Fallback statistics
+	kisFailed      int64 // Total KIS failures
+	naverFallbacks int64 // Total Naver fallbacks
+	naverSucceeded int64 // Successful Naver fallbacks
+	statsMu        sync.RWMutex
 
 	// Control
 	ctx    context.Context
@@ -49,9 +58,10 @@ type RESTPoller struct {
 }
 
 // NewRESTPoller creates a new REST poller
-func NewRESTPoller(kisClient *kis.RESTClient, service *Service) *RESTPoller {
+func NewRESTPoller(kisClient *kis.RESTClient, naverClient *naver.Client, service *Service) *RESTPoller {
 	return &RESTPoller{
 		kisClient:   kisClient,
+		naverClient: naverClient,
 		service:     service,
 		tierConfigs: DefaultTierConfigs(),
 		tiers: map[Tier][]string{
@@ -112,20 +122,74 @@ func (p *RESTPoller) fetchTierPrices(tier Tier) {
 		return
 	}
 
-	// Fetch prices
+	// Try KIS first
 	ticks, err := p.kisClient.GetCurrentPrices(p.ctx, symbols)
 	if err != nil {
-		// Log error (TODO: add logging)
-		return
+		log.Warn().
+			Err(err).
+			Int("tier", int(tier)).
+			Int("symbol_count", len(symbols)).
+			Msg("KIS price fetch failed, trying Naver fallback")
+
+		// Update statistics
+		p.statsMu.Lock()
+		p.kisFailed++
+		p.statsMu.Unlock()
+
+		// Fallback to Naver if available
+		if p.naverClient != nil {
+			naverTicks, naverErr := p.naverClient.GetCurrentPrices(p.ctx, symbols)
+			if naverErr != nil {
+				log.Error().
+					Err(naverErr).
+					Int("tier", int(tier)).
+					Msg("Naver fallback also failed")
+
+				// Update statistics
+				p.statsMu.Lock()
+				p.naverFallbacks++
+				p.statsMu.Unlock()
+
+				return
+			}
+
+			// Naver fallback succeeded
+			ticks = naverTicks
+
+			log.Info().
+				Int("tier", int(tier)).
+				Int("count", len(naverTicks)).
+				Msg("✅ Naver fallback succeeded")
+
+			// Update statistics
+			p.statsMu.Lock()
+			p.naverFallbacks++
+			p.naverSucceeded++
+			p.statsMu.Unlock()
+		} else {
+			log.Error().Msg("Naver client not available for fallback")
+			return
+		}
 	}
 
 	// Process each tick
+	successCount := 0
 	for _, tick := range ticks {
 		if err := p.service.ProcessTick(p.ctx, *tick); err != nil {
-			// Log error (TODO: add logging)
+			log.Debug().
+				Err(err).
+				Str("symbol", tick.Symbol).
+				Msg("Failed to process tick")
 			continue
 		}
+		successCount++
 	}
+
+	log.Debug().
+		Int("tier", int(tier)).
+		Int("total", len(ticks)).
+		Int("success", successCount).
+		Msg("Tier prices processed")
 }
 
 // SetTierSymbols sets symbols for a specific tier
@@ -264,4 +328,31 @@ type TierStats struct {
 	MaxSize      int
 	Interval     time.Duration
 	UsagePercent float64
+}
+
+// GetFallbackStats returns Naver fallback statistics
+func (p *RESTPoller) GetFallbackStats() FallbackStats {
+	p.statsMu.RLock()
+	defer p.statsMu.RUnlock()
+
+	stats := FallbackStats{
+		KISFailed:      p.kisFailed,
+		NaverFallbacks: p.naverFallbacks,
+		NaverSucceeded: p.naverSucceeded,
+	}
+
+	// Calculate success rate
+	if stats.NaverFallbacks > 0 {
+		stats.NaverSuccessRate = float64(stats.NaverSucceeded) / float64(stats.NaverFallbacks) * 100
+	}
+
+	return stats
+}
+
+// FallbackStats represents Naver fallback statistics
+type FallbackStats struct {
+	KISFailed        int64   // Total KIS failures
+	NaverFallbacks   int64   // Total Naver fallback attempts
+	NaverSucceeded   int64   // Successful Naver fallbacks
+	NaverSuccessRate float64 // Success rate percentage
 }

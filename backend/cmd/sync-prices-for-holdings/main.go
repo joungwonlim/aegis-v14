@@ -59,7 +59,8 @@ func main() {
 	log.Info().Msg("Initializing PriceSync...")
 	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
 	priceSyncService := pricesync.NewService(priceRepo)
-	priceSyncManager := pricesync.NewManager(priceSyncService, kisClient)
+	// Note: PriorityManager is nil for this utility - subscriptions will be done manually
+	priceSyncManager := pricesync.NewManager(priceSyncService, kisClient, nil)
 
 	// 4. Start PriceSync Manager
 	log.Info().Msg("Starting PriceSync Manager...")

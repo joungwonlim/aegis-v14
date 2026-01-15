@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"aegis/internal/domain/ranking"
-	"aegis/internal/domain/signals"
+	"github.com/wonny/aegis/v14/internal/domain/ranking"
+	"github.com/wonny/aegis/v14/internal/domain/signals"
 )
 
 // Service Ranking 서비스

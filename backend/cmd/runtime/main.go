@@ -87,13 +87,19 @@ func main() {
 	// ========================================
 	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
 	priceService := pricesync.NewService(priceRepo)
-	priceSyncManager := pricesync.NewManager(priceService, kisClient)
+
+	// Create repository adapters for PriorityManager (will be fully initialized after repos are ready)
+	// Note: positionRepo will be created later, so we'll create PriorityManager after section 2
+
+	// We need to initialize PriorityManager after repositories are ready (section 2)
+	// For now, just start PriceSync service and manager (will be configured later)
+	priceSyncManager := pricesync.NewManager(priceService, kisClient, nil) // nil PriorityManager for now
 
 	if err := priceSyncManager.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start PriceSync Manager")
 	}
 
-	log.Info().Msg("✅ PriceSync Manager started")
+	log.Info().Msg("✅ PriceSync Manager started (priority manager will be configured after repositories are ready)")
 
 	// ========================================
 	// 1.5. Initialize Holdings Sync Service
@@ -238,6 +244,33 @@ func main() {
 	}()
 
 	log.Info().Msg("✅ Exit Engine started")
+
+	// ========================================
+	// 4. Initialize PriorityManager and Subscriptions
+	// ========================================
+	// Now that all repositories are ready, create PriorityManager
+	positionAdapter := NewPositionRepoAdapter(positionRepo, accountID)
+	orderAdapter := NewOrderRepoAdapter()
+	watchlistAdapter := NewWatchlistRepoAdapter()
+	systemAdapter := NewSystemRepoAdapter()
+
+	priorityManager := pricesync.NewPriorityManager(
+		positionAdapter,
+		orderAdapter,
+		watchlistAdapter,
+		systemAdapter,
+	)
+
+	// Update PriceSyncManager with PriorityManager
+	// Note: This is a workaround - in production, we'd refactor Manager to allow late binding
+	priceSyncManager = pricesync.NewManager(priceService, kisClient, priorityManager)
+
+	// Initialize subscriptions based on current positions/watchlist
+	if err := priceSyncManager.InitializeSubscriptions(ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize PriceSync subscriptions, will retry periodically")
+	} else {
+		log.Info().Msg("✅ PriceSync subscriptions initialized from positions/watchlist")
+	}
 
 	// ========================================
 	// All services running

@@ -16,6 +16,9 @@ type Manager struct {
 	// Core service
 	service *Service
 
+	// Priority management
+	priorityManager *PriorityManager
+
 	// Data sources
 	restPoller  *RESTPoller
 	naverClient *naver.Client
@@ -34,12 +37,13 @@ type Manager struct {
 }
 
 // NewManager creates a new PriceSync manager
-func NewManager(service *Service, kisClient *kis.Client) *Manager {
+func NewManager(service *Service, kisClient *kis.Client, priorityManager *PriorityManager) *Manager {
 	return &Manager{
-		service:     service,
-		kisClient:   kisClient,
-		naverClient: naver.NewClient(),
-		isRunning:   false,
+		service:         service,
+		kisClient:       kisClient,
+		priorityManager: priorityManager,
+		naverClient:     naver.NewClient(),
+		isRunning:       false,
 	}
 }
 
@@ -132,9 +136,7 @@ func (m *Manager) startWebSocket() error {
 		return err
 	}
 
-	// Subscribe to initial symbols (empty for now)
-	// TODO: Load from positions/watchlist
-	log.Info().Msg("✅ WebSocket started (no initial subscriptions)")
+	log.Info().Msg("✅ WebSocket started")
 
 	return nil
 }
@@ -143,17 +145,15 @@ func (m *Manager) startWebSocket() error {
 func (m *Manager) startRESTPoller() error {
 	log.Info().Msg("Starting REST Poller...")
 
-	// Create REST poller
-	m.restPoller = NewRESTPoller(m.kisClient.REST, m.service)
+	// Create REST poller with Naver fallback
+	m.restPoller = NewRESTPoller(m.kisClient.REST, m.naverClient, m.service)
 
 	// Start poller
 	if err := m.restPoller.Start(m.ctx); err != nil {
 		return err
 	}
 
-	// Set initial symbols (empty for now)
-	// TODO: Load from positions/watchlist
-	log.Info().Msg("✅ REST Poller started (no initial symbols)")
+	log.Info().Msg("✅ REST Poller started")
 
 	return nil
 }
@@ -278,4 +278,148 @@ func (m *Manager) monitorHealth() {
 			log.Debug().Msg("Health check (placeholder)")
 		}
 	}
+}
+
+// RefreshSubscriptions refreshes all subscriptions based on PriorityManager
+// This should be called:
+// 1. On startup (after Start)
+// 2. Periodically (every 5 minutes)
+// 3. On events (position/order changes)
+func (m *Manager) RefreshSubscriptions(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.isRunning {
+		return ErrPriceSyncNotRunning
+	}
+
+	if m.priorityManager == nil {
+		log.Warn().Msg("PriorityManager not configured, skipping subscription refresh")
+		return nil
+	}
+
+	log.Info().Msg("Refreshing subscriptions from PriorityManager...")
+
+	// 1. Refresh priorities
+	if err := m.priorityManager.Refresh(ctx); err != nil {
+		return err
+	}
+
+	// 2. Get WS symbols (top 40)
+	wsSymbols := m.priorityManager.GetWSSymbols()
+
+	// 3. Get REST tier symbols
+	tier0Symbols := m.priorityManager.GetTier0Symbols()
+	tier1Symbols := m.priorityManager.GetTier1Symbols()
+	tier2Symbols := m.priorityManager.GetTier2Symbols()
+
+	// 4. Update WS subscriptions
+	if m.kisClient.WS != nil {
+		// Get current subscriptions
+		currentWS := m.kisClient.WS.GetSubscriptions()
+
+		// Find symbols to subscribe (in new list but not in current)
+		toSubscribe := difference(wsSymbols, currentWS)
+
+		// Find symbols to unsubscribe (in current but not in new list)
+		toUnsubscribe := difference(currentWS, wsSymbols)
+
+		// Subscribe new symbols
+		for _, symbol := range toSubscribe {
+			if err := m.kisClient.WS.Subscribe(symbol); err != nil {
+				log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to subscribe WS")
+			}
+		}
+
+		// Unsubscribe removed symbols
+		for _, symbol := range toUnsubscribe {
+			if err := m.kisClient.WS.Unsubscribe(symbol); err != nil {
+				log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to unsubscribe WS")
+			}
+		}
+
+		log.Info().
+			Int("ws_total", len(wsSymbols)).
+			Int("subscribed", len(toSubscribe)).
+			Int("unsubscribed", len(toUnsubscribe)).
+			Msg("WS subscriptions updated")
+	}
+
+	// 5. Update REST tiers
+	if m.restPoller != nil {
+		if err := m.restPoller.SetTierSymbols(Tier0, tier0Symbols); err != nil {
+			log.Error().Err(err).Msg("Failed to set Tier0 symbols")
+		}
+
+		if err := m.restPoller.SetTierSymbols(Tier1, tier1Symbols); err != nil {
+			log.Error().Err(err).Msg("Failed to set Tier1 symbols")
+		}
+
+		if err := m.restPoller.SetTierSymbols(Tier2, tier2Symbols); err != nil {
+			log.Error().Err(err).Msg("Failed to set Tier2 symbols")
+		}
+
+		log.Info().
+			Int("tier0", len(tier0Symbols)).
+			Int("tier1", len(tier1Symbols)).
+			Int("tier2", len(tier2Symbols)).
+			Msg("REST tiers updated")
+	}
+
+	log.Info().Msg("✅ Subscriptions refreshed successfully")
+
+	return nil
+}
+
+// InitializeSubscriptions initializes subscriptions on startup
+// This is called by Runtime after Start()
+func (m *Manager) InitializeSubscriptions(ctx context.Context) error {
+	log.Info().Msg("Initializing subscriptions from positions/watchlist...")
+
+	// First refresh
+	if err := m.RefreshSubscriptions(ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize subscriptions")
+		return err
+	}
+
+	// Start periodic refresh (every 5 minutes)
+	m.wg.Add(1)
+	go m.periodicRefresh()
+
+	return nil
+}
+
+// periodicRefresh refreshes subscriptions periodically
+func (m *Manager) periodicRefresh() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			if err := m.RefreshSubscriptions(m.ctx); err != nil {
+				log.Error().Err(err).Msg("Periodic subscription refresh failed")
+			}
+		}
+	}
+}
+
+// difference returns elements in a that are not in b
+func difference(a, b []string) []string {
+	bSet := make(map[string]bool)
+	for _, v := range b {
+		bSet[v] = true
+	}
+
+	var diff []string
+	for _, v := range a {
+		if !bSet[v] {
+			diff = append(diff, v)
+		}
+	}
+	return diff
 }

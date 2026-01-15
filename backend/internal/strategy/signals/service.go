@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"aegis/internal/domain/signals"
-	"aegis/internal/domain/universe"
+	"github.com/wonny/aegis/v14/internal/domain/signals"
+	"github.com/wonny/aegis/v14/internal/domain/universe"
 )
 
 // Service Signals 서비스
