@@ -6,9 +6,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
 import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/stock-detail-sheet'
 import { getHoldings, getOrderIntents, getOrders, getFills, getKISUnfilledOrders, getKISFilledOrders, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
@@ -28,8 +25,6 @@ export default function RuntimeDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [rulesDialogOpen, setRulesDialogOpen] = useState(false)
-  const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null)
-  const [detailSheetOpen, setDetailSheetOpen] = useState(false)
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [intentSortField, setIntentSortField] = useState<IntentSortField | null>(null)
@@ -261,11 +256,7 @@ export default function RuntimeDashboard() {
   }
 
   const handleHoldingClick = (holding: Holding) => {
-    // 기존 Sheet (유지)
-    setSelectedHolding(holding)
-    setDetailSheetOpen(true)
-
-    // 새로운 StockDetailSheet 열기
+    // StockDetailSheet 열기
     openStockDetail({
       symbol: holding.symbol,
       symbolName: holding.raw?.symbol_name || holding.symbol,
@@ -279,7 +270,6 @@ export default function RuntimeDashboard() {
 
       // Optimistic update - immediately update UI
       const updatedHolding = { ...holding, exit_mode: exitMode }
-      setSelectedHolding(updatedHolding)
       setHoldings(prev => prev.map(h =>
         h.account_id === holding.account_id && h.symbol === holding.symbol
           ? updatedHolding
@@ -291,15 +281,6 @@ export default function RuntimeDashboard() {
 
       // Refresh data to ensure consistency with server
       await loadData()
-
-      // Update selectedHolding with fresh data
-      const freshHoldings = await getHoldings()
-      const freshHolding = freshHoldings.find(h =>
-        h.account_id === holding.account_id && h.symbol === holding.symbol
-      )
-      if (freshHolding) {
-        setSelectedHolding(freshHolding)
-      }
     } catch (err) {
       console.error('Failed to update exit mode:', err)
       setError(err instanceof Error ? err.message : 'Failed to update exit mode')
@@ -1160,133 +1141,6 @@ export default function RuntimeDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* 종목 상세 정보 Sheet */}
-      <Sheet open={detailSheetOpen} onOpenChange={setDetailSheetOpen}>
-        <SheetContent className="w-[1600px] sm:w-[2160px]">
-          {selectedHolding && (() => {
-            const symbolName = selectedHolding.raw?.symbol_name || selectedHolding.symbol
-            const evaluateAmount = selectedHolding.raw?.evaluate_amount || (selectedHolding.qty * selectedHolding.current_price).toString()
-            const purchaseAmount = selectedHolding.raw?.purchase_amount || (selectedHolding.qty * selectedHolding.avg_price).toString()
-            const weight = totalEvaluation > 0 ? (parseInt(evaluateAmount) / totalEvaluation) * 100 : 0
-            const pnl = typeof selectedHolding.pnl === 'string' ? parseFloat(selectedHolding.pnl) : selectedHolding.pnl
-            const currentPrice = typeof selectedHolding.current_price === 'string' ? parseFloat(selectedHolding.current_price) : selectedHolding.current_price
-            const avgPrice = typeof selectedHolding.avg_price === 'string' ? parseFloat(selectedHolding.avg_price) : selectedHolding.avg_price
-            const priceColor = pnl >= 0 ? '#EA5455' : '#2196F3'
-
-            return (
-              <>
-                <SheetHeader>
-                  <SheetTitle className="text-2xl">{symbolName}</SheetTitle>
-                  <SheetDescription>
-                    종목 상세 정보
-                  </SheetDescription>
-                </SheetHeader>
-
-                {/* Exit Engine Switch */}
-                <div className="mt-6 flex items-center justify-between p-4 border rounded-lg">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="exit-mode" className="text-base font-semibold">
-                      Exit Engine
-                    </Label>
-                    <div className="text-sm text-muted-foreground">
-                      {selectedHolding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
-                    </div>
-                  </div>
-                  <Switch
-                    id="exit-mode"
-                    checked={selectedHolding.exit_mode === 'ENABLED'}
-                    onCheckedChange={(checked) => handleExitModeToggle(selectedHolding, checked)}
-                  />
-                </div>
-
-                <div className="mt-6 space-y-6">
-                  {/* 현재가 */}
-                  <div className="space-y-2">
-                    <div className="text-3xl font-bold" style={{ color: priceColor }}>
-                      {formatNumber(currentPrice, 0)}원
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span style={{ color: priceColor }} className="text-lg font-semibold">
-                        {formatPnL(pnl)}
-                      </span>
-                      <span style={{ color: priceColor }} className="text-lg font-semibold">
-                        {formatPercent(selectedHolding.pnl_pct)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 구분선 */}
-                  <div className="border-t border-border"></div>
-
-                  {/* 보유 정보 */}
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">보유수량</span>
-                      <span className="font-mono font-semibold">{formatNumber(selectedHolding.qty)}주</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">매도가능</span>
-                      <span className="font-mono font-semibold">{formatNumber(selectedHolding.qty)}주</span>
-                    </div>
-                  </div>
-
-                  {/* 구분선 */}
-                  <div className="border-t border-border"></div>
-
-                  {/* 손익 정보 */}
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">평가손익</span>
-                      <span className="font-mono font-semibold">{formatPnL(pnl)}원</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">수익률</span>
-                      <span className="font-mono font-semibold">{formatPercent(selectedHolding.pnl_pct)}</span>
-                    </div>
-                  </div>
-
-                  {/* 구분선 */}
-                  <div className="border-t border-border"></div>
-
-                  {/* 가격 정보 */}
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">매입단가</span>
-                      <span className="font-mono font-semibold">{formatNumber(avgPrice, 0)}원</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">현재가</span>
-                      <span className="font-mono font-semibold" style={{ color: priceColor }}>
-                        {formatNumber(currentPrice, 0)}원
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 구분선 */}
-                  <div className="border-t border-border"></div>
-
-                  {/* 금액 정보 */}
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">평가금액</span>
-                      <span className="font-mono font-semibold">{formatNumber(parseInt(evaluateAmount), 0)}원</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">매입금액</span>
-                      <span className="font-mono font-semibold">{formatNumber(parseInt(purchaseAmount), 0)}원</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">비중</span>
-                      <span className="font-mono font-semibold">{weight.toFixed(1)}%</span>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )
-          })()}
-        </SheetContent>
-      </Sheet>
-
       {/* StockDetailSheet - v10 스타일 종목 상세 */}
       <StockDetailSheet
         stock={selectedStock}
@@ -1295,6 +1149,8 @@ export default function RuntimeDashboard() {
         holdings={holdings}
         unfilledOrders={kisUnfilledOrders}
         executedOrders={kisFilledOrders}
+        totalEvaluation={totalEvaluation}
+        onExitModeToggle={handleExitModeToggle}
       />
     </div>
   )
