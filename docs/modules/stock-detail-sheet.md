@@ -6,7 +6,7 @@ v10의 StockDetailSheet 기능을 v14에 모듈 단위로 포팅한 독립 모�
 
 - **책임**: 종목 상세 정보 표시 (Sheet UI)
 - **위치**: `frontend/components/stock-detail-sheet/`
-- **Phase**: Phase 1 (Price, Order 탭) 완료
+- **Phase**: Phase 1 (Holding, Price, Order 탭) 완료
 
 ---
 
@@ -19,6 +19,7 @@ frontend/components/stock-detail-sheet/
 ├── types.ts                       # 타입 정의
 ├── index.ts                       # Export
 ├── tabs/
+│   ├── holding-tab.tsx            # ✅ Phase 1: 보유 정보 탭
 │   ├── price-tab.tsx              # ✅ Phase 1: 가격 정보 탭
 │   └── order-tab.tsx              # ✅ Phase 1: 주문 탭
 └── hooks/
@@ -29,7 +30,23 @@ frontend/components/stock-detail-sheet/
 
 ## Phase 1: 구현 완료 기능
 
-### 1. Price 탭 ✅
+### 1. Holding 탭 ✅
+
+**기능**:
+- Exit Engine 활성화/비활성화 스위치
+- 현재가, 평가손익, 수익률 표시
+- 보유수량, 매도가능 수량 표시
+- 매입단가, 평가금액, 매입금액 표시
+- 포트폴리오 비중 표시
+
+**데이터 소스**:
+- v14 기존 `Holdings` 데이터
+- Exit Engine 상태 업데이트 API
+
+**구현 파일**:
+- `tabs/holding-tab.tsx`
+
+### 2. Price 탭 ✅
 
 **기능**:
 - 현재가, 전일대비, 등락률 표시
@@ -45,7 +62,7 @@ frontend/components/stock-detail-sheet/
 - `tabs/price-tab.tsx`
 - `hooks/use-stock-price.ts`
 
-### 2. Order 탭 ✅
+### 3. Order 탭 ✅
 
 **기능**:
 - 미체결 주문 목록 (해당 종목만 필터링)
@@ -60,7 +77,7 @@ frontend/components/stock-detail-sheet/
 **구현 파일**:
 - `tabs/order-tab.tsx`
 
-### 3. 기본 컴포넌트 ✅
+### 4. 기본 컴포넌트 ✅
 
 **StockDetailSheet**:
 - shadcn/ui Sheet 기반
@@ -289,7 +306,7 @@ tabs/ai-tab.tsx
 
 | 버전 | 날짜 | 내용 |
 |------|------|------|
-| v14.1.0-phase1 | 2026-01-15 | Phase 1 완료 (Price, Order 탭) |
+| v14.1.0-phase1 | 2026-01-15 | Phase 1 완료 (Holding, Price, Order 탭) |
 | v14.2.0-phase2 | TBD | Phase 2 (Investment, Consensus, AI 탭) |
 
 ---
