@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { StockSymbol } from '@/components/stock-symbol'
+import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/stock-detail-sheet'
 import { getHoldings, getOrderIntents, getOrders, getFills, getKISUnfilledOrders, getKISFilledOrders, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
@@ -30,6 +31,9 @@ export default function RuntimeDashboard() {
   const [detailSheetOpen, setDetailSheetOpen] = useState(false)
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+
+  // StockDetailSheet 훅
+  const { selectedStock, isOpen: isStockDetailOpen, openStockDetail, handleOpenChange: handleStockDetailOpenChange } = useStockDetail()
 
   // 총 평가금액 계산 (비중 계산용)
   const totalEvaluation = holdings.reduce((sum, h) => {
@@ -190,8 +194,15 @@ export default function RuntimeDashboard() {
   }
 
   const handleHoldingClick = (holding: Holding) => {
+    // 기존 Sheet (유지)
     setSelectedHolding(holding)
     setDetailSheetOpen(true)
+
+    // 새로운 StockDetailSheet 열기
+    openStockDetail({
+      symbol: holding.symbol,
+      symbolName: holding.raw?.symbol_name || holding.symbol,
+    })
   }
 
   const handleExitModeToggle = async (holding: Holding, enabled: boolean) => {
@@ -1076,6 +1087,16 @@ export default function RuntimeDashboard() {
           })()}
         </SheetContent>
       </Sheet>
+
+      {/* StockDetailSheet - v10 스타일 종목 상세 */}
+      <StockDetailSheet
+        stock={selectedStock}
+        open={isStockDetailOpen}
+        onOpenChange={handleStockDetailOpenChange}
+        holdings={holdings}
+        unfilledOrders={kisUnfilledOrders}
+        executedOrders={kisFilledOrders}
+      />
     </div>
   )
 }

@@ -120,6 +120,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
+| `modules/stock-detail-sheet.md` | ✅ 완료 | StockDetailSheet 모듈 (v10 포팅, Phase 1 완료) |
 | `ui/pages.md` | ⬜ TODO | 페이지 구조 |
 | `ui/components.md` | ⬜ TODO | 컴포넌트 계층 |
 | `ui/state-management.md` | ⬜ TODO | 상태 관리 전략 |
