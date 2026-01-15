@@ -119,6 +119,7 @@ export function StockDetailSheet({
               symbol={stock.symbol}
               symbolName={stock.symbolName}
               currentPrice={priceInfo?.currentPrice || 0}
+              holding={holding}
               unfilledOrders={unfilledOrders}
               executedOrders={executedOrders}
             />

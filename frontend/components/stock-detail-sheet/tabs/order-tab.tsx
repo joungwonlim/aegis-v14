@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { ShoppingCart, CheckCircle, Clock, TrendingUp, TrendingDown } from 'lucide-react'
+import { ShoppingCart, CheckCircle, Clock, TrendingUp, TrendingDown, ChevronUp, ChevronDown } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -13,13 +13,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { placeKISOrder } from '@/lib/api'
 
 interface OrderTabProps {
   symbol: string
   symbolName: string
   currentPrice: number
+  holding: any | null  // 보유 정보 (보유수량, 평가손익 등)
   unfilledOrders: any[]
   executedOrders: any[]
 }
@@ -39,6 +39,7 @@ export function OrderTab({
   symbol,
   symbolName,
   currentPrice,
+  holding,
   unfilledOrders,
   executedOrders,
 }: OrderTabProps) {
@@ -78,6 +79,26 @@ export function OrderTab({
     if (currentPrice > 0) {
       setPrice(Math.floor(currentPrice).toString())
     }
+  }
+
+  // 주문가격 증감
+  const handlePriceIncrement = () => {
+    const currentPriceValue = parseInt(price) || 0
+    setPrice((currentPriceValue + 1).toString())
+  }
+
+  const handlePriceDecrement = () => {
+    const currentPriceValue = parseInt(price) || 0
+    if (currentPriceValue > 1) {
+      setPrice((currentPriceValue - 1).toString())
+    }
+  }
+
+  // 주문수량 빠른 조절
+  const handleQuantityAdjust = (delta: number) => {
+    const currentQty = parseInt(quantity) || 0
+    const newQty = Math.max(0, currentQty + delta)
+    setQuantity(newQty.toString())
   }
 
   // 주문 총액 계산
@@ -261,7 +282,7 @@ export function OrderTab({
         )}
       </div>
 
-      {/* 빠른 주문 폼 */}
+      {/* 빠른 주문 폼 (v10 스타일) */}
       <div className="rounded-lg border p-6">
         <div className="mb-4 flex items-center gap-2">
           <ShoppingCart className="h-5 w-5 text-primary" />
@@ -269,101 +290,197 @@ export function OrderTab({
         </div>
 
         <div className="space-y-4">
-          {/* 매수/매도 선택 */}
-          <div className="space-y-2">
-            <Label>구분</Label>
-            <RadioGroup value={orderSide} onValueChange={(v) => setOrderSide(v as 'buy' | 'sell')}>
-              <div className="flex gap-4">
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="buy" id="buy" />
-                  <Label htmlFor="buy" className="cursor-pointer font-medium text-red-500">
-                    <TrendingUp className="inline h-4 w-4 mr-1" />
-                    매수
-                  </Label>
+          {/* 보유 정보 (holding이 있을 때만) */}
+          {holding && (
+            <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4">
+              <div className="mb-2 text-sm font-medium text-green-600 dark:text-green-400">보유 정보</div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-muted-foreground">보유수량</div>
+                  <div className="font-semibold">{holding.qty?.toLocaleString()}주</div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sell" id="sell" />
-                  <Label htmlFor="sell" className="cursor-pointer font-medium text-blue-500">
-                    <TrendingDown className="inline h-4 w-4 mr-1" />
-                    매도
-                  </Label>
+                <div>
+                  <div className="text-muted-foreground">평균매수단가</div>
+                  <div className="font-mono font-semibold">{Math.floor(holding.avg_price || 0).toLocaleString()}원</div>
                 </div>
-              </div>
-            </RadioGroup>
-          </div>
-
-          {/* 주문 유형 선택 */}
-          <div className="space-y-2">
-            <Label>주문 유형</Label>
-            <RadioGroup value={orderType} onValueChange={(v) => setOrderType(v as 'limit' | 'market')}>
-              <div className="flex gap-4">
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="limit" id="limit" />
-                  <Label htmlFor="limit" className="cursor-pointer">지정가</Label>
+                <div>
+                  <div className="text-muted-foreground">평가손익</div>
+                  <div className={`font-semibold ${holding.pnl >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                    {holding.pnl >= 0 ? '+' : ''}{holding.pnl?.toLocaleString()}원
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="market" id="market" />
-                  <Label htmlFor="market" className="cursor-pointer">시장가</Label>
+                <div>
+                  <div className="text-muted-foreground">손익률</div>
+                  <div className={`font-semibold ${holding.pnl_pct >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                    {holding.pnl_pct >= 0 ? '+' : ''}{holding.pnl_pct?.toFixed(2)}%
+                  </div>
                 </div>
               </div>
-            </RadioGroup>
+            </div>
+          )}
+
+          {/* 매수/매도 큰 버튼 */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant={orderSide === 'buy' ? 'default' : 'outline'}
+              className={`h-12 text-base font-semibold ${
+                orderSide === 'buy'
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'hover:bg-muted'
+              }`}
+              onClick={() => setOrderSide('buy')}
+            >
+              매수
+            </Button>
+            <Button
+              variant={orderSide === 'sell' ? 'default' : 'outline'}
+              className={`h-12 text-base font-semibold ${
+                orderSide === 'sell'
+                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                  : 'hover:bg-muted'
+              }`}
+              onClick={() => setOrderSide('sell')}
+            >
+              매도
+            </Button>
           </div>
 
-          {/* 주문 수량 */}
-          <div className="space-y-2">
-            <Label htmlFor="quantity">주문수량</Label>
-            <Input
-              id="quantity"
-              type="number"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              placeholder="주문수량 입력"
-              min="1"
-            />
+          {/* 지정가/시장가 큰 버튼 */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant={orderType === 'limit' ? 'default' : 'outline'}
+              className={`h-10 ${
+                orderType === 'limit'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              }`}
+              onClick={() => setOrderType('limit')}
+            >
+              지정가
+            </Button>
+            <Button
+              variant={orderType === 'market' ? 'default' : 'outline'}
+              className={`h-10 ${
+                orderType === 'market'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              }`}
+              onClick={() => setOrderType('market')}
+            >
+              시장가
+            </Button>
           </div>
 
-          {/* 주문 가격 (지정가일 때만) */}
+          {/* 주문가격 (지정가일 때만) */}
           {orderType === 'limit' && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="price">주문가격</Label>
+                <Label>주문가격</Label>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={handlePriceSync}
-                  className="h-6 text-xs"
+                  className="h-6 text-xs text-primary"
                 >
-                  현재가 동기화
+                  현재가 적용
                 </Button>
               </div>
-              <Input
-                id="price"
-                type="number"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="주문가격 입력"
-                min="1"
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  placeholder="주문가격 입력"
+                  className="font-mono text-right"
+                  min="1"
+                />
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-6 w-8"
+                    onClick={handlePriceIncrement}
+                  >
+                    <ChevronUp className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-6 w-8"
+                    onClick={handlePriceDecrement}
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* 주문 총액 */}
+          {/* 주문수량 */}
+          <div className="space-y-2">
+            <Label>주문수량</Label>
+            <Input
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="주문수량 입력"
+              className="text-right"
+              min="1"
+            />
+            {/* 빠른 수량 조절 버튼 */}
+            <div className="grid grid-cols-4 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuantityAdjust(10)}
+              >
+                +10
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuantityAdjust(50)}
+              >
+                +50
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuantityAdjust(100)}
+              >
+                +100
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuantityAdjust(1000)}
+              >
+                +1000
+              </Button>
+            </div>
+          </div>
+
+          {/* 총 주문금액 */}
           <div className="rounded-lg bg-muted/50 p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">주문 총액</span>
-              <span className="text-lg font-bold">
+              <span className="text-sm text-muted-foreground">총 주문금액</span>
+              <span className="text-lg font-bold font-mono">
                 {totalAmount > 0 ? `${totalAmount.toLocaleString()}원` : '-'}
               </span>
             </div>
           </div>
 
-          {/* 주문 버튼 */}
+          {/* 주문 실행 버튼 (큰 버튼) */}
           <Button
             onClick={handleSubmit}
             disabled={isSubmitting}
-            className={`w-full ${orderSide === 'buy' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'}`}
+            className={`w-full h-12 text-lg font-semibold ${
+              orderSide === 'buy'
+                ? 'bg-red-500 hover:bg-red-600'
+                : 'bg-blue-500 hover:bg-blue-600'
+            }`}
           >
-            {isSubmitting ? '주문 중...' : `${orderSide === 'buy' ? '매수' : '매도'} 주문`}
+            {isSubmitting ? '주문 중...' : `🛒 ${orderSide === 'buy' ? '한할 매수하기' : '한할 매도하기'}`}
           </Button>
 
           {/* 결과 메시지 */}
