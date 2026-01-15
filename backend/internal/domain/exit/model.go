@@ -23,7 +23,7 @@ type Position struct {
 	EntryTS       time.Time       `json:"entry_ts"`
 	Status        string          `json:"status"`           // OPEN/CLOSING/CLOSED (Exit Engine owns)
 	ExitMode      string          `json:"exit_mode"`        // ENABLED/DISABLED/MANUAL_ONLY (Exit Engine owns)
-	ExitProfileID string          `json:"exit_profile_id"`  // Override profile (Exit Engine owns)
+	ExitProfileID *string         `json:"exit_profile_id"`  // Override profile (Exit Engine owns), NULL = use default
 	StrategyID    string          `json:"strategy_id"`      // Entry strategy
 	UpdatedTS     time.Time       `json:"updated_ts"`
 	Version       int             `json:"version"` // Optimistic locking

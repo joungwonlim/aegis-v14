@@ -158,7 +158,7 @@ func (s *Service) createExitEvent(ctx context.Context, accountID, symbol string)
 		ExitReasonCode: exitReasonCode,
 		Source:         source,
 		IntentID:       intentID,
-		ExitProfileID:  &position.ExitProfileID,
+		ExitProfileID:  position.ExitProfileID,
 		RealizedPnl:    realizedPnl,
 		RealizedPnlPct: realizedPnlPct,
 		CreatedTS:      time.Now(),

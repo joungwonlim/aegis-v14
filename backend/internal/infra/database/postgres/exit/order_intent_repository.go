@@ -205,11 +205,12 @@ func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int)
 	var intents []*exit.OrderIntent
 	for rows.Next() {
 		intent := &exit.OrderIntent{}
+		var symbolName string // Temporary variable for unused symbol_name
 		err := rows.Scan(
 			&intent.IntentID,
 			&intent.PositionID,
 			&intent.Symbol,
-			&intent.SymbolName,
+			&symbolName, // Read but don't store
 			&intent.IntentType,
 			&intent.Qty,
 			&intent.OrderType,

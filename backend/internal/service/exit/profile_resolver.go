@@ -13,7 +13,7 @@ import (
 // 4. Default profile
 func (s *Service) resolveExitProfile(ctx context.Context, pos *exit.Position) *exit.ExitProfile {
 	// 1. Position override
-	if pos.ExitProfileID != "" {
+	if pos.ExitProfileID != nil && *pos.ExitProfileID != "" {
 		// TODO: Load profile from repository
 		// For now, return default if override is set
 		return s.defaultProfile
