@@ -77,113 +77,132 @@ export function StockDetailSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
-        <SheetHeader className="border-b pb-4">
-          <SheetTitle>
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1">
-                <StockSymbol
-                  symbol={stock.symbol}
-                  symbolName={stock.symbolName}
-                  size="lg"
-                />
-                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                  {stock.market && (
-                    <span className="rounded bg-muted px-2 py-0.5">
-                      {stock.market}
-                    </span>
-                  )}
-                  {stock.sector && <span>{stock.sector}</span>}
-                </div>
+        <SheetHeader className="sticky top-0 z-10 border-b pb-4 bg-background">
+          <div className="flex items-center gap-3">
+            {/* Stock Logo */}
+            <StockSymbol
+              symbol={stock.symbol}
+              symbolName={stock.symbolName}
+              size="lg"
+            />
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <SheetTitle className="text-lg truncate">
+                  {stock.symbolName}
+                </SheetTitle>
+                {holding && (
+                  <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="보유 종목" />
+                )}
+                <span className="text-xs text-muted-foreground">{stock.symbol}</span>
+                {stock.market && (
+                  <span className="px-1.5 py-0.5 text-[10px] rounded bg-muted text-muted-foreground">
+                    {stock.market}
+                  </span>
+                )}
               </div>
+              {stock.sector && (
+                <p className="text-xs text-muted-foreground truncate">{stock.sector}</p>
+              )}
+              {/* TODO Phase 2: 회사 설명 추가 */}
+              {/* {description && (
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>
+              )} */}
             </div>
 
-            {/* 종목명 */}
-            <div className="text-lg font-semibold text-muted-foreground mb-3">
-              {stock.symbolName}
+            {/* 아이콘 버튼 그룹 */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                title="관심종목"
+              >
+                <Star className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={() => setExitRuleDialogOpen(true)}
+                title="Exit Rule 설정"
+              >
+                <Settings className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                title="차트 보기"
+              >
+                <BarChart3 className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                title="외부 링크"
+              >
+                <ExternalLink className="h-5 w-5" />
+              </Button>
             </div>
+          </div>
 
-            {/* 현재가 */}
-            {priceInfo && (
-              <div className="space-y-2 mb-4">
-                <div
-                  className="text-4xl font-bold"
+          {/* 현재가 */}
+          {priceInfo && (
+            <div className="mt-3">
+              <div className="flex items-baseline gap-2">
+                <span
+                  className="text-2xl font-bold"
                   style={{
                     color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
                   }}
                 >
-                  {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}원
-                </div>
-                <div className="flex items-center gap-4">
-                  <span
-                    className="text-xl font-semibold"
-                    style={{
-                      color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
-                    }}
-                  >
+                  {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}
+                </span>
+                <span className="text-sm text-muted-foreground">원</span>
+                <div
+                  className="flex items-center gap-1 ml-2"
+                  style={{
+                    color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
+                  }}
+                >
+                  {(priceInfo.changeRate || 0) >= 0 ? (
+                    <TrendingUp className="h-4 w-4" />
+                  ) : (
+                    <TrendingDown className="h-4 w-4" />
+                  )}
+                  <span className="text-sm">
                     {(priceInfo.changeRate || 0) >= 0 ? '+' : ''}
                     {Math.floor(priceInfo.changePrice || 0).toLocaleString()}
                   </span>
-                  <span
-                    className="text-xl font-semibold"
-                    style={{
-                      color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
-                    }}
-                  >
-                    {(priceInfo.changeRate || 0) >= 0 ? '+' : ''}
-                    {(priceInfo.changeRate || 0).toFixed(2)}%
+                  <span className="text-sm">
+                    ({(priceInfo.changeRate || 0) >= 0 ? '+' : ''}
+                    {(priceInfo.changeRate || 0).toFixed(2)}%)
                   </span>
                 </div>
               </div>
-            )}
-
-            {/* 컨트롤 버튼 그룹 */}
-            <div className="flex items-center justify-between gap-3">
-              {/* Exit Engine 스위치 */}
-              <div className="flex items-center gap-2">
-                <Label htmlFor="exit-engine-header" className="text-sm font-medium">
-                  Exit Engine
-                </Label>
-                <Switch
-                  id="exit-engine-header"
-                  checked={holding?.exit_mode === 'ENABLED'}
-                  onCheckedChange={(enabled) => {
-                    if (holding) {
-                      onExitModeToggle(holding, enabled)
-                    }
-                  }}
-                />
-              </div>
-
-              {/* 아이콘 버튼 그룹 */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10"
-                  onClick={() => setExitRuleDialogOpen(true)}
-                  title="Exit Rule 설정"
-                >
-                  <Settings className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10"
-                  title="차트 보기"
-                >
-                  <BarChart3 className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10"
-                  title="외부 링크"
-                >
-                  <ExternalLink className="h-5 w-5" />
-                </Button>
-              </div>
             </div>
-          </SheetTitle>
+          )}
+
+          {/* Exit Engine 스위치 */}
+          {holding && (
+            <div className="mt-3 flex items-center gap-2">
+              <Label htmlFor="exit-engine-header" className="text-sm font-medium">
+                Exit Engine
+              </Label>
+              <Switch
+                id="exit-engine-header"
+                checked={holding.exit_mode === 'ENABLED'}
+                onCheckedChange={(enabled) => {
+                  onExitModeToggle(holding, enabled)
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
+              </span>
+            </div>
+          )}
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
