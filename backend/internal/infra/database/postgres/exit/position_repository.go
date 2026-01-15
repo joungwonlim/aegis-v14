@@ -43,6 +43,7 @@ func (r *PositionRepository) GetPosition(ctx context.Context, positionID uuid.UU
 	`
 
 	var pos exit.Position
+	var exitProfileID *string
 	err := r.pool.QueryRow(ctx, query, positionID).Scan(
 		&pos.PositionID,
 		&pos.AccountID,
@@ -53,11 +54,12 @@ func (r *PositionRepository) GetPosition(ctx context.Context, positionID uuid.UU
 		&pos.EntryTS,
 		&pos.Status,
 		&pos.ExitMode,
-		&pos.ExitProfileID,
+		&exitProfileID,
 		&pos.StrategyID,
 		&pos.UpdatedTS,
 		&pos.Version,
 	)
+	pos.ExitProfileID = exitProfileID
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -100,6 +102,7 @@ func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.P
 	var positions []*exit.Position
 	for rows.Next() {
 		var pos exit.Position
+		var exitProfileID *string
 		err := rows.Scan(
 			&pos.PositionID,
 			&pos.AccountID,
@@ -110,7 +113,7 @@ func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.P
 			&pos.EntryTS,
 			&pos.Status,
 			&pos.ExitMode,
-			&pos.ExitProfileID,
+			&exitProfileID,
 			&pos.StrategyID,
 			&pos.UpdatedTS,
 			&pos.Version,
@@ -118,6 +121,7 @@ func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.P
 		if err != nil {
 			return nil, fmt.Errorf("scan position: %w", err)
 		}
+		pos.ExitProfileID = exitProfileID
 		positions = append(positions, &pos)
 	}
 
@@ -160,6 +164,7 @@ func (r *PositionRepository) GetOpenPositions(ctx context.Context, accountID str
 	var positions []*exit.Position
 	for rows.Next() {
 		var pos exit.Position
+		var exitProfileID *string
 		err := rows.Scan(
 			&pos.PositionID,
 			&pos.AccountID,
@@ -170,7 +175,7 @@ func (r *PositionRepository) GetOpenPositions(ctx context.Context, accountID str
 			&pos.EntryTS,
 			&pos.Status,
 			&pos.ExitMode,
-			&pos.ExitProfileID,
+			&exitProfileID,
 			&pos.StrategyID,
 			&pos.UpdatedTS,
 			&pos.Version,
@@ -178,6 +183,7 @@ func (r *PositionRepository) GetOpenPositions(ctx context.Context, accountID str
 		if err != nil {
 			return nil, fmt.Errorf("scan position: %w", err)
 		}
+		pos.ExitProfileID = exitProfileID
 		positions = append(positions, &pos)
 	}
 
@@ -338,6 +344,7 @@ func (r *PositionRepository) GetPositionBySymbol(ctx context.Context, accountID,
 	`
 
 	pos := &exit.Position{}
+	var exitProfileID *string
 	err := r.pool.QueryRow(ctx, query, accountID, symbol, status).Scan(
 		&pos.PositionID,
 		&pos.AccountID,
@@ -348,11 +355,12 @@ func (r *PositionRepository) GetPositionBySymbol(ctx context.Context, accountID,
 		&pos.EntryTS,
 		&pos.Status,
 		&pos.ExitMode,
-		&pos.ExitProfileID,
+		&exitProfileID,
 		&pos.StrategyID,
 		&pos.UpdatedTS,
 		&pos.Version,
 	)
+	pos.ExitProfileID = exitProfileID
 
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("position not found for symbol %s with status %s", symbol, status)

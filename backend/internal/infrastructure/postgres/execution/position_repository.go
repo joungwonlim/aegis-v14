@@ -26,12 +26,14 @@ func NewPositionRepository(db *pgxpool.Pool) *PositionRepository {
 func (r *PositionRepository) GetPositionBySymbol(ctx context.Context, accountID, symbol, status string) (*exit.Position, error) {
 	query := `
 		SELECT position_id, account_id, symbol, side, qty, avg_price, entry_ts,
-		       status, exit_mode, exit_profile_id, strategy_id, updated_ts, version
+		       status, COALESCE(exit_mode, 'ENABLED') AS exit_mode,
+		       exit_profile_id, strategy_id, updated_ts, version
 		FROM trade.positions
 		WHERE account_id = $1 AND symbol = $2 AND status = $3
 	`
 
 	var position exit.Position
+	var exitProfileID *string
 
 	err := r.db.QueryRow(ctx, query, accountID, symbol, status).Scan(
 		&position.PositionID,
@@ -43,11 +45,12 @@ func (r *PositionRepository) GetPositionBySymbol(ctx context.Context, accountID,
 		&position.EntryTS,
 		&position.Status,
 		&position.ExitMode,
-		&position.ExitProfileID,
+		&exitProfileID,
 		&position.StrategyID,
 		&position.UpdatedTS,
 		&position.Version,
 	)
+	position.ExitProfileID = exitProfileID
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -63,12 +66,14 @@ func (r *PositionRepository) GetPositionBySymbol(ctx context.Context, accountID,
 func (r *PositionRepository) GetPosition(ctx context.Context, positionID uuid.UUID) (*exit.Position, error) {
 	query := `
 		SELECT position_id, account_id, symbol, side, qty, avg_price, entry_ts,
-		       status, exit_mode, exit_profile_id, strategy_id, updated_ts, version
+		       status, COALESCE(exit_mode, 'ENABLED') AS exit_mode,
+		       exit_profile_id, strategy_id, updated_ts, version
 		FROM trade.positions
 		WHERE position_id = $1
 	`
 
 	var position exit.Position
+	var exitProfileID *string
 
 	err := r.db.QueryRow(ctx, query, positionID).Scan(
 		&position.PositionID,
@@ -80,11 +85,12 @@ func (r *PositionRepository) GetPosition(ctx context.Context, positionID uuid.UU
 		&position.EntryTS,
 		&position.Status,
 		&position.ExitMode,
-		&position.ExitProfileID,
+		&exitProfileID,
 		&position.StrategyID,
 		&position.UpdatedTS,
 		&position.Version,
 	)
+	position.ExitProfileID = exitProfileID
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
