@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, TrendingUp, ShoppingCart, DollarSign, Target, Brain } from 'lucide-react'
+import { X, TrendingUp, ShoppingCart, DollarSign, Target, Brain, Package } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StockSymbol } from '@/components/stock-symbol'
 import type { StockInfo, StockDetailTab } from './types'
 import { useStockPrice } from './hooks/use-stock-price'
+import { HoldingTab } from './tabs/holding-tab'
 import { PriceTab } from './tabs/price-tab'
 import { OrderTab } from './tabs/order-tab'
 
@@ -22,12 +23,14 @@ interface StockDetailSheetProps {
   holdings: any[]           // Holdings 데이터
   unfilledOrders: any[]     // 미체결 주문
   executedOrders: any[]     // 체결 주문
+  totalEvaluation: number   // 총 평가금액
+  onExitModeToggle: (holding: any, enabled: boolean) => void  // Exit Engine 토글
 }
 
 /**
  * 종목 상세 Sheet (v10 스타일)
  *
- * Phase 1: Price, Order 탭
+ * Phase 1: Holding, Price, Order 탭
  * Phase 2: Investment, Consensus, AI 탭 추가
  */
 export function StockDetailSheet({
@@ -37,15 +40,21 @@ export function StockDetailSheet({
   holdings,
   unfilledOrders,
   executedOrders,
+  totalEvaluation,
+  onExitModeToggle,
 }: StockDetailSheetProps) {
-  const [activeTab, setActiveTab] = useState<StockDetailTab>('price')
+  const [activeTab, setActiveTab] = useState<StockDetailTab>('holding')
 
   // 가격 정보 조회
   const { data: priceInfo } = useStockPrice(stock?.symbol || '', holdings)
 
+  // 해당 종목의 보유 정보 찾기
+  const holding = holdings.find((h) => h.symbol === stock?.symbol)
+
   if (!stock) return null
 
   const tabs = [
+    { key: 'holding', label: '보유', icon: Package },
     { key: 'price', label: '시세', icon: TrendingUp },
     { key: 'order', label: '주문', icon: ShoppingCart },
     // Phase 2에서 활성화
@@ -58,7 +67,7 @@ export function StockDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader className="border-b pb-4">
-          <div className="flex items-start justify-between">
+          <SheetTitle className="flex items-start justify-between">
             <div className="flex-1">
               <StockSymbol
                 symbol={stock.symbol}
@@ -74,11 +83,11 @@ export function StockDetailSheet({
                 {stock.sector && <span>{stock.sector}</span>}
               </div>
             </div>
-          </div>
+          </SheetTitle>
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
                 <tab.icon className="h-4 w-4" />
@@ -86,6 +95,16 @@ export function StockDetailSheet({
               </TabsTrigger>
             ))}
           </TabsList>
+
+          <TabsContent value="holding" className="mt-4">
+            <HoldingTab
+              symbol={stock.symbol}
+              symbolName={stock.symbolName}
+              holding={holding}
+              totalEvaluation={totalEvaluation}
+              onExitModeToggle={(enabled) => holding && onExitModeToggle(holding, enabled)}
+            />
+          </TabsContent>
 
           <TabsContent value="price" className="mt-4">
             <PriceTab
