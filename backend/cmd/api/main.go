@@ -14,6 +14,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/api/router"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	exitrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
+	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
 )
@@ -68,18 +69,38 @@ func main() {
 	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 
+	// Initialize KIS client and adapter
+	kisClient, err := kis.NewClientFromEnv()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create KIS client")
+	}
+	kisAdapter := kis.NewExecutionAdapter(kisClient)
+
+	// Get account ID from environment
+	accountID := os.Getenv("KIS_ACCOUNT_ID")
+	if accountID == "" {
+		accountID = os.Getenv("KIS_ACCOUNT_NO")
+	}
+	if accountID == "" {
+		log.Fatal().Msg("KIS_ACCOUNT_ID or KIS_ACCOUNT_NO environment variable is required")
+	}
+
+	log.Info().Str("account_id", accountID).Msg("✅ KIS client initialized")
+
 	// Initialize handlers
 	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo, positionRepo)
 	intentsHandler := handlers.NewIntentsHandler(orderIntentRepo, orderIntentRepo) // Reader and Writer
 	ordersHandler := handlers.NewOrdersHandler(orderRepo)
 	fillsHandler := handlers.NewFillsHandler(fillRepo)
+	kisOrdersHandler := handlers.NewKISOrdersHandler(kisAdapter, accountID)
 
 	// Initialize router
 	routerCfg := &router.Config{
-		HoldingsHandler: holdingsHandler,
-		IntentsHandler:  intentsHandler,
-		OrdersHandler:   ordersHandler,
-		FillsHandler:    fillsHandler,
+		HoldingsHandler:  holdingsHandler,
+		IntentsHandler:   intentsHandler,
+		OrdersHandler:    ordersHandler,
+		FillsHandler:     fillsHandler,
+		KISOrdersHandler: kisOrdersHandler,
 	}
 
 	httpRouter := router.NewRouter(routerCfg)
