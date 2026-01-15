@@ -32,6 +32,47 @@
 ### 5. 문서 생성 시 즉시 등록
 새 문서 생성 시 `docs/_index.md`에 즉시 등록
 
+### 6. shadcn/ui 컴포넌트 설치 필수 (CRITICAL)
+**UI 컴포넌트 사용 전 반드시 설치 확인!**
+
+```bash
+# ❌ 금지: 설치 없이 import
+import { Input } from '@/components/ui/input'  // 빌드 실패!
+
+# ✅ 필수: 먼저 설치, 그 다음 import
+npx shadcn@latest add input
+npx shadcn@latest add label
+npx shadcn@latest add radio-group
+```
+
+**설치 체크리스트 (컴포넌트 사용 전 필수):**
+```
+□ 사용할 shadcn/ui 컴포넌트 목록 작성
+□ 각 컴포넌트가 이미 설치되어 있는지 확인 (frontend/components/ui/ 폴더 확인)
+□ 미설치 컴포넌트는 `npx shadcn@latest add {component}` 실행
+□ 설치 완료 후 import 문 작성
+```
+
+**주요 shadcn/ui 컴포넌트:**
+- `button` - Button 컴포넌트
+- `input` - Input 입력 필드
+- `label` - Label 레이블
+- `radio-group` - RadioGroup 라디오 버튼
+- `select` - Select 드롭다운
+- `checkbox` - Checkbox 체크박스
+- `dialog` - Dialog 모달
+- `sheet` - Sheet 사이드 패널
+- `table` - Table 테이블
+- `tabs` - Tabs 탭
+- `card` - Card 카드
+- `badge` - Badge 뱃지
+- `switch` - Switch 스위치
+
+**위반 시:**
+- 즉시 설치 필요
+- 빌드 실패 원인이 됨
+- 커밋 전 반드시 확인
+
 ---
 
 ## 🔄 작업 수행 시 필수 체크리스트 (CRITICAL)
