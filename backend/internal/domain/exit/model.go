@@ -166,17 +166,18 @@ type HardStopConfig struct {
 
 // OrderIntent represents exit intent (idempotent)
 type OrderIntent struct {
-	IntentID   uuid.UUID       `json:"intent_id"`
-	PositionID uuid.UUID       `json:"position_id"`
-	Symbol     string          `json:"symbol"`
-	IntentType string          `json:"intent_type"` // EXIT_PARTIAL | EXIT_FULL
-	Qty        int64           `json:"qty"`
-	OrderType  string          `json:"order_type"` // MKT | LMT
+	IntentID   uuid.UUID        `json:"intent_id"`
+	PositionID uuid.UUID        `json:"position_id"`
+	Symbol     string           `json:"symbol"`
+	SymbolName string           `json:"symbol_name"` // 종목명
+	IntentType string           `json:"intent_type"` // EXIT_PARTIAL | EXIT_FULL
+	Qty        int64            `json:"qty"`
+	OrderType  string           `json:"order_type"` // MKT | LMT
 	LimitPrice *decimal.Decimal `json:"limit_price"`
-	ReasonCode string          `json:"reason_code"` // SL1 | SL2 | TP1 | TP2 | TP3 | TRAIL | TIME | MANUAL
-	ActionKey  string          `json:"action_key"`  // {position_id}:SL1 (unique)
-	Status     string          `json:"status"`      // NEW | ACK | REJECTED | FILLED
-	CreatedTS  time.Time       `json:"created_ts"`
+	ReasonCode string           `json:"reason_code"` // SL1 | SL2 | TP1 | TP2 | TP3 | TRAIL | TIME | MANUAL
+	ActionKey  string           `json:"action_key"`  // {position_id}:SL1 (unique)
+	Status     string           `json:"status"`      // NEW | ACK | REJECTED | FILLED
+	CreatedTS  time.Time        `json:"created_ts"`
 }
 
 // Intent Types
