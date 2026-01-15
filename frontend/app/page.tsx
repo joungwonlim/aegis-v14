@@ -133,8 +133,12 @@ export default function RuntimeDashboard() {
 
     const aHolding = holdings.find(h => h.symbol === a.symbol)
     const bHolding = holdings.find(h => h.symbol === b.symbol)
-    const aCurrentPrice = aHolding?.current_price || 0
-    const bCurrentPrice = bHolding?.current_price || 0
+    const aCurrentPrice = typeof aHolding?.current_price === 'string'
+      ? parseFloat(aHolding.current_price)
+      : (aHolding?.current_price || 0)
+    const bCurrentPrice = typeof bHolding?.current_price === 'string'
+      ? parseFloat(bHolding.current_price)
+      : (bHolding?.current_price || 0)
     const aOrderPrice = a.limit_price || aCurrentPrice
     const bOrderPrice = b.limit_price || bCurrentPrice
     const aDeviation = aOrderPrice > 0 ? ((aCurrentPrice - aOrderPrice) / aOrderPrice) * 100 : 0
@@ -689,7 +693,9 @@ export default function RuntimeDashboard() {
                 sortedIntents.map((intent) => {
                   // holdings에서 현재가 정보 가져오기
                   const holding = holdings.find(h => h.symbol === intent.symbol)
-                  const currentPrice = holding?.current_price || 0
+                  const currentPrice = typeof holding?.current_price === 'string'
+                    ? parseFloat(holding.current_price)
+                    : (holding?.current_price || 0)
                   const pnlPct = holding?.pnl_pct || 0
 
                   // 주문가격 (limit_price 또는 현재가)
@@ -827,7 +833,9 @@ export default function RuntimeDashboard() {
                   .map((intent) => {
                     // holdings에서 현재가 정보 가져오기
                     const holding = holdings.find(h => h.symbol === intent.symbol)
-                    const currentPrice = holding?.current_price || 0
+                    const currentPrice = typeof holding?.current_price === 'string'
+                      ? parseFloat(holding.current_price)
+                      : (holding?.current_price || 0)
                     const pnlPct = holding?.pnl_pct || 0
 
                     // 주문가격 (limit_price 또는 현재가)
@@ -943,7 +951,9 @@ export default function RuntimeDashboard() {
 
                   // holdings에서 현재가 정보 가져오기
                   const holding = holdings.find(h => h.symbol === order.Symbol)
-                  const currentPrice = holding?.current_price || 0
+                  const currentPrice = typeof holding?.current_price === 'string'
+                    ? parseFloat(holding.current_price)
+                    : (holding?.current_price || 0)
                   const pnl = holding?.pnl || 0
                   const pnlPct = holding?.pnl_pct || 0
 
@@ -1038,7 +1048,9 @@ export default function RuntimeDashboard() {
 
                   // holdings에서 현재가 정보 가져오기
                   const holding = holdings.find(h => h.symbol === fill.Symbol)
-                  const currentPrice = holding?.current_price || 0
+                  const currentPrice = typeof holding?.current_price === 'string'
+                    ? parseFloat(holding.current_price)
+                    : (holding?.current_price || 0)
                   const pnl = holding?.pnl || 0
                   const pnlPct = holding?.pnl_pct || 0
 
