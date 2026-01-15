@@ -78,74 +78,33 @@ export function StockDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader className="border-b pb-4">
-          <SheetTitle className="flex items-start justify-between">
-            <div className="flex-1">
-              <StockSymbol
-                symbol={stock.symbol}
-                symbolName={stock.symbolName}
-                size="lg"
-              />
-              <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                {stock.market && (
-                  <span className="rounded bg-muted px-2 py-0.5">
-                    {stock.market}
-                  </span>
-                )}
-                {stock.sector && <span>{stock.sector}</span>}
+          <SheetTitle>
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1">
+                <StockSymbol
+                  symbol={stock.symbol}
+                  symbolName={stock.symbolName}
+                  size="lg"
+                />
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  {stock.market && (
+                    <span className="rounded bg-muted px-2 py-0.5">
+                      {stock.market}
+                    </span>
+                  )}
+                  {stock.sector && <span>{stock.sector}</span>}
+                </div>
               </div>
             </div>
 
-            {/* 아이콘 버튼 그룹 */}
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setExitRuleDialogOpen(true)}
-                title="Exit Rule"
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                title="차트 보기"
-              >
-                <BarChart3 className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                title="외부 링크"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-            </div>
-          </SheetTitle>
-        </SheetHeader>
-
-        <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
-          <TabsList className="grid w-full grid-cols-3">
-            {tabs.map((tab) => (
-              <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* 종목명 + 현재가 (모든 탭 공통) */}
-          <div className="mt-4 space-y-3 px-4">
             {/* 종목명 */}
-            <div className="text-lg font-semibold text-muted-foreground">
+            <div className="text-lg font-semibold text-muted-foreground mb-3">
               {stock.symbolName}
             </div>
 
             {/* 현재가 */}
             {priceInfo && (
-              <div className="space-y-2">
+              <div className="space-y-2 mb-4">
                 <div
                   className="text-4xl font-bold"
                   style={{
@@ -176,7 +135,66 @@ export function StockDetailSheet({
                 </div>
               </div>
             )}
-          </div>
+
+            {/* 컨트롤 버튼 그룹 */}
+            <div className="flex items-center justify-between gap-3">
+              {/* Exit Engine 스위치 */}
+              <div className="flex items-center gap-2">
+                <Label htmlFor="exit-engine-header" className="text-sm font-medium">
+                  Exit Engine
+                </Label>
+                <Switch
+                  id="exit-engine-header"
+                  checked={holding?.exit_mode === 'ENABLED'}
+                  onCheckedChange={(enabled) => {
+                    if (holding) {
+                      onExitModeToggle(holding, enabled)
+                    }
+                  }}
+                />
+              </div>
+
+              {/* 아이콘 버튼 그룹 */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  onClick={() => setExitRuleDialogOpen(true)}
+                  title="Exit Rule 설정"
+                >
+                  <Settings className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  title="차트 보기"
+                >
+                  <BarChart3 className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  title="외부 링크"
+                >
+                  <ExternalLink className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+          </SheetTitle>
+        </SheetHeader>
+
+        <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
+          <TabsList className="grid w-full grid-cols-3">
+            {tabs.map((tab) => (
+              <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
           <TabsContent value="holding" className="mt-4">
             <HoldingTab

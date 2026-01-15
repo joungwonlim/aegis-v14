@@ -104,12 +104,19 @@ frontend/components/stock-detail-sheet/
 - Tabs로 탭 전환
 - StockSymbol 컴포넌트로 종목 표시
 - v10과 동일한 UI/UX
-- **상단 아이콘 버튼** (v10 스타일):
-  - Settings: Exit Rule 다이얼로그 열기
-  - BarChart3: 차트 보기 (Phase 2)
-  - ExternalLink: 외부 링크 (Phase 2)
+- **SheetHeader 구조**:
+  - 종목 로고 + 종목명 + 마켓/섹터 정보
+  - 종목명 (text-lg, 회색)
+  - 현재가 (text-4xl, 큰 숫자, 빨강/파랑)
+  - 전일대비 + 등락률 (text-xl, 빨강/파랑)
+  - Exit Engine 스위치 (왼쪽)
+  - 아이콘 버튼 그룹 (오른쪽):
+    - Settings (h-10 w-10): Exit Rule 상세 설정
+    - BarChart3 (h-10 w-10): 차트 보기 (Phase 2)
+    - ExternalLink (h-10 w-10): 외부 링크 (Phase 2)
 - **Exit Rule 다이얼로그**:
-  - Exit Engine 활성화/비활성화 스위치
+  - Settings 버튼 클릭 시 열림
+  - Exit Engine 스위치 (중복, 빠른 접근용)
   - 상세 설정은 Phase 2 예정
 
 **useStockDetail 훅**:
