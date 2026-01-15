@@ -14,6 +14,7 @@ import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/s
 import { getHoldings, getOrderIntents, getOrders, getFills, getKISUnfilledOrders, getKISFilledOrders, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
+type IntentSortField = 'symbol' | 'current_price' | 'order_price' | 'deviation' | 'qty' | 'created_ts'
 type SortOrder = 'asc' | 'desc'
 
 export default function RuntimeDashboard() {
@@ -31,6 +32,8 @@ export default function RuntimeDashboard() {
   const [detailSheetOpen, setDetailSheetOpen] = useState(false)
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [intentSortField, setIntentSortField] = useState<IntentSortField | null>(null)
+  const [intentSortOrder, setIntentSortOrder] = useState<SortOrder>('desc')
 
   // StockDetailSheet 훅
   const { selectedStock, isOpen: isStockDetailOpen, openStockDetail, handleOpenChange: handleStockDetailOpenChange } = useStockDetail()
@@ -112,6 +115,66 @@ export default function RuntimeDashboard() {
     }
 
     return sortOrder === 'asc' ? (aValue as number) - (bValue as number) : (bValue as number) - (aValue as number)
+  })
+
+  // Intent 정렬 핸들러
+  const handleIntentSort = (field: IntentSortField) => {
+    if (intentSortField === field) {
+      setIntentSortOrder(intentSortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setIntentSortField(field)
+      setIntentSortOrder('desc')
+    }
+  }
+
+  // 정렬된 intents
+  const sortedIntents = [...intents].sort((a, b) => {
+    if (!intentSortField) return 0
+
+    const aHolding = holdings.find(h => h.symbol === a.symbol)
+    const bHolding = holdings.find(h => h.symbol === b.symbol)
+    const aCurrentPrice = aHolding?.current_price || 0
+    const bCurrentPrice = bHolding?.current_price || 0
+    const aOrderPrice = a.limit_price || aCurrentPrice
+    const bOrderPrice = b.limit_price || bCurrentPrice
+    const aDeviation = aOrderPrice > 0 ? ((aCurrentPrice - aOrderPrice) / aOrderPrice) * 100 : 0
+    const bDeviation = bOrderPrice > 0 ? ((bCurrentPrice - bOrderPrice) / bOrderPrice) * 100 : 0
+
+    let aValue: number | string = 0
+    let bValue: number | string = 0
+
+    switch (intentSortField) {
+      case 'symbol':
+        aValue = a.symbol_name || a.symbol
+        bValue = b.symbol_name || b.symbol
+        break
+      case 'current_price':
+        aValue = aCurrentPrice
+        bValue = bCurrentPrice
+        break
+      case 'order_price':
+        aValue = aOrderPrice
+        bValue = bOrderPrice
+        break
+      case 'deviation':
+        aValue = aDeviation
+        bValue = bDeviation
+        break
+      case 'qty':
+        aValue = a.qty
+        bValue = b.qty
+        break
+      case 'created_ts':
+        aValue = new Date(a.created_ts).getTime()
+        bValue = new Date(b.created_ts).getTime()
+        break
+    }
+
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return intentSortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue)
+    }
+
+    return intentSortOrder === 'asc' ? (aValue as number) - (bValue as number) : (bValue as number) - (aValue as number)
   })
 
   // 합계 계산
@@ -542,28 +605,88 @@ export default function RuntimeDashboard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>종목명</TableHead>
-                <TableHead className="text-right">현재가</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('symbol')}
+                >
+                  <div className="flex items-center gap-1">
+                    종목명
+                    {intentSortField === 'symbol' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('current_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    현재가
+                    {intentSortField === 'current_price' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="text-right">전일대비</TableHead>
-                <TableHead className="text-right">주문가격</TableHead>
-                <TableHead className="text-right">괴리율</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('order_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    주문가격
+                    {intentSortField === 'order_price' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('deviation')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    괴리율
+                    {intentSortField === 'deviation' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead>타입</TableHead>
-                <TableHead className="text-right">수량</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('qty')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    수량
+                    {intentSortField === 'qty' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead>주문유형</TableHead>
                 <TableHead>사유</TableHead>
                 <TableHead>상태</TableHead>
-                <TableHead>생성시각</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('created_ts')}
+                >
+                  <div className="flex items-center gap-1">
+                    생성시각
+                    {intentSortField === 'created_ts' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {intents.length === 0 ? (
+              {sortedIntents.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={11} className="text-center text-muted-foreground">
                     Order Intent가 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                intents.map((intent) => {
+                sortedIntents.map((intent) => {
                   // holdings에서 현재가 정보 가져오기
                   const holding = holdings.find(h => h.symbol === intent.symbol)
                   const currentPrice = holding?.current_price || 0
@@ -610,36 +733,96 @@ export default function RuntimeDashboard() {
         <CardHeader>
           <CardTitle>📤 KIS Orders Execution</CardTitle>
           <CardDescription>
-            승인 대기 중인 Exit Intent ({intents.filter(i => i.status === 'PENDING_APPROVAL').length}개)
+            승인 대기 중인 Exit Intent ({sortedIntents.filter(i => i.status === 'PENDING_APPROVAL').length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>종목명</TableHead>
-                <TableHead className="text-right">현재가</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('symbol')}
+                >
+                  <div className="flex items-center gap-1">
+                    종목명
+                    {intentSortField === 'symbol' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('current_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    현재가
+                    {intentSortField === 'current_price' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="text-right">전일대비</TableHead>
-                <TableHead className="text-right">주문가격</TableHead>
-                <TableHead className="text-right">괴리율</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('order_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    주문가격
+                    {intentSortField === 'order_price' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('deviation')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    괴리율
+                    {intentSortField === 'deviation' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead>타입</TableHead>
-                <TableHead className="text-right">수량</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('qty')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    수량
+                    {intentSortField === 'qty' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead>주문유형</TableHead>
                 <TableHead>사유</TableHead>
                 <TableHead>상태</TableHead>
-                <TableHead>생성시각</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('created_ts')}
+                >
+                  <div className="flex items-center gap-1">
+                    생성시각
+                    {intentSortField === 'created_ts' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="text-center">작업</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {intents.filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED').length === 0 ? (
+              {sortedIntents.filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED').length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={12} className="text-center text-muted-foreground">
                     승인 대기 중인 Intent가 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                intents
+                sortedIntents
                   .filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED')
                   .map((intent) => {
                     // holdings에서 현재가 정보 가져오기
