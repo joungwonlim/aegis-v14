@@ -1,9 +1,5 @@
 'use client'
 
-import { Package } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
-
 interface HoldingTabProps {
   symbol: string
   symbolName: string
@@ -13,9 +9,9 @@ interface HoldingTabProps {
 }
 
 /**
- * Holding 탭 - 보유 정보 + Exit Engine 스위치
+ * Holding 탭 - 보유 정보
  *
- * 기존 Sheet 기능 통합
+ * Exit Engine 스위치는 상단 아이콘 버튼(Settings)에서 제어
  */
 export function HoldingTab({
   symbol,
@@ -59,26 +55,6 @@ export function HoldingTab({
 
   return (
     <div className="space-y-6 p-4">
-      {/* Exit Engine 스위치 */}
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="exit-mode" className="text-base font-semibold">
-            Exit Engine
-          </Label>
-          <div className="text-sm text-muted-foreground">
-            {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
-          </div>
-        </div>
-        <Switch
-          id="exit-mode"
-          checked={holding.exit_mode === 'ENABLED'}
-          onCheckedChange={onExitModeToggle}
-        />
-      </div>
-
-      {/* 구분선 */}
-      <div className="border-t border-border"></div>
-
       {/* 보유 정보 */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">

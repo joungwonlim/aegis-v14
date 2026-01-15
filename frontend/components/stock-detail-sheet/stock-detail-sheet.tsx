@@ -1,14 +1,24 @@
 'use client'
 
 import { useState } from 'react'
-import { X, TrendingUp, ShoppingCart, DollarSign, Target, Brain, Package } from 'lucide-react'
+import { X, TrendingUp, ShoppingCart, DollarSign, Target, Brain, Package, Settings, Star, Bell, BarChart3, ExternalLink } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { StockSymbol } from '@/components/stock-symbol'
 import type { StockInfo, StockDetailTab } from './types'
 import { useStockPrice } from './hooks/use-stock-price'
@@ -44,6 +54,7 @@ export function StockDetailSheet({
   onExitModeToggle,
 }: StockDetailSheetProps) {
   const [activeTab, setActiveTab] = useState<StockDetailTab>('holding')
+  const [exitRuleDialogOpen, setExitRuleDialogOpen] = useState(false)
 
   // 가격 정보 조회
   const { data: priceInfo } = useStockPrice(stock?.symbol || '', holdings)
@@ -82,6 +93,35 @@ export function StockDetailSheet({
                 )}
                 {stock.sector && <span>{stock.sector}</span>}
               </div>
+            </div>
+
+            {/* 아이콘 버튼 그룹 */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setExitRuleDialogOpen(true)}
+                title="Exit Rule"
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="차트 보기"
+              >
+                <BarChart3 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="외부 링크"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </Button>
             </div>
           </SheetTitle>
         </SheetHeader>
@@ -173,6 +213,52 @@ export function StockDetailSheet({
           {/* <TabsContent value="ai">...</TabsContent> */}
         </Tabs>
       </SheetContent>
+
+      {/* Exit Rule 다이얼로그 */}
+      <Dialog open={exitRuleDialogOpen} onOpenChange={setExitRuleDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Exit Rule 설정</DialogTitle>
+            <DialogDescription>
+              {stock.symbolName} ({stock.symbol})의 Exit Engine 설정
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Exit Engine 활성화/비활성화 */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="exit-engine-dialog" className="text-base font-semibold">
+                  Exit Engine
+                </Label>
+                <div className="text-sm text-muted-foreground">
+                  자동 손절/익절 시스템 활성화
+                </div>
+              </div>
+              <Switch
+                id="exit-engine-dialog"
+                checked={holding?.exit_mode === 'ENABLED'}
+                onCheckedChange={(enabled) => {
+                  if (holding) {
+                    onExitModeToggle(holding, enabled)
+                  }
+                }}
+              />
+            </div>
+
+            {/* 추가 설정 (Phase 2) */}
+            {holding?.exit_mode === 'ENABLED' && (
+              <div className="rounded-lg border bg-muted/50 p-4">
+                <div className="text-sm text-muted-foreground">
+                  🚧 상세 Exit Rule 설정은 Phase 2에서 추가됩니다
+                  <br />
+                  (손절률, 익절률, Trailing Stop 등)
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   )
 }

@@ -33,11 +33,13 @@ frontend/components/stock-detail-sheet/
 ### 1. Holding 탭 ✅
 
 **기능**:
-- Exit Engine 활성화/비활성화 스위치
-- 현재가, 평가손익, 수익률 표시
 - 보유수량, 매도가능 수량 표시
-- 매입단가, 평가금액, 매입금액 표시
+- 평가손익, 수익률 표시
+- 매입단가 표시
+- 평가금액, 매입금액 표시
 - 포트폴리오 비중 표시
+
+**참고**: Exit Engine 스위치는 상단 아이콘 버튼(Settings)으로 이동
 
 **데이터 소스**:
 - v14 기존 `Holdings` 데이터
@@ -102,6 +104,13 @@ frontend/components/stock-detail-sheet/
 - Tabs로 탭 전환
 - StockSymbol 컴포넌트로 종목 표시
 - v10과 동일한 UI/UX
+- **상단 아이콘 버튼** (v10 스타일):
+  - Settings: Exit Rule 다이얼로그 열기
+  - BarChart3: 차트 보기 (Phase 2)
+  - ExternalLink: 외부 링크 (Phase 2)
+- **Exit Rule 다이얼로그**:
+  - Exit Engine 활성화/비활성화 스위치
+  - 상세 설정은 Phase 2 예정
 
 **useStockDetail 훅**:
 - Sheet 열기/닫기 상태 관리
