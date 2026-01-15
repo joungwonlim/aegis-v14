@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	evaluationInterval = 3 * time.Second  // 1~5초 권장
-	maxRetries         = 3                // 최대 재평가 횟수
-	freshnessThreshold = 10 * time.Second // 가격 신선도 임계값
+	evaluationInterval     = 3 * time.Second  // 1~5초 권장
+	reconciliationInterval = 30 * time.Second // Intent 조정 주기
+	maxRetries             = 3                // 최대 재평가 횟수
+	freshnessThreshold     = 10 * time.Second // 가격 신선도 임계값
 )
 
 // evaluationLoop runs the main exit evaluation loop (1~5초 주기)
@@ -28,6 +29,28 @@ func (s *Service) evaluationLoop() {
 			// Evaluate all positions
 			if err := s.evaluateAllPositions(s.ctx); err != nil {
 				log.Error().Err(err).Msg("Exit evaluation failed")
+			}
+
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// reconciliationLoop runs the intent reconciliation loop (30초 주기)
+func (s *Service) reconciliationLoop() {
+	ticker := time.NewTicker(reconciliationInterval)
+	defer ticker.Stop()
+
+	// Wait a bit before first run to let other services initialize
+	time.Sleep(10 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			// Reconcile intents with actual holdings/fills
+			if err := s.ReconcileIntents(s.ctx); err != nil {
+				log.Error().Err(err).Msg("Intent reconciliation failed")
 			}
 
 		case <-s.ctx.Done():
@@ -224,6 +247,31 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 
 	// 7. Evaluate triggers (우선순위 순서)
 	trigger := s.evaluateTriggers(snapshot, state, bestPrice, profile, controlMode)
+
+	// 7.5. Record exit signal for debugging/backtest (best-effort, non-blocking)
+	if trigger != nil {
+		currentPriceInt := bestPrice.BestPrice
+		if bestPrice.BidPrice != nil {
+			currentPriceInt = *bestPrice.BidPrice
+		}
+		currentPrice := decimal.NewFromInt(currentPriceInt)
+
+		signal := &exit.ExitSignal{
+			SignalID:    uuid.New(),
+			PositionID:  snapshot.PositionID,
+			RuleName:    trigger.ReasonCode,
+			IsTriggered: true,
+			Reason:      fmt.Sprintf("Trigger hit: %s", trigger.ReasonCode),
+			Price:       currentPrice,
+			EvaluatedTS: time.Now(),
+		}
+
+		// Best-effort signal recording (non-blocking)
+		if err := s.signalRepo.InsertSignal(ctx, signal); err != nil {
+			log.Warn().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to record exit signal (non-fatal)")
+		}
+	}
+
 	if trigger == nil {
 		// No trigger hit
 		return nil
@@ -330,6 +378,25 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 		Int64("qty", qty).
 		Str("type", intentType).
 		Msg("Exit intent created")
+
+	// 7. Update position status to CLOSING (Exit Engine owns status)
+	// Use version from snapshot to ensure consistency
+	if pos.Status == exit.StatusOpen {
+		err = s.posRepo.UpdateStatus(ctx, snapshot.PositionID, exit.StatusClosing, snapshot.Version)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("symbol", snapshot.Symbol).
+				Msg("Failed to update position status to CLOSING (non-fatal)")
+			// Non-fatal: Intent already created, status update is best-effort
+		} else {
+			log.Info().
+				Str("symbol", snapshot.Symbol).
+				Str("old_status", exit.StatusOpen).
+				Str("new_status", exit.StatusClosing).
+				Msg("Position status updated to CLOSING")
+		}
+	}
 
 	return nil
 }

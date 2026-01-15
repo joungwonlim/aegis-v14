@@ -34,6 +34,106 @@
 
 ---
 
+## 🔄 작업 수행 시 필수 체크리스트 (CRITICAL)
+
+**모든 구현 작업 완료 후 반드시 다음 순서대로 수행:**
+
+### Step 1: SSOT 확인 ✅
+```
+□ 변경한 코드가 올바른 모듈의 책임인가?
+□ 다른 모듈의 책임을 침범하지 않았는가?
+□ 인터페이스를 통해서만 다른 모듈과 통신하는가?
+□ 순환 참조가 없는가?
+```
+
+**위반 시 즉시 수정 필요!**
+
+### Step 2: 문서 동기화 📝
+```
+□ 코드 변경 시 관련 설계 문서 업데이트 완료?
+□ 새로운 함수/메서드 추가 시 docs/ 해당 모듈 문서에 반영?
+□ API 변경 시 docs/api/ 문서 업데이트?
+□ DB 스키마 변경 시 docs/database/ 문서 업데이트?
+```
+
+**업데이트할 문서:**
+- 코드 변경: `docs/modules/{모듈명}.md`
+- API 변경: `docs/api/*.md`
+- DB 변경: `docs/database/schema.md`
+- 아키텍처 변경: `docs/architecture/*.md`
+
+### Step 3: Git 커밋 🔖
+```
+□ 변경사항을 논리적 단위로 그룹화했는가?
+□ 커밋 메시지가 명확한가?
+□ Co-Authored-By 태그 추가했는가?
+```
+
+**커밋 메시지 형식:**
+```bash
+{type}({scope}): {subject}
+
+{body}
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**Type:**
+- `feat`: 새로운 기능
+- `fix`: 버그 수정
+- `refactor`: 리팩토링
+- `docs`: 문서 변경
+- `test`: 테스트 추가/수정
+- `chore`: 빌드/설정 변경
+
+**예시:**
+```bash
+git add {변경된 파일들}
+git commit -m "$(cat <<'EOF'
+feat(exit): Intent Reconciliation 기능 추가
+
+- 중복 Intent 자동 탐지 및 취소 (30초 주기)
+- position_id + reason_code 기반 중복 검사
+- reconciliationLoop 백그라운드 실행
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## 🚨 체크리스트 위반 시 대응
+
+**SSOT 위반:**
+- 즉시 코드 수정
+- 올바른 모듈로 이동
+- 인터페이스 재설계
+
+**문서 누락:**
+- 작업 중단
+- 문서 업데이트 우선 완료
+- 코드 재검토
+
+**Git 미처리:**
+- 변경사항 커밋
+- 논리적 단위로 분리
+- 의미 있는 메시지 작성
+
+---
+
+## 📋 작업 완료 기준 (Definition of Done)
+
+모든 작업은 다음 3가지를 모두 완료해야 "완료"로 간주:
+
+1. ✅ **SSOT 준수** - 모듈 책임 경계 확인
+2. 📝 **문서 동기화** - 관련 문서 업데이트 완료
+3. 🔖 **Git 커밋** - 변경사항 커밋 완료
+
+**하나라도 누락 시 작업 미완료!**
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -574,6 +674,386 @@ Fetcher → (구현)
 
 ---
 
+## Claude Code 활용 베스트 프랙티스
+
+### 📝 1. 실수 학습 패턴 (Continuous Learning)
+
+**원칙**: Claude가 실수할 때마다 CLAUDE.md에 지침을 추가하여 같은 실수를 반복하지 않게 합니다.
+
+#### 실수 → 학습 프로세스
+
+```
+1. Claude가 실수 발생
+   ↓
+2. 실수 원인 분석
+   ↓
+3. CLAUDE.md에 명확한 지침 추가
+   ↓
+4. 다음 대화부터 자동 적용
+```
+
+#### 예시: 실수 사례와 개선
+
+**실수 사례 1**: Exit Engine 구현 시 HardStop을 TODO 주석으로만 남김
+
+**개선 지침 추가**:
+```markdown
+## ❌ 금지: TODO 주석으로 중요 기능 미루기
+
+### 규칙
+- 안전장치(HardStop, Circuit Breaker 등)는 TODO가 아닌 즉시 구현
+- "// TODO: Implement later" 금지 → 구현하거나 별도 이슈 생성
+
+### 예외
+- 성능 최적화 (미래 개선)
+- 선택적 기능 (현재 불필요)
+```
+
+**실수 사례 2**: Profile Resolver를 껍데기만 만들고 항상 default 반환
+
+**개선 지침 추가**:
+```markdown
+## ❌ 금지: 인터페이스만 구현하고 내부는 빈 껍데기
+
+### 규칙
+- Repository를 주입받았으면 실제로 사용해야 함
+- "For now, return default" 패턴 금지
+- 미구현 시 명시적 에러 반환 또는 panic
+
+### 체크리스트
+- [ ] 주입된 dependency가 실제로 호출되는가?
+- [ ] 오버라이드 로직이 실제로 작동하는가?
+```
+
+#### 지침 추가 위치
+
+| 실수 유형 | CLAUDE.md 섹션 |
+|----------|----------------|
+| 설계 원칙 위반 | `## 절대 규칙` 또는 `## 모듈 독립성 설계 원칙` |
+| 구현 패턴 오류 | `## 금지 패턴` (새 섹션 생성) |
+| 문서 작성 오류 | `## 설계 문서 SSOT 규칙` |
+| 테스트 누락 | `## 테스트 전략` (새 섹션 생성) |
+
+---
+
+### 🔍 2. PR 검증 활용 (Pull Request Review)
+
+**원칙**: PR 과정에서 Claude를 태그해 리뷰 내용을 CLAUDE.md에 자동 반영합니다.
+
+#### PR 워크플로우
+
+```
+1. 개발자가 PR 생성
+   ↓
+2. PR 설명에 @claude 태그
+   ↓
+3. Claude가 자동 코드 리뷰
+   ↓
+4. 발견된 문제를 CLAUDE.md에 지침으로 추가
+   ↓
+5. PR 승인 + CLAUDE.md 업데이트 커밋
+```
+
+#### PR 템플릿 예시
+
+```markdown
+## PR 설명
+Exit Engine HardStop 구현
+
+## 변경 사항
+- [ ] HardStop 트리거 평가 메서드 추가
+- [ ] PAUSE_ALL에서도 HardStop 예외 처리
+- [ ] Runtime에 signalRepo 주입
+
+## Claude 검증 요청
+@claude 다음을 확인해주세요:
+- [ ] HardStop이 PAUSE_ALL에서도 작동하는가?
+- [ ] 테스트 커버리지가 충분한가?
+- [ ] CLAUDE.md에 누락된 지침이 있는가?
+```
+
+#### Claude의 PR 리뷰 → CLAUDE.md 업데이트
+
+Claude가 PR에서 발견한 패턴을 CLAUDE.md에 자동 추가:
+
+```markdown
+## 🔍 PR #123에서 발견된 패턴
+
+### ✅ 좋은 패턴
+- Intent 생성 후 Position.status를 CLOSING으로 전이
+- 버전 체크 후 UpdateStatus 호출
+
+### ⚠️ 개선 필요
+- ExitSignalRepository 주입 시 nil 체크 누락
+- GetAllOpenPositions 쿼리에 인덱스 힌트 부재
+
+### 📋 CLAUDE.md 업데이트 필요
+- [ ] "Repository 주입 시 nil 체크 필수" 규칙 추가
+- [ ] "DB 쿼리 시 인덱스 활용 검증" 체크리스트 추가
+```
+
+---
+
+### 🔗 3. GitHub 연동 (Issue-Driven Learning)
+
+**원칙**: GitHub 이슈와 연동하여 문제 해결 과정을 자동으로 학습합니다.
+
+#### 이슈 생성 → 해결 → 학습 사이클
+
+```
+1. 버그/기능 요청 이슈 생성
+   ↓
+2. 이슈에 @claude 태그
+   ↓
+3. Claude가 이슈 분석 + 해결 방안 제시
+   ↓
+4. 구현 후 PR 생성
+   ↓
+5. 해결 패턴을 CLAUDE.md에 기록
+```
+
+#### 이슈 템플릿
+
+```markdown
+## 버그 리포트
+**제목**: Exit Engine이 PAUSE_ALL 상태에서 HardStop을 평가하지 않음
+
+**재현 방법**:
+1. Exit Control을 PAUSE_ALL로 설정
+2. 급락장 발생 (-15%)
+3. HardStop이 트리거되지 않음
+
+**기대 동작**:
+PAUSE_ALL에서도 HardStop은 예외로 작동해야 함
+
+**실제 동작**:
+모든 트리거가 차단됨 (HardStop 포함)
+
+@claude 이 문제를 분석하고 CLAUDE.md에 방지 지침을 추가해주세요
+```
+
+#### Claude의 이슈 해결 → CLAUDE.md 반영
+
+```markdown
+## 🐛 Issue #456: PAUSE_ALL에서 HardStop 미작동
+
+### 근본 원인
+- `evaluateTriggers()`에서 PAUSE_ALL 체크가 HardStop 평가보다 먼저 실행됨
+
+### 해결 방안
+- HardStop을 우선순위 0번으로 이동 (PAUSE_ALL 체크보다 먼저)
+
+### CLAUDE.md 업데이트
+```markdown
+## 안전장치 평가 우선순위 규칙
+
+### 필수 원칙
+- 최후 안전장치(HardStop, Emergency Flatten 등)는 **모든 제어 모드를 우회**
+- 평가 순서: HardStop → Control Mode Check → 일반 트리거
+
+### 코드 패턴
+\`\`\`go
+// ✅ CORRECT
+func evaluateTriggers() {
+    // Priority 0: HardStop (bypasses control mode)
+    if profile.Config.HardStop.Enabled {
+        if trigger := s.evaluateHardStop(...); trigger != nil {
+            return trigger
+        }
+    }
+
+    // Control Mode filtering
+    if controlMode == PAUSE_ALL {
+        return nil
+    }
+
+    // Regular triggers...
+}
+\`\`\`
+```
+```
+
+---
+
+### ⚙️ 4. 백그라운드 에이전트 활용 (Background Agents)
+
+**원칙**: 오래 걸리는 작업은 백그라운드 에이전트에게 위임하고, 주 작업에 집중합니다.
+
+#### 백그라운드 작업 적합 케이스
+
+| 작업 유형 | 예시 | 백그라운드 권장 이유 |
+|----------|------|---------------------|
+| 대규모 테스트 실행 | 전체 유닛 테스트 (1000+ 케이스) | 5분+ 소요 |
+| 코드 품질 검증 | Linter + Security Scan + Coverage | 반복적, 병렬 실행 가능 |
+| 문서 생성 | API 문서 자동 생성 | 비동기 가능 |
+| 데이터 마이그레이션 검증 | 1000만+ 레코드 검증 | 시간 소모적 |
+
+#### 사용 방법
+
+**예시 1: 전체 테스트 실행**
+
+```bash
+# 주 Claude: 기능 구현에 집중
+# 백그라운드 Agent: 테스트 실행 + 리포트 생성
+
+$ claude --background "go test ./... -coverprofile=coverage.out && go tool cover -html=coverage.out -o coverage.html"
+```
+
+**예시 2: Exit Engine 검증**
+
+```bash
+# 주 Claude: 다음 기능 구현
+# 백그라운드 Agent: Exit Engine 시뮬레이션 (1000 틱)
+
+$ claude --background "./scripts/validate-exit-engine.sh --ticks=1000"
+```
+
+#### 백그라운드 결과 활용
+
+```
+1. 백그라운드 작업 완료 알림 수신
+   ↓
+2. 결과 분석 (통과/실패)
+   ↓
+3. 실패 시 → 이슈 생성 + CLAUDE.md 업데이트
+   ↓
+4. 통과 시 → PR 승인 진행
+```
+
+---
+
+### 🔌 5. 플러그인 활용 (Plugins for Automation)
+
+**원칙**: 반복 작업, 모니터링, 무한 루프 작업은 플러그인(Wilgan 등)으로 자동화합니다.
+
+#### Wilgan Plugin 활용 예시
+
+**사용 케이스 1: 지속적 모니터링**
+
+```yaml
+# .wilgan/monitor-exit-engine.yml
+name: Exit Engine Health Monitor
+trigger: every 5 minutes
+actions:
+  - check_service_status: runtime
+  - query_db: "SELECT COUNT(*) FROM trade.positions WHERE status = 'CLOSING' AND updated_ts < NOW() - INTERVAL '10 minutes'"
+  - alert_if: result > 0
+    message: "⚠️ 10분 이상 CLOSING 상태인 포지션 발견"
+```
+
+**사용 케이스 2: 자동 문서 동기화**
+
+```yaml
+# .wilgan/sync-docs.yml
+name: CLAUDE.md ↔ Implementation Sync Check
+trigger: on every commit
+actions:
+  - grep_todos: "backend/**/*.go"
+  - check_claude_md: TODO 주석이 CLAUDE.md에 금지 패턴으로 등록되었는가?
+  - create_pr: CLAUDE.md 업데이트 필요 시 자동 PR 생성
+```
+
+**사용 케이스 3: 무한 반복 백테스팅**
+
+```yaml
+# .wilgan/backtest-loop.yml
+name: Continuous Backtesting
+trigger: on demand
+actions:
+  - loop:
+      - run: go run ./cmd/backtest --date=$(date +%Y-%m-%d)
+      - collect_metrics: PnL, Sharpe Ratio, Max Drawdown
+      - update_dashboard: Grafana
+      - sleep: 1 hour
+    until: stopped
+```
+
+#### Wilgan Plugin 설정
+
+```bash
+# Wilgan 초기화
+$ wilgan init
+
+# Plugin 등록
+$ wilgan add monitor-exit-engine.yml
+
+# Plugin 실행
+$ wilgan start monitor-exit-engine
+
+# 상태 확인
+$ wilgan status
+```
+
+---
+
+### 🎯 통합 워크플로우 예시
+
+#### 시나리오: Exit Engine 신규 트리거 추가
+
+```
+[Step 1] 이슈 생성
+GitHub Issue: "EXIT_MOMENTUM 트리거 추가 요청"
+@claude 요구사항 분석 + 설계 제안
+
+[Step 2] 설계 단계
+Claude: docs/modules/exit-engine.md 업데이트
+백그라운드 Agent: 기존 Exit 로직 테스트 실행
+
+[Step 3] 구현 단계
+Claude: 코드 작성
+백그라운드 Agent: Linter + Security Scan
+
+[Step 4] PR 생성
+PR 설명: @claude 코드 리뷰 + CLAUDE.md 업데이트 요청
+Claude: 리뷰 후 CLAUDE.md에 신규 패턴 추가
+
+[Step 5] 자동화
+Wilgan Plugin: 매 1시간마다 EXIT_MOMENTUM 백테스팅
+결과를 Slack으로 자동 알림
+```
+
+---
+
+### 📋 체크리스트: Claude Code 효과적 활용
+
+#### 실수 학습
+- [ ] Claude 실수 발생 시 CLAUDE.md에 금지 패턴 추가
+- [ ] 매 PR마다 CLAUDE.md 업데이트 검토
+- [ ] 주 1회 CLAUDE.md 정리 (중복 제거, 우선순위 조정)
+
+#### PR 검증
+- [ ] PR 템플릿에 @claude 태그 포함
+- [ ] PR 승인 전 CLAUDE.md 동기화 확인
+- [ ] 리뷰 내용을 다음 작업에 반영
+
+#### GitHub 연동
+- [ ] 모든 버그 이슈에 @claude 태그
+- [ ] 해결된 이슈의 패턴을 CLAUDE.md에 기록
+- [ ] 이슈 템플릿 표준화
+
+#### 백그라운드 작업
+- [ ] 5분+ 소요 작업은 백그라운드로 위임
+- [ ] 테스트는 항상 백그라운드에서 실행
+- [ ] 백그라운드 결과를 PR에 자동 첨부
+
+#### 플러그인 활용
+- [ ] 반복 작업 식별 후 Wilgan으로 자동화
+- [ ] 모니터링 플러그인 등록 (Exit Engine, API 헬스체크)
+- [ ] 백테스팅 루프 자동화
+
+---
+
+### 🚀 효과
+
+이 베스트 프랙티스를 따르면:
+
+1. **학습 가속화**: 실수를 반복하지 않음
+2. **품질 향상**: PR 단계에서 자동 검증
+3. **생산성 증대**: 백그라운드 작업으로 병렬화
+4. **자동화 극대화**: 플러그인으로 무인 운영
+
+---
+
 **Version**: v14.0.0-design
 **Phase**: 설계 (Design)
-**Last Updated**: 2026-01-13
+**Last Updated**: 2026-01-15

@@ -19,6 +19,7 @@ type Service struct {
 	intentRepo    exit.OrderIntentRepository
 	profileRepo   exit.ExitProfileRepository
 	overrideRepo  exit.SymbolExitOverrideRepository
+	signalRepo    exit.ExitSignalRepository
 
 	// Dependencies
 	priceSync     *pricesync.Service
@@ -43,6 +44,7 @@ func NewService(
 	intentRepo exit.OrderIntentRepository,
 	profileRepo exit.ExitProfileRepository,
 	overrideRepo exit.SymbolExitOverrideRepository,
+	signalRepo exit.ExitSignalRepository,
 	priceSync *pricesync.Service,
 	defaultProfile *exit.ExitProfile,
 ) *Service {
@@ -53,6 +55,7 @@ func NewService(
 		intentRepo:     intentRepo,
 		profileRepo:    profileRepo,
 		overrideRepo:   overrideRepo,
+		signalRepo:     signalRepo,
 		priceSync:      priceSync,
 		defaultProfile: defaultProfile,
 		isRunning:      false,
@@ -76,6 +79,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Start evaluation loop
 	go s.evaluationLoop()
+
+	// Start reconciliation loop (30초마다)
+	go s.reconciliationLoop()
 
 	log.Info().Msg("✅ Exit Service started")
 

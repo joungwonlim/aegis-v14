@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { getHoldings, getOrderIntents, getOrders, getFills, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill } from '@/lib/api'
+import { StockSymbol } from '@/components/stock-symbol'
+import { getHoldings, getOrderIntents, getOrders, getFills, getKISUnfilledOrders, getKISFilledOrders, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
 type SortOrder = 'asc' | 'desc'
@@ -19,6 +20,8 @@ export default function RuntimeDashboard() {
   const [intents, setIntents] = useState<OrderIntent[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [fills, setFills] = useState<Fill[]>([])
+  const [kisUnfilledOrders, setKisUnfilledOrders] = useState<KISUnfilledOrder[]>([])
+  const [kisFilledOrders, setKisFilledOrders] = useState<KISFill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
@@ -133,6 +136,8 @@ export default function RuntimeDashboard() {
         getOrderIntents(),
         getOrders(),
         getFills(),
+        getKISUnfilledOrders(),
+        getKISFilledOrders(),
       ])
 
       // Extract successful results, handle null responses
@@ -140,12 +145,14 @@ export default function RuntimeDashboard() {
       if (results[1].status === 'fulfilled') setIntents(results[1].value || [])
       if (results[2].status === 'fulfilled') setOrders(results[2].value || [])
       if (results[3].status === 'fulfilled') setFills(results[3].value || [])
+      if (results[4].status === 'fulfilled') setKisUnfilledOrders(results[4].value || [])
+      if (results[5].status === 'fulfilled') setKisFilledOrders(results[5].value || [])
 
       // Collect errors from failed requests
       const errors = results
         .map((result, index) => {
           if (result.status === 'rejected') {
-            const names = ['Holdings', 'Intents', 'Orders', 'Fills']
+            const names = ['Holdings', 'Intents', 'Orders', 'Fills', 'KIS Unfilled', 'KIS Filled']
             return names[index]
           }
           return null
@@ -226,8 +233,8 @@ export default function RuntimeDashboard() {
   useEffect(() => {
     loadData()
 
-    // Auto-refresh every 5 seconds
-    const interval = setInterval(loadData, 5000)
+    // Auto-refresh every 10 seconds (to avoid KIS API rate limit)
+    const interval = setInterval(loadData, 10000)
     return () => clearInterval(interval)
   }, [])
 
@@ -245,7 +252,21 @@ export default function RuntimeDashboard() {
       DUPLICATE: 'outline',
     }
 
-    return <Badge variant={variants[status] || 'default'}>{status}</Badge>
+    // Status 한글 변환
+    const statusLabels: Record<string, string> = {
+      PENDING_APPROVAL: '승인대기',
+      NEW: '주문대기',
+      SUBMITTED: '주문완료',
+      ACK: '처리중',
+      FILLED: '체결완료',
+      PARTIAL: '부분체결',
+      FAILED: '실패',
+      REJECTED: '거부',
+      CANCELLED: '취소',
+      DUPLICATE: '중복',
+    }
+
+    return <Badge variant={variants[status] || 'default'}>{statusLabels[status] || status}</Badge>
   }
 
   const formatNumber = (value: number | undefined, decimals = 0) => {
@@ -446,10 +467,14 @@ export default function RuntimeDashboard() {
                     return (
                       <TableRow key={`${holding.account_id}-${holding.symbol}`}>
                         <TableCell
-                          className="font-medium cursor-pointer hover:text-blue-600 hover:underline"
+                          className="cursor-pointer hover:opacity-80"
                           onClick={() => handleHoldingClick(holding)}
                         >
-                          {symbolName}
+                          <StockSymbol
+                            symbol={holding.symbol}
+                            symbolName={symbolName}
+                            size="sm"
+                          />
                         </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(holding.qty)}</TableCell>
@@ -502,7 +527,11 @@ export default function RuntimeDashboard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>종목코드</TableHead>
+                <TableHead>종목명</TableHead>
+                <TableHead className="text-right">현재가</TableHead>
+                <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-right">주문가격</TableHead>
+                <TableHead className="text-right">괴리율</TableHead>
                 <TableHead>타입</TableHead>
                 <TableHead className="text-right">수량</TableHead>
                 <TableHead>주문유형</TableHead>
@@ -514,24 +543,47 @@ export default function RuntimeDashboard() {
             <TableBody>
               {intents.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     Order Intent가 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                intents.map((intent) => (
-                  <TableRow key={intent.intent_id}>
-                    <TableCell className="font-mono">{intent.symbol}</TableCell>
-                    <TableCell>{intent.intent_type}</TableCell>
-                    <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
-                    <TableCell>{intent.order_type}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{intent.reason_code}</Badge>
-                    </TableCell>
-                    <TableCell>{getStatusBadge(intent.status)}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
-                  </TableRow>
-                ))
+                intents.map((intent) => {
+                  // holdings에서 현재가 정보 가져오기
+                  const holding = holdings.find(h => h.symbol === intent.symbol)
+                  const currentPrice = holding?.current_price || 0
+                  const pnlPct = holding?.pnl_pct || 0
+
+                  // 주문가격 (limit_price 또는 현재가)
+                  const orderPrice = intent.limit_price || currentPrice
+
+                  // 괴리율 계산: (현재가 - 주문가격) / 주문가격 * 100
+                  const deviationPct = orderPrice > 0 ? ((currentPrice - orderPrice) / orderPrice) * 100 : 0
+
+                  return (
+                    <TableRow key={intent.intent_id}>
+                      <TableCell>
+                        <StockSymbol
+                          symbol={intent.symbol}
+                          symbolName={intent.symbol_name}
+                          size="sm"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(orderPrice, 0)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatPercent(deviationPct)}</TableCell>
+                      <TableCell>{intent.intent_type}</TableCell>
+                      <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
+                      <TableCell>{intent.order_type}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{intent.reason_code}</Badge>
+                      </TableCell>
+                      <TableCell>{getStatusBadge(intent.status)}</TableCell>
+                      <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>
@@ -550,151 +602,272 @@ export default function RuntimeDashboard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>종목코드</TableHead>
+                <TableHead>종목명</TableHead>
+                <TableHead className="text-right">현재가</TableHead>
+                <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-right">주문가격</TableHead>
+                <TableHead className="text-right">괴리율</TableHead>
                 <TableHead>타입</TableHead>
                 <TableHead className="text-right">수량</TableHead>
                 <TableHead>주문유형</TableHead>
                 <TableHead>사유</TableHead>
+                <TableHead>상태</TableHead>
                 <TableHead>생성시각</TableHead>
                 <TableHead className="text-center">작업</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {intents.filter(i => i.status === 'PENDING_APPROVAL').length === 0 ? (
+              {intents.filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED').length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  <TableCell colSpan={12} className="text-center text-muted-foreground">
                     승인 대기 중인 Intent가 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
                 intents
-                  .filter(i => i.status === 'PENDING_APPROVAL')
-                  .map((intent) => (
-                    <TableRow key={intent.intent_id}>
-                      <TableCell className="font-mono">{intent.symbol}</TableCell>
-                      <TableCell>{intent.intent_type}</TableCell>
-                      <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
-                      <TableCell>{intent.order_type}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{intent.reason_code}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex gap-2 justify-center">
-                          <Button
+                  .filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED')
+                  .map((intent) => {
+                    // holdings에서 현재가 정보 가져오기
+                    const holding = holdings.find(h => h.symbol === intent.symbol)
+                    const currentPrice = holding?.current_price || 0
+                    const pnlPct = holding?.pnl_pct || 0
+
+                    // 주문가격 (limit_price 또는 현재가)
+                    const orderPrice = intent.limit_price || currentPrice
+
+                    // 괴리율 계산: (현재가 - 주문가격) / 주문가격 * 100
+                    const deviationPct = orderPrice > 0 ? ((currentPrice - orderPrice) / orderPrice) * 100 : 0
+
+                    return (
+                      <TableRow key={intent.intent_id}>
+                        <TableCell>
+                          <StockSymbol
+                            symbol={intent.symbol}
+                            symbolName={intent.symbol_name}
                             size="sm"
-                            onClick={() => handleApprove(intent.intent_id)}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            주문 실행
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleReject(intent.intent_id)}
-                          >
-                            삭제
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(orderPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(deviationPct)}</TableCell>
+                        <TableCell>{intent.intent_type}</TableCell>
+                        <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
+                        <TableCell>{intent.order_type}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{intent.reason_code}</Badge>
+                        </TableCell>
+                        <TableCell>{getStatusBadge(intent.status)}</TableCell>
+                        <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
+                        <TableCell className="text-center">
+                          {intent.status === 'PENDING_APPROVAL' ? (
+                            <div className="flex gap-2 justify-center">
+                              <Button
+                                size="sm"
+                                onClick={() => handleApprove(intent.intent_id)}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                주문 실행
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => handleReject(intent.intent_id)}
+                              >
+                                삭제
+                              </Button>
+                            </div>
+                          ) : (
+                            <Badge variant="secondary">{intent.status === 'NEW' ? '주문 대기 중' : '주문 완료'}</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
 
-      {/* KIS 미체결 list */}
+      {/* KIS 미체결 주문 */}
       <Card>
         <CardHeader>
-          <CardTitle>⏳ KIS 미체결 list</CardTitle>
+          <CardTitle>⏳ KIS 미체결 주문</CardTitle>
           <CardDescription>
-            미체결 또는 부분체결 주문 ({orders.filter(o => o.open_qty > 0).length}개)
+            {(() => {
+              const buyOrders = kisUnfilledOrders.filter(o => o.Raw?.order_side !== '01')
+              const sellOrders = kisUnfilledOrders.filter(o => o.Raw?.order_side === '01')
+              const totalAmount = kisUnfilledOrders.reduce((sum, o) => {
+                const price = parseFloat(o.Raw?.order_price || '0')
+                return sum + (price * o.OpenQty)
+              }, 0)
+
+              return (
+                <>
+                  {kisUnfilledOrders.length}건
+                  {buyOrders.length > 0 && `, 매수 ${buyOrders.length}건`}
+                  {sellOrders.length > 0 && `, 매도 ${sellOrders.length}건`}
+                  {totalAmount > 0 && `, ${formatNumber(totalAmount, 0)}원`}
+                </>
+              )
+            })()}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>주문번호</TableHead>
-                <TableHead>종목코드</TableHead>
+                <TableHead className="w-12">순번</TableHead>
+                <TableHead>종목명</TableHead>
+                <TableHead className="text-right">현재가</TableHead>
+                <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-center">구분</TableHead>
+                <TableHead className="text-right">주문가격</TableHead>
+                <TableHead className="text-right">괴리율</TableHead>
                 <TableHead className="text-right">주문수량</TableHead>
                 <TableHead className="text-right">미체결</TableHead>
-                <TableHead className="text-right">체결</TableHead>
-                <TableHead>상태</TableHead>
-                <TableHead>브로커상태</TableHead>
-                <TableHead>제출시각</TableHead>
+                <TableHead>주문시간</TableHead>
+                <TableHead className="text-center">액션</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.filter(o => o.open_qty > 0).length === 0 ? (
+              {kisUnfilledOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     미체결 주문이 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                orders.filter(o => o.open_qty > 0).map((order) => (
-                  <TableRow key={order.order_id}>
-                    <TableCell className="font-mono text-sm">{order.order_id.slice(0, 8)}...</TableCell>
-                    <TableCell className="font-mono">{order.symbol || '-'}</TableCell>
-                    <TableCell className="text-right">{formatNumber(order.qty)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(order.open_qty)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(order.filled_qty)}</TableCell>
-                    <TableCell>{getStatusBadge(order.status)}</TableCell>
-                    <TableCell>{order.broker_status}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(order.submitted_ts)}</TableCell>
-                  </TableRow>
-                ))
+                kisUnfilledOrders.map((order, index) => {
+                  const isBuy = order.Raw?.order_side !== '01'
+                  const orderPrice = parseFloat(order.Raw?.order_price || '0')
+
+                  // holdings에서 현재가 정보 가져오기
+                  const holding = holdings.find(h => h.symbol === order.Symbol)
+                  const currentPrice = holding?.current_price || 0
+                  const pnl = holding?.pnl || 0
+                  const pnlPct = holding?.pnl_pct || 0
+
+                  // 괴리율 계산: (현재가 - 주문가격) / 주문가격 * 100
+                  const deviationPct = orderPrice > 0 ? ((currentPrice - orderPrice) / orderPrice) * 100 : 0
+
+                  return (
+                    <TableRow key={order.OrderID}>
+                      <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                      <TableCell>
+                        <StockSymbol
+                          symbol={order.Symbol}
+                          symbolName={order.Raw?.stock_name}
+                          size="sm"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={isBuy ? 'default' : 'destructive'}>
+                          {isBuy ? '매수' : '매도'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(orderPrice, 0)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatPercent(deviationPct)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(order.Qty)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(order.OpenQty)}</TableCell>
+                      <TableCell className="text-sm font-mono">{order.Raw?.order_time || '-'}</TableCell>
+                      <TableCell className="text-center">
+                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                          삭제
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
 
-      {/* KIS 체결 list */}
+      {/* KIS 체결 주문 */}
       <Card>
         <CardHeader>
-          <CardTitle>✅ KIS 체결 list</CardTitle>
+          <CardTitle>✅ KIS 체결 주문</CardTitle>
           <CardDescription>
-            완료된 체결 내역 ({fills.length}개)
+            {(() => {
+              const buyFills = kisFilledOrders.filter(f => f.Raw?.order_side !== '01')
+              const sellFills = kisFilledOrders.filter(f => f.Raw?.order_side === '01')
+              const buyAmount = buyFills.reduce((sum, f) => sum + (parseFloat(f.Price) * f.Qty), 0)
+              const sellAmount = sellFills.reduce((sum, f) => sum + (parseFloat(f.Price) * f.Qty), 0)
+
+              return (
+                <>
+                  {kisFilledOrders.length}건
+                  {buyFills.length > 0 && `, 매수 ${buyFills.length}건, ${formatNumber(buyAmount, 0)}원`}
+                  {sellFills.length > 0 && `, 매도 ${sellFills.length}건, ${formatNumber(sellAmount, 0)}원`}
+                </>
+              )
+            })()}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>체결번호</TableHead>
-                <TableHead>주문번호</TableHead>
-                <TableHead>KIS 체결번호</TableHead>
-                <TableHead className="text-right">수량</TableHead>
-                <TableHead className="text-right">가격</TableHead>
-                <TableHead className="text-right">수수료</TableHead>
-                <TableHead className="text-right">세금</TableHead>
-                <TableHead>체결시각</TableHead>
+                <TableHead className="w-12">순번</TableHead>
+                <TableHead>종목명</TableHead>
+                <TableHead className="text-right">현재가</TableHead>
+                <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-center">구분</TableHead>
+                <TableHead className="text-right">체결가</TableHead>
+                <TableHead className="text-right">체결수량</TableHead>
+                <TableHead className="text-right">체결금액</TableHead>
+                <TableHead>체결시간</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {fills.length === 0 ? (
+              {kisFilledOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     체결 내역이 없습니다
                   </TableCell>
                 </TableRow>
               ) : (
-                fills.map((fill) => (
-                  <TableRow key={fill.fill_id}>
-                    <TableCell className="font-mono text-sm">{fill.fill_id.slice(0, 8)}...</TableCell>
-                    <TableCell className="font-mono text-sm">{fill.order_id.slice(0, 8)}...</TableCell>
-                    <TableCell className="font-mono text-sm">{fill.kis_exec_id}</TableCell>
-                    <TableCell className="text-right">{formatNumber(fill.qty)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(fill.price, 0)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(fill.fee, 0)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(fill.tax, 0)}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(fill.ts)}</TableCell>
-                  </TableRow>
-                ))
+                kisFilledOrders.map((fill, index) => {
+                  const fillPrice = parseFloat(fill.Price)
+                  const fillQty = fill.Qty
+                  const fillAmount = fillPrice * fillQty
+                  const isBuy = fill.Raw?.order_side !== '01'
+
+                  // holdings에서 현재가 정보 가져오기
+                  const holding = holdings.find(h => h.symbol === fill.Symbol)
+                  const currentPrice = holding?.current_price || 0
+                  const pnl = holding?.pnl || 0
+                  const pnlPct = holding?.pnl_pct || 0
+
+                  return (
+                    <TableRow key={fill.ExecID}>
+                      <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                      <TableCell>
+                        <StockSymbol
+                          symbol={fill.Symbol}
+                          symbolName={fill.Raw?.stock_name}
+                          size="sm"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={isBuy ? 'default' : 'destructive'}>
+                          {isBuy ? '매수' : '매도'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(fillPrice, 0)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(fillQty)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatNumber(fillAmount, 0)}</TableCell>
+                      <TableCell className="text-sm font-mono">{formatTimestamp(fill.Timestamp)}</TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>

@@ -418,6 +418,59 @@ WHERE p.position_id = ?
 GROUP BY p.qty;
 ```
 
+### 5. Intent Reconciliation (조정)
+
+**목적**: Intent 상태와 실제 체결 내역 불일치 방지
+
+**문제 상황 예시:**
+- 같은 포지션에 SL1, SL2가 각각 500주씩 Intent 생성됨
+- 실제로는 SL1만 체결되고 SL2는 미체결
+- UI에 중복 Intent 표시로 혼란 발생
+
+**Reconciliation Loop (30초 주기):**
+
+```mermaid
+flowchart TD
+    START[Start Reconciliation] --> LOAD[Load recent 500 intents]
+    LOAD --> GROUP[Group by position_id + reason_code]
+    GROUP --> CHECK{Duplicate found?}
+    CHECK -->|no| END[End]
+    CHECK -->|yes| CANCEL[Cancel older intents<br/>Keep most recent]
+    CANCEL --> LOG[Log: Cancelled duplicate intent]
+    LOG --> END
+```
+
+**구현 로직:**
+
+1. **중복 Intent 탐지:**
+   ```go
+   // position_id + reason_code로 그룹화
+   type intentKey struct {
+       positionID uuid.UUID
+       reasonCode string
+   }
+   ```
+
+2. **중복 제거 규칙:**
+   - 같은 position + reason으로 여러 Intent 발견 시
+   - created_ts 기준으로 정렬
+   - 가장 최근 것만 유지
+   - 나머지는 `status=CANCELLED`로 변경
+
+3. **실행 주기:**
+   - 30초마다 백그라운드 실행
+   - 첫 실행 전 10초 대기 (다른 서비스 초기화)
+   - 최근 500개 Intent만 검사 (성능 최적화)
+
+**효과:**
+- 중복 Intent 자동 정리
+- UI 혼란 방지
+- 데이터 일관성 유지
+
+**파일:**
+- `backend/internal/service/exit/reconciliation.go`
+- `backend/internal/service/exit/evaluator.go` (reconciliationLoop)
+
 ---
 
 ## 🎲 청산 룰 상세 설정
@@ -2417,5 +2470,5 @@ Exit Engine은 LISTEN으로 이벤트를 받아 메모리 캐시 갱신.
 **Dependencies**: PriceSync (읽기), Execution (읽기)
 **Consumers**: Execution (order_intents 소비)
 **Important Change**: Exit Engine은 더 이상 reentry_candidates를 생성하지 않음. Execution이 exit_events를 생성하고, Reentry는 그것을 소비함.
-**Version**: v14.0.0-design
-**Last Updated**: 2026-01-13
+**Version**: v14.0.0
+**Last Updated**: 2026-01-15
