@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
 
@@ -182,12 +183,19 @@ func (h *KISOrdersHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Submit order to KIS
+	var limitPrice *decimal.Decimal
+	if req.OrderType == "limit" && req.Price > 0 {
+		price := decimal.NewFromInt(int64(req.Price))
+		limitPrice = &price
+	}
+
 	kisReq := execution.KISOrderRequest{
-		Symbol:    req.Symbol,
-		Side:      req.Side,
-		OrderType: req.OrderType,
-		Qty:       req.Qty,
-		Price:     req.Price,
+		AccountID:  h.accountID,
+		Symbol:     req.Symbol,
+		Side:       req.Side,
+		OrderType:  req.OrderType,
+		Qty:        int64(req.Qty),
+		LimitPrice: limitPrice,
 	}
 
 	resp, err := h.kisAdapter.SubmitOrder(ctx, kisReq)
