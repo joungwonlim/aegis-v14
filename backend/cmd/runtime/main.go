@@ -76,7 +76,10 @@ func main() {
 	// Get account ID from environment
 	accountID := os.Getenv("KIS_ACCOUNT_ID")
 	if accountID == "" {
-		log.Fatal().Msg("KIS_ACCOUNT_ID environment variable is required")
+		accountID = os.Getenv("KIS_ACCOUNT_NO")
+	}
+	if accountID == "" {
+		log.Fatal().Msg("KIS_ACCOUNT_ID or KIS_ACCOUNT_NO environment variable is required")
 	}
 
 	// ========================================
