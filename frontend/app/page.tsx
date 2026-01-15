@@ -537,6 +537,9 @@ export default function RuntimeDashboard() {
                             symbol={holding.symbol}
                             symbolName={symbolName}
                             size="sm"
+                            isHolding={true}
+                            isExitEnabled={holding.exit_mode === 'ENABLED'}
+                            market={holding.raw?.market}
                           />
                         </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(holding.qty)}</TableCell>
@@ -696,6 +699,9 @@ export default function RuntimeDashboard() {
                           symbol={intent.symbol}
                           symbolName={intent.symbol_name}
                           size="sm"
+                          isHolding={!!holding}
+                          isExitEnabled={holding?.exit_mode === 'ENABLED'}
+                          market={holding?.raw?.market}
                         />
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
@@ -843,6 +849,9 @@ export default function RuntimeDashboard() {
                             symbol={intent.symbol}
                             symbolName={intent.symbol_name}
                             size="sm"
+                            isHolding={!!holding}
+                            isExitEnabled={holding?.exit_mode === 'ENABLED'}
+                            market={holding?.raw?.market}
                           />
                         </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
@@ -963,6 +972,9 @@ export default function RuntimeDashboard() {
                           symbol={order.Symbol}
                           symbolName={order.Raw?.stock_name}
                           size="sm"
+                          isHolding={!!holding}
+                          isExitEnabled={holding?.exit_mode === 'ENABLED'}
+                          market={holding?.raw?.market}
                         />
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
@@ -1057,6 +1069,9 @@ export default function RuntimeDashboard() {
                           symbol={fill.Symbol}
                           symbolName={fill.Raw?.stock_name}
                           size="sm"
+                          isHolding={!!holding}
+                          isExitEnabled={holding?.exit_mode === 'ENABLED'}
+                          market={holding?.raw?.market}
                         />
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>

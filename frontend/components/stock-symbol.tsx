@@ -5,9 +5,20 @@ interface StockSymbolProps {
   symbolName?: string
   size?: 'sm' | 'md' | 'lg'
   showCode?: boolean
+  isHolding?: boolean
+  isExitEnabled?: boolean
+  market?: string
 }
 
-export function StockSymbol({ symbol, symbolName, size = 'md', showCode = true }: StockSymbolProps) {
+export function StockSymbol({
+  symbol,
+  symbolName,
+  size = 'md',
+  showCode = true,
+  isHolding = false,
+  isExitEnabled = false,
+  market
+}: StockSymbolProps) {
   // 종목 로고 URL (네이버 금융 API 활용)
   const logoUrl = `https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock${symbol}.svg`
 
@@ -30,6 +41,19 @@ export function StockSymbol({ symbol, symbolName, size = 'md', showCode = true }
     lg: 'text-base',
   }
 
+  // 시장 구분 추출 (KOSPI/KOSDAQ)
+  const getMarketLabel = () => {
+    if (!market) return null
+
+    // market이 "KOSPI" 또는 "KOSDAQ" 포함 여부 확인
+    if (market.includes('KOSPI')) return 'KOSPI'
+    if (market.includes('KOSDAQ')) return 'KOSDAQ'
+
+    return null
+  }
+
+  const marketLabel = getMarketLabel()
+
   return (
     <div className="flex items-center gap-2">
       <Avatar className={sizeClasses[size]}>
@@ -37,9 +61,26 @@ export function StockSymbol({ symbol, symbolName, size = 'md', showCode = true }
         <AvatarFallback className="text-xs">{fallbackText}</AvatarFallback>
       </Avatar>
       <div className="flex flex-col">
-        <span className={`font-medium ${textSizeClasses[size]}`}>{displayName}</span>
+        <div className="flex items-center gap-1">
+          <span className={`font-medium ${textSizeClasses[size]}`}>{displayName}</span>
+          {isHolding && (
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: isExitEnabled ? '#EF4444' : '#10B981' }}
+              title={isExitEnabled ? 'Exit Engine 활성화' : '보유종목'}
+            />
+          )}
+        </div>
         {showCode && (
-          <span className="text-xs text-muted-foreground">{symbol}</span>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground">{symbol}</span>
+            {marketLabel && (
+              <>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs text-muted-foreground">{marketLabel}</span>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>
