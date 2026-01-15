@@ -39,8 +39,15 @@ export function OrderTab({
 
   const formatTime = (ts: string | null | undefined) => {
     if (!ts) return '-'
-    const date = new Date(ts)
-    return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+    // DB timestamp는 KST이지만 timezone 정보가 없어서 UTC로 해석됨
+    // +09:00을 추가하여 KST로 명시
+    const kstTimestamp = ts.includes('+') || ts.includes('Z') ? ts : `${ts}+09:00`
+    const date = new Date(kstTimestamp)
+    return date.toLocaleTimeString('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 
   return (

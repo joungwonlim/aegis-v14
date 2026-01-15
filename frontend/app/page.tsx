@@ -300,7 +300,11 @@ export default function RuntimeDashboard() {
   }
 
   const formatTimestamp = (ts: string) => {
-    return new Date(ts).toLocaleString('ko-KR', {
+    // DB timestamp는 KST이지만 timezone 정보가 없어서 UTC로 해석됨
+    // +09:00을 추가하여 KST로 명시
+    const kstTimestamp = ts.includes('+') || ts.includes('Z') ? ts : `${ts}+09:00`
+    return new Date(kstTimestamp).toLocaleString('ko-KR', {
+      timeZone: 'Asia/Seoul',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
