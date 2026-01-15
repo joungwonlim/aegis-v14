@@ -18,7 +18,7 @@ import (
 // 3. Loss recovery → cancel intents if conditions no longer valid
 // 4. Position qty sync → update Position.qty based on actual fills
 func (s *Service) ReconcileIntents(ctx context.Context) error {
-	log.Debug().Msg("🔄 Starting Intent Reconciliation")
+	log.Info().Msg("🔄 Starting Intent Reconciliation")
 
 	// 1. Find and cancel duplicate intents
 	if err := s.cancelDuplicateIntents(ctx); err != nil {
@@ -42,7 +42,7 @@ func (s *Service) ReconcileIntents(ctx context.Context) error {
 	// 	log.Warn().Err(err).Msg("Failed to sync position qty (non-fatal)")
 	// }
 
-	log.Debug().Msg("✅ Intent Reconciliation completed")
+	log.Info().Msg("✅ Intent Reconciliation completed")
 	return nil
 }
 
@@ -188,12 +188,17 @@ func (s *Service) cancelRecoveredIntents(ctx context.Context) error {
 		return err
 	}
 
+	log.Info().Int("total_intents", len(intents)).Msg("Checking intents for recovery cancellation")
+
 	cancelCount := 0
+	checkedCount := 0
 	for _, intent := range intents {
 		// Only check active intents
 		if intent.Status != "NEW" && intent.Status != "PENDING_APPROVAL" && intent.Status != "SUBMITTED" {
 			continue
 		}
+
+		checkedCount++
 
 		// Get position
 		pos, err := s.posRepo.GetPosition(ctx, intent.PositionID)
@@ -204,8 +209,12 @@ func (s *Service) cancelRecoveredIntents(ctx context.Context) error {
 
 		// Get current price
 		bestPrice, err := s.priceSync.GetBestPrice(ctx, intent.Symbol)
-		if err != nil || bestPrice.IsStale {
-			// Skip if no price available
+		if err != nil {
+			log.Warn().Err(err).Str("symbol", intent.Symbol).Msg("Failed to get best price")
+			continue
+		}
+		if bestPrice.IsStale {
+			log.Debug().Str("symbol", intent.Symbol).Msg("Price is stale, skipping recovery check")
 			continue
 		}
 
@@ -264,9 +273,10 @@ func (s *Service) cancelRecoveredIntents(ctx context.Context) error {
 		}
 	}
 
-	if cancelCount > 0 {
-		log.Info().Int("count", cancelCount).Msg("Cancelled recovered intents")
-	}
+	log.Info().
+		Int("checked", checkedCount).
+		Int("cancelled", cancelCount).
+		Msg("Recovery cancellation check completed")
 
 	return nil
 }
