@@ -77,14 +77,29 @@ func runBackendStart(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Monitor both processes
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- runtimeCmd.Wait()
+	}()
+	go func() {
+		errCh <- apiCmd.Wait()
+	}()
+
 	fmt.Println("✅ Backend 서버 실행 중")
-	fmt.Println("   - Exit Engine 평가 루프 (3초 주기)")
-	fmt.Println("   - Price Sync 서비스 (3초 주기)")
-	fmt.Println("   - API 서버 (포트: 8099)")
+	fmt.Println("   - Runtime 서버: Exit Engine, Price Sync")
+	fmt.Println("   - API 서버: http://localhost:8099")
 	fmt.Println("종료하려면 Ctrl+C를 누르세요")
 
-	<-sigCh
-	fmt.Println("\n🛑 종료 신호 수신, 서버 종료 중...")
+	// Wait for signal or process exit
+	select {
+	case <-sigCh:
+		fmt.Println("\n🛑 종료 신호 수신, 서버 종료 중...")
+	case err := <-errCh:
+		if err != nil {
+			fmt.Printf("\n⚠️  프로세스가 예기치 않게 종료됨: %v\n", err)
+		}
+	}
 
 	// 두 프로세스 모두 종료
 	if err := runtimeCmd.Process.Kill(); err != nil {
