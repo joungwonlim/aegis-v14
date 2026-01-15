@@ -59,29 +59,6 @@ export function HoldingTab({
 
   return (
     <div className="space-y-6 p-4">
-      {/* 종목명 */}
-      <div className="text-lg font-semibold text-muted-foreground">
-        {symbolName}
-      </div>
-
-      {/* 현재가 (큰 숫자) */}
-      <div className="space-y-2">
-        <div className="text-4xl font-bold" style={{ color: priceColor }}>
-          {formatNumber(currentPrice, 0)}원
-        </div>
-        <div className="flex items-center gap-4">
-          <span style={{ color: priceColor }} className="text-xl font-semibold">
-            {formatPnL(pnl)}
-          </span>
-          <span style={{ color: priceColor }} className="text-xl font-semibold">
-            {formatPercent(holding.pnl_pct)}
-          </span>
-        </div>
-      </div>
-
-      {/* 구분선 */}
-      <div className="border-t border-border"></div>
-
       {/* Exit Engine 스위치 */}
       <div className="flex items-center justify-between rounded-lg border p-4">
         <div className="space-y-0.5">
@@ -141,12 +118,6 @@ export function HoldingTab({
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">매입단가</span>
           <span className="font-mono font-semibold">{formatNumber(avgPrice, 0)}원</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">현재가</span>
-          <span className="font-mono font-semibold" style={{ color: priceColor }}>
-            {formatNumber(currentPrice, 0)}원
-          </span>
         </div>
       </div>
 

@@ -96,6 +96,48 @@ export function StockDetailSheet({
             ))}
           </TabsList>
 
+          {/* 종목명 + 현재가 (모든 탭 공통) */}
+          <div className="mt-4 space-y-3 px-4">
+            {/* 종목명 */}
+            <div className="text-lg font-semibold text-muted-foreground">
+              {stock.symbolName}
+            </div>
+
+            {/* 현재가 */}
+            {priceInfo && (
+              <div className="space-y-2">
+                <div
+                  className="text-4xl font-bold"
+                  style={{
+                    color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
+                  }}
+                >
+                  {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}원
+                </div>
+                <div className="flex items-center gap-4">
+                  <span
+                    className="text-xl font-semibold"
+                    style={{
+                      color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
+                    }}
+                  >
+                    {(priceInfo.changeRate || 0) >= 0 ? '+' : ''}
+                    {Math.floor(priceInfo.changePrice || 0).toLocaleString()}
+                  </span>
+                  <span
+                    className="text-xl font-semibold"
+                    style={{
+                      color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
+                    }}
+                  >
+                    {(priceInfo.changeRate || 0) >= 0 ? '+' : ''}
+                    {(priceInfo.changeRate || 0).toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <TabsContent value="holding" className="mt-4">
             <HoldingTab
               symbol={stock.symbol}
