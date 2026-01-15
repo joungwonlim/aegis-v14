@@ -245,10 +245,28 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 		}
 	}
 
-	// 7. Evaluate triggers (우선순위 순서)
+	// 7. Check existing active intents for this position
+	existingIntents, err := s.getActiveIntents(ctx, pos.PositionID)
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", pos.Symbol).Msg("Failed to get existing intents (continuing anyway)")
+		existingIntents = nil // continue without existing intent check
+	}
+
+	// 8. Evaluate triggers (우선순위 순서)
 	trigger := s.evaluateTriggers(snapshot, state, bestPrice, profile, controlMode)
 
-	// 7.5. Record exit signal for debugging/backtest (best-effort, non-blocking)
+	// 8.5. Check if new trigger is more severe than existing intents
+	if trigger != nil && existingIntents != nil && len(existingIntents) > 0 {
+		if !s.isMoreSevere(trigger.ReasonCode, existingIntents) {
+			log.Debug().
+				Str("symbol", snapshot.Symbol).
+				Str("new_trigger", trigger.ReasonCode).
+				Msg("New trigger is not more severe than existing intents, skipping")
+			return nil // Don't create duplicate/less severe intent
+		}
+	}
+
+	// 9. Record exit signal for debugging/backtest (best-effort, non-blocking)
 	if trigger != nil {
 		currentPriceInt := bestPrice.BestPrice
 		if bestPrice.BidPrice != nil {
@@ -277,8 +295,73 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 		return nil
 	}
 
-	// 8. Create intent (v10 방어: Intent 생성 직전 DB 재확인)
+	// 10. Create intent (v10 방어: Intent 생성 직전 DB 재확인)
 	return s.createIntentWithVersionCheck(ctx, snapshot, trigger)
+}
+
+// getActiveIntents retrieves active intents for a position
+func (s *Service) getActiveIntents(ctx context.Context, positionID uuid.UUID) ([]*exit.OrderIntent, error) {
+	// Get recent intents and filter by position_id and active status
+	allIntents, err := s.intentRepo.GetRecentIntents(ctx, 100)
+	if err != nil {
+		return nil, err
+	}
+
+	var activeIntents []*exit.OrderIntent
+	for _, intent := range allIntents {
+		if intent.PositionID == positionID {
+			// Only consider active intents
+			if intent.Status == exit.IntentStatusNew ||
+				intent.Status == exit.IntentStatusPendingApproval ||
+				intent.Status == exit.IntentStatusAck {
+				activeIntents = append(activeIntents, intent)
+			}
+		}
+	}
+
+	return activeIntents, nil
+}
+
+// isMoreSevere checks if the new trigger is more severe than existing intents
+// Severity order: SL2 > SL1 > TP3 > TP2 > TP1 > TRAIL
+func (s *Service) isMoreSevere(newReasonCode string, existingIntents []*exit.OrderIntent) bool {
+	newSeverity := getTriggerSeverity(newReasonCode)
+
+	// Check if any existing intent is more or equally severe
+	for _, intent := range existingIntents {
+		existingSeverity := getTriggerSeverity(intent.ReasonCode)
+		if existingSeverity >= newSeverity {
+			// Existing intent is more or equally severe
+			return false
+		}
+	}
+
+	// New trigger is more severe than all existing intents
+	return true
+}
+
+// getTriggerSeverity returns severity score (higher = more severe)
+func getTriggerSeverity(reasonCode string) int {
+	switch reasonCode {
+	case exit.ReasonSL2:
+		return 100 // Most severe (full stop loss)
+	case exit.ReasonSL1:
+		return 90 // Partial stop loss
+	case exit.ReasonStopFloor:
+		return 80 // Breakeven protection
+	case exit.ReasonTP3:
+		return 30
+	case exit.ReasonTP2:
+		return 20
+	case exit.ReasonTP1:
+		return 10
+	case exit.ReasonTrail:
+		return 5
+	case exit.ReasonTime:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // PositionSnapshot represents a position snapshot at evaluation start (v10 방어)
