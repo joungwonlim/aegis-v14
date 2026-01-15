@@ -613,6 +613,7 @@ export default function RuntimeDashboard() {
                   </div>
                 </TableHead>
                 <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-right">매입단가</TableHead>
                 <TableHead
                   className="text-right cursor-pointer hover:bg-muted/50"
                   onClick={() => handleIntentSort('order_price')}
@@ -678,6 +679,9 @@ export default function RuntimeDashboard() {
                     ? parseFloat(holding.current_price)
                     : (holding?.current_price || 0)
                   const pnlPct = holding?.pnl_pct || 0
+                  const avgPrice = holding
+                    ? (typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price)
+                    : 0
 
                   // 주문가격 (limit_price 또는 현재가)
                   const orderPrice = intent.limit_price || currentPrice
@@ -696,6 +700,9 @@ export default function RuntimeDashboard() {
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
                       <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-right font-mono text-muted-foreground">
+                        {holding ? formatNumber(avgPrice, 0) : '-'}
+                      </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(orderPrice, 0)}</TableCell>
                       <TableCell className="text-right font-mono">{formatPercent(deviationPct)}</TableCell>
                       <TableCell>{intent.intent_type}</TableCell>
@@ -750,6 +757,7 @@ export default function RuntimeDashboard() {
                   </div>
                 </TableHead>
                 <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-right">매입단가</TableHead>
                 <TableHead
                   className="text-right cursor-pointer hover:bg-muted/50"
                   onClick={() => handleIntentSort('order_price')}
@@ -818,6 +826,9 @@ export default function RuntimeDashboard() {
                       ? parseFloat(holding.current_price)
                       : (holding?.current_price || 0)
                     const pnlPct = holding?.pnl_pct || 0
+                    const avgPrice = holding
+                      ? (typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price)
+                      : 0
 
                     // 주문가격 (limit_price 또는 현재가)
                     const orderPrice = intent.limit_price || currentPrice
@@ -836,6 +847,9 @@ export default function RuntimeDashboard() {
                         </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          {holding ? formatNumber(avgPrice, 0) : '-'}
+                        </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(orderPrice, 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPercent(deviationPct)}</TableCell>
                         <TableCell>{intent.intent_type}</TableCell>
