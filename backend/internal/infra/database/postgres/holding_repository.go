@@ -33,9 +33,12 @@ func (r *HoldingRepository) GetAllHoldings(ctx context.Context) ([]*execution.Ho
 			((h.current_price - h.avg_price) / NULLIF(h.avg_price, 0) * 100) as pnl_pct,
 			h.updated_ts,
 			COALESCE(p.exit_mode, 'ENABLED') as exit_mode,
-			h.raw
+			h.raw,
+			COALESCE(pb.change_price, 0) as change_price,
+			COALESCE(pb.change_rate, 0.0) as change_rate
 		FROM trade.holdings h
 		LEFT JOIN trade.positions p ON h.account_id = p.account_id AND h.symbol = p.symbol
+		LEFT JOIN market.prices_best pb ON h.symbol = pb.symbol
 		WHERE h.qty > 0
 		ORDER BY h.symbol ASC
 	`
@@ -60,6 +63,8 @@ func (r *HoldingRepository) GetAllHoldings(ctx context.Context) ([]*execution.Ho
 			&h.UpdatedTS,
 			&h.ExitMode,
 			&h.Raw,
+			&h.ChangePrice,
+			&h.ChangeRate,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan holding: %w", err)

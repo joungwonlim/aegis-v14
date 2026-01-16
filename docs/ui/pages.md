@@ -35,11 +35,11 @@ v14 시스템의 페이지 구조 및 기능 설계
 |--------|------|-----------|------|
 | 종목명 | string | ✅ | 종목명 + 로고 (StockSymbol) |
 | 현재가 | number | ✅ | 실시간 현재가 |
-| 전일대비 | number | ✅ | 평가손익률 (%, pnl_pct) |
+| 전일대비 | number | ✅ | 전일 종가 대비 등락률 (%, change_rate from prices_best) |
 | 보유수량 | number | ✅ | 보유 주식 수량 |
 | 매도가능 | number | ❌ | 매도 가능 수량 |
 | 평가손익 | number | ✅ | 평가손익 금액 |
-| 수익률 | number | ✅ | 평가손익률 (%, pnl_pct) |
+| 수익률 | number | ✅ | 평가손익률 (%, pnl_pct - 매입단가 대비) |
 | 매입단가 | number | ✅ | 평균 매입 단가 |
 | 평가금액 | number | ✅ | 현재 평가 금액 |
 | 매입금액 | number | ✅ | 총 매입 금액 |

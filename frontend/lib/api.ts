@@ -10,6 +10,8 @@ export interface Holding {
   current_price: number
   pnl: number
   pnl_pct: number
+  change_price?: number // 전일대비 가격 (원, from prices_best)
+  change_rate?: number // 전일대비 등락률 (%, from prices_best)
   updated_ts: string
   exit_mode: string // ENABLED, DISABLED, MANUAL_ONLY
   raw?: {

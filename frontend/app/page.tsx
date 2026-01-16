@@ -554,7 +554,7 @@ export default function RuntimeDashboard() {
                           />
                         </TableCell>
                         <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
-                        <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(holding.change_rate || 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPnL(pnl)}</TableCell>

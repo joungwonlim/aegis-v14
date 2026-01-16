@@ -59,8 +59,10 @@ type Holding struct {
 	Qty          int64           `json:"qty"`           // 보유 수량
 	AvgPrice     decimal.Decimal `json:"avg_price"`     // 평균 단가
 	CurrentPrice decimal.Decimal `json:"current_price"` // 현재가 (참고용)
-	Pnl          decimal.Decimal `json:"pnl"`           // 평가손익
-	PnlPct       float64         `json:"pnl_pct"`       // 수익률 (%)
+	Pnl          decimal.Decimal `json:"pnl"`           // 평가손익 (매입단가 대비)
+	PnlPct       float64         `json:"pnl_pct"`       // 수익률 (%, 매입단가 대비)
+	ChangePrice  int64           `json:"change_price"`  // 전일대비 가격 (원, from prices_best)
+	ChangeRate   float64         `json:"change_rate"`   // 전일대비 등락률 (%, from prices_best)
 	UpdatedTS    time.Time       `json:"updated_ts"`    // 마지막 동기화 시각
 	ExitMode     string          `json:"exit_mode"`     // Exit Engine 모드 (ENABLED/DISABLED/MANUAL_ONLY)
 	Raw          map[string]any  `json:"raw"`           // KIS API 원본
