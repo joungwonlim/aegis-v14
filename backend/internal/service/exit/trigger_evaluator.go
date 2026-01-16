@@ -77,13 +77,13 @@ func calculateATRFactor(currentATR *decimal.Decimal, atrConfig exit.ATRConfig) f
 // Returns the highest priority trigger that is hit, or nil if none
 //
 // Priority (high → low):
-// 1. SL2 (full stop loss) - 가장 위험
-// 2. SL1 (partial stop loss)
-// 3. STOP_FLOOR (본전 방어, TP1 체결 후)
-// 4. TP3 (take profit 3)
-// 5. TP2 (take profit 2)
-// 6. TP1 (take profit 1)
-// 7. TRAIL (trailing stop, only in TRAILING_ACTIVE phase)
+// 1. SL2 (full stop loss) - 가장 위험, 전량 손절
+// 2. STOP_FLOOR (본전 방어, TP1 체결 후)
+// 3. SL1 (partial stop loss) - 50% 부분 손절
+// 4. TP1 (take profit 1) - 5% 도달 시 10% 익절
+// 5. TP2 (take profit 2) - 10% 도달 시 20% 익절
+// 6. TP3 (take profit 3) - 15% 도달 시 30% 익절
+// 7. TRAIL (trailing stop, TP2_DONE/TRAILING_ACTIVE phase)
 // 8. TIME (time-based exit)
 //
 // Control Mode Filtering:
@@ -128,10 +128,14 @@ func (s *Service) evaluateTriggers(
 		Str("pnl_pct", pnlPct.StringFixed(2)).
 		Msg("Evaluating triggers")
 
-	// Control Mode filtering
+	// ✅ Priority 0: HARDSTOP (bypasses control mode)
+	// Emergency stop loss that works even in PAUSE_ALL mode
+	if trigger := s.evaluateHardStop(snapshot, pnlPct, profile); trigger != nil {
+		return trigger
+	}
+
+	// Control Mode filtering (AFTER HardStop)
 	if controlMode == exit.ControlModePauseAll {
-		// No triggers (except HardStop if configured)
-		// TODO: Implement HardStop bypass
 		log.Debug().Str("symbol", snapshot.Symbol).Msg("PAUSE_ALL mode, skipping triggers")
 		return nil
 	}
@@ -161,18 +165,18 @@ func (s *Service) evaluateTriggers(
 		return nil
 	}
 
-	// Priority 4: TP3
-	if trigger := s.evaluateTP3(snapshot, pnlPct, profile, atrFactor); trigger != nil {
+	// Priority 4: TP1 (5% 도달 시 10% 매도)
+	if trigger := s.evaluateTP1(snapshot, pnlPct, currentPrice, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
-	// Priority 5: TP2
-	if trigger := s.evaluateTP2(snapshot, pnlPct, profile, atrFactor); trigger != nil {
+	// Priority 5: TP2 (10% 도달 시 20% 매도)
+	if trigger := s.evaluateTP2(snapshot, pnlPct, currentPrice, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
-	// Priority 6: TP1
-	if trigger := s.evaluateTP1(snapshot, pnlPct, profile, atrFactor); trigger != nil {
+	// Priority 6: TP3 (15% 도달 시 30% 매도)
+	if trigger := s.evaluateTP3(snapshot, pnlPct, currentPrice, profile, atrFactor); trigger != nil {
 		return trigger
 	}
 
@@ -333,7 +337,7 @@ func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice deci
 }
 
 // evaluateTP1 evaluates TP1 (take profit 1) trigger with ATR scaling
-func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct, currentPrice decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
 	// Calculate ATR-scaled threshold
 	scaledPct := scaleTriggerPct(
 		profile.Config.TP1.BasePct,
@@ -377,7 +381,7 @@ func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			ReasonCode: exit.ReasonTP1,
 			Qty:        qty,
 			OrderType:  exit.OrderTypeLMT,
-			// TODO: Calculate limit price with slippage
+			LimitPrice: &currentPrice,
 		}
 	}
 
@@ -385,7 +389,7 @@ func (s *Service) evaluateTP1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 }
 
 // evaluateTP2 evaluates TP2 (take profit 2) trigger with ATR scaling
-func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct, currentPrice decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
 	// Calculate ATR-scaled threshold
 	scaledPct := scaleTriggerPct(
 		profile.Config.TP2.BasePct,
@@ -429,7 +433,7 @@ func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			ReasonCode: exit.ReasonTP2,
 			Qty:        qty,
 			OrderType:  exit.OrderTypeLMT,
-			// TODO: Calculate limit price with slippage
+			LimitPrice: &currentPrice,
 		}
 	}
 
@@ -437,7 +441,7 @@ func (s *Service) evaluateTP2(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 }
 
 // evaluateTP3 evaluates TP3 (take profit 3) trigger with ATR scaling
-func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
+func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct, currentPrice decimal.Decimal, profile *exit.ExitProfile, atrFactor float64) *exit.ExitTrigger {
 	// Calculate ATR-scaled threshold
 	scaledPct := scaleTriggerPct(
 		profile.Config.TP3.BasePct,
@@ -481,7 +485,7 @@ func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 			ReasonCode: exit.ReasonTP3,
 			Qty:        qty,
 			OrderType:  exit.OrderTypeLMT,
-			// TODO: Calculate limit price with slippage
+			LimitPrice: &currentPrice,
 		}
 	}
 
@@ -662,6 +666,41 @@ func (s *Service) evaluateTimeStop(snapshot PositionSnapshot, state *exit.Positi
 				Qty:        snapshot.Qty, // Full qty (remaining)
 				OrderType:  exit.OrderTypeMKT,
 			}
+		}
+	}
+
+	return nil
+}
+
+// evaluateHardStop evaluates HardStop (emergency stop loss) trigger
+// HardStop bypasses all control modes (PAUSE_ALL, PAUSE_PROFIT)
+// This is the last line of defense against catastrophic losses
+func (s *Service) evaluateHardStop(
+	snapshot PositionSnapshot,
+	pnlPct decimal.Decimal,
+	profile *exit.ExitProfile,
+) *exit.ExitTrigger {
+	// Check if HardStop is enabled
+	if !profile.Config.HardStop.Enabled {
+		return nil
+	}
+
+	// HardStop threshold (e.g., -10%)
+	threshold := decimal.NewFromFloat(profile.Config.HardStop.Pct)
+	thresholdPct := threshold.Mul(decimal.NewFromInt(100))
+
+	// Trigger if P&L <= threshold (e.g., -12% <= -10%)
+	if pnlPct.LessThanOrEqual(thresholdPct) {
+		log.Warn().
+			Str("symbol", snapshot.Symbol).
+			Str("pnl_pct", pnlPct.StringFixed(2)).
+			Str("threshold", thresholdPct.StringFixed(2)).
+			Msg("🚨 HARDSTOP TRIGGERED (Emergency Stop)")
+
+		return &exit.ExitTrigger{
+			ReasonCode: exit.ReasonHardStop,
+			Qty:        snapshot.Qty, // Full qty (emergency exit)
+			OrderType:  exit.OrderTypeMKT,
 		}
 	}
 

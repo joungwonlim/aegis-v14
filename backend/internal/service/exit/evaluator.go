@@ -15,7 +15,7 @@ const (
 	evaluationInterval     = 3 * time.Second  // 1~5초 권장
 	reconciliationInterval = 30 * time.Second // Intent 조정 주기
 	maxRetries             = 3                // 최대 재평가 횟수
-	freshnessThreshold     = 10 * time.Second // 가격 신선도 임계값
+	freshnessThreshold     = 25 * time.Second // 가격 신선도 임계값 (REST Tier1=10초 × 2 + 5초 버퍼)
 )
 
 // evaluationLoop runs the main exit evaluation loop (1~5초 주기)
@@ -80,9 +80,10 @@ func (s *Service) evaluateAllPositions(ctx context.Context) error {
 
 	// 3. Evaluate each position
 	for _, pos := range positions {
-		// Skip disabled positions
-		if pos.ExitMode == exit.ExitModeDisabled {
-			log.Debug().Str("symbol", pos.Symbol).Msg("Position exit disabled, skipping")
+		// Skip disabled or manual-only positions
+		if pos.ExitMode == exit.ExitModeDisabled || pos.ExitMode == exit.ExitModeManualOnly {
+			log.Debug().Str("symbol", pos.Symbol).Str("exit_mode", pos.ExitMode).
+				Msg("Position exit auto-evaluation disabled, skipping")
 			continue
 		}
 
@@ -144,43 +145,49 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 		return fmt.Errorf("get state: %w", err)
 	}
 
-	// 2.5. Check for 평단가 변경 (추가 매수 감지)
+	// 2.5. Check for 평단가 변경 (추가 매수 vs 부분체결/정정 구분)
 	if state.LastAvgPrice != nil {
-		// Tolerance: 0.5% 이상 변경 시에만 리셋
-		// 계산 오차나 미세한 반올림 차이는 무시
 		diff := pos.AvgPrice.Sub(*state.LastAvgPrice).Abs()
-		threshold := state.LastAvgPrice.Mul(decimal.NewFromFloat(0.005)) // 0.5%
+		minThreshold := state.LastAvgPrice.Mul(decimal.NewFromFloat(0.005)) // 0.5%
+		additionalBuyThreshold := state.LastAvgPrice.Mul(decimal.NewFromFloat(0.02)) // 2%
 
-		if diff.GreaterThan(threshold) {
-			log.Warn().
-				Str("symbol", pos.Symbol).
-				Str("old_avg_price", state.LastAvgPrice.String()).
-				Str("new_avg_price", pos.AvgPrice.String()).
-				Str("diff", diff.String()).
-				Str("threshold", threshold.String()).
-				Str("old_phase", state.Phase).
-				Msg("평단가 유의미한 변경 감지: Exit State를 OPEN으로 리셋 (추가매수로 인한 재진입)")
+		if diff.GreaterThan(minThreshold) {
+			// 0.5% 이상 변경 감지
+			if diff.GreaterThan(additionalBuyThreshold) {
+				// 2% 이상 → 추가매수 → OPEN 리셋
+				log.Warn().
+					Str("symbol", pos.Symbol).
+					Str("old_avg_price", state.LastAvgPrice.String()).
+					Str("new_avg_price", pos.AvgPrice.String()).
+					Str("diff_pct", diff.Div(*state.LastAvgPrice).Mul(decimal.NewFromInt(100)).StringFixed(2)).
+					Str("old_phase", state.Phase).
+					Msg("추가매수 감지 (>2%) → Exit State OPEN 리셋")
 
-			// State를 OPEN으로 리셋
-			err = s.stateRepo.ResetStateToOpen(ctx, pos.PositionID, pos.AvgPrice)
-			if err != nil {
-				return fmt.Errorf("reset state to open: %w", err)
+				err = s.stateRepo.ResetStateToOpen(ctx, pos.PositionID, pos.AvgPrice)
+				if err != nil {
+					return fmt.Errorf("reset state to open: %w", err)
+				}
+
+				// State 재로드
+				state, err = s.stateRepo.GetState(ctx, pos.PositionID)
+				if err != nil {
+					return fmt.Errorf("get state after reset: %w", err)
+				}
+			} else {
+				// 0.5~2% → 부분체결/정정 → State 유지, LastAvgPrice만 업데이트
+				log.Debug().
+					Str("symbol", pos.Symbol).
+					Str("old_avg_price", state.LastAvgPrice.String()).
+					Str("new_avg_price", pos.AvgPrice.String()).
+					Str("diff_pct", diff.Div(*state.LastAvgPrice).Mul(decimal.NewFromInt(100)).StringFixed(2)).
+					Msg("부분체결/정정 감지 (0.5~2%) → State 유지, LastAvgPrice 업데이트")
+
+				err = s.stateRepo.UpdateLastAvgPrice(ctx, pos.PositionID, pos.AvgPrice)
+				if err != nil {
+					log.Error().Err(err).Str("symbol", pos.Symbol).Msg("Failed to update last_avg_price")
+				}
+				state.LastAvgPrice = &pos.AvgPrice
 			}
-
-			// State 재로드
-			state, err = s.stateRepo.GetState(ctx, pos.PositionID)
-			if err != nil {
-				return fmt.Errorf("get state after reset: %w", err)
-			}
-		} else if diff.GreaterThan(decimal.Zero) {
-			// 미세한 변경 (threshold 이하): 로그만 남기고 무시
-			log.Debug().
-				Str("symbol", pos.Symbol).
-				Str("old_avg_price", state.LastAvgPrice.String()).
-				Str("new_avg_price", pos.AvgPrice.String()).
-				Str("diff", diff.String()).
-				Str("threshold", threshold.String()).
-				Msg("평단가 미세 변동 감지 (threshold 이하): 무시")
 		}
 	} else if state.LastAvgPrice == nil {
 		// 처음 평가하는 경우 LastAvgPrice 설정
@@ -301,25 +308,9 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 
 // getActiveIntents retrieves active intents for a position
 func (s *Service) getActiveIntents(ctx context.Context, positionID uuid.UUID) ([]*exit.OrderIntent, error) {
-	// Get recent intents and filter by position_id and active status
-	allIntents, err := s.intentRepo.GetRecentIntents(ctx, 100)
-	if err != nil {
-		return nil, err
-	}
-
-	var activeIntents []*exit.OrderIntent
-	for _, intent := range allIntents {
-		if intent.PositionID == positionID {
-			// Only consider active intents
-			if intent.Status == exit.IntentStatusNew ||
-				intent.Status == exit.IntentStatusPendingApproval ||
-				intent.Status == exit.IntentStatusAck {
-				activeIntents = append(activeIntents, intent)
-			}
-		}
-	}
-
-	return activeIntents, nil
+	// Get active intents for this position directly from DB
+	// Uses idx_order_intents_position_status index for performance
+	return s.intentRepo.GetActiveIntentsByPosition(ctx, positionID)
 }
 
 // isMoreSevere checks if the new trigger is more severe than existing intents
@@ -427,7 +418,8 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 	}
 
 	// 6. Create intent (멱등) - PENDING_APPROVAL 상태로 생성 (사용자 승인 대기)
-	actionKey := fmt.Sprintf("%s:%s", snapshot.PositionID.String(), trigger.ReasonCode)
+	// action_key에 Phase 포함 → 평단가 리셋 후 재발동 가능
+	actionKey := fmt.Sprintf("%s:%s:%s", snapshot.PositionID.String(), state.Phase, trigger.ReasonCode)
 	intent := &exit.OrderIntent{
 		IntentID:   uuid.New(),
 		PositionID: snapshot.PositionID,

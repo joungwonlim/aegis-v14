@@ -217,6 +217,24 @@ const (
 	IntentStatusCancelled       = "CANCELLED"        // 사용자가 취소
 )
 
+// ActiveIntentStatuses defines which statuses are considered "active"
+// Used by both Evaluator (duplication check) and Reconciliation (conflict detection)
+var ActiveIntentStatuses = []string{
+	IntentStatusNew,
+	IntentStatusPendingApproval,
+	IntentStatusAck,
+}
+
+// IsActiveIntent checks if the given status is active
+func IsActiveIntent(status string) bool {
+	for _, s := range ActiveIntentStatuses {
+		if status == s {
+			return true
+		}
+	}
+	return false
+}
+
 // ====================
 // ExitTrigger (evaluation result)
 // ====================

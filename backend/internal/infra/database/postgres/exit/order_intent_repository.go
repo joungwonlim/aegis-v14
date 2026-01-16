@@ -154,6 +154,62 @@ func (r *OrderIntentRepository) GetIntentByActionKey(ctx context.Context, action
 	return &intent, nil
 }
 
+// GetActiveIntentsByPosition retrieves active intents for a position (NEW, PENDING_APPROVAL, ACK)
+func (r *OrderIntentRepository) GetActiveIntentsByPosition(ctx context.Context, positionID uuid.UUID) ([]*exit.OrderIntent, error) {
+	query := `
+		SELECT
+			intent_id,
+			position_id,
+			symbol,
+			intent_type,
+			qty,
+			order_type,
+			limit_price,
+			reason_code,
+			action_key,
+			status,
+			created_ts
+		FROM trade.order_intents
+		WHERE position_id = $1
+		  AND status IN ('NEW', 'PENDING_APPROVAL', 'ACK')
+		ORDER BY created_ts DESC
+	`
+
+	rows, err := r.pool.Query(ctx, query, positionID)
+	if err != nil {
+		return nil, fmt.Errorf("query active intents: %w", err)
+	}
+	defer rows.Close()
+
+	var intents []*exit.OrderIntent
+	for rows.Next() {
+		intent := &exit.OrderIntent{}
+		err := rows.Scan(
+			&intent.IntentID,
+			&intent.PositionID,
+			&intent.Symbol,
+			&intent.IntentType,
+			&intent.Qty,
+			&intent.OrderType,
+			&intent.LimitPrice,
+			&intent.ReasonCode,
+			&intent.ActionKey,
+			&intent.Status,
+			&intent.CreatedTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan intent: %w", err)
+		}
+		intents = append(intents, intent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return intents, nil
+}
+
 // UpdateIntentStatus updates intent status
 func (r *OrderIntentRepository) UpdateIntentStatus(ctx context.Context, intentID uuid.UUID, status string) error {
 	query := `

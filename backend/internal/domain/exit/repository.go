@@ -55,11 +55,26 @@ type PositionStateRepository interface {
 	// UpdateATR updates cached ATR
 	UpdateATR(ctx context.Context, positionID uuid.UUID, atr decimal.Decimal) error
 
-	// IncrementBreachTicks increments breach tick counter (Phase 1: confirm_ticks)
+	// IncrementBreachTicks increments breach tick counter (Phase 1: confirm_ticks) - DEPRECATED
 	IncrementBreachTicks(ctx context.Context, positionID uuid.UUID) error
 
-	// ResetBreachTicks resets breach tick counter to 0
+	// ResetBreachTicks resets breach tick counter to 0 - DEPRECATED
 	ResetBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// IncrementStopFloorBreachTicks increments stop floor breach tick counter
+	IncrementStopFloorBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// ResetStopFloorBreachTicks resets stop floor breach tick counter to 0
+	ResetStopFloorBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// IncrementTrailingBreachTicks increments trailing breach tick counter
+	IncrementTrailingBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// ResetTrailingBreachTicks resets trailing breach tick counter to 0
+	ResetTrailingBreachTicks(ctx context.Context, positionID uuid.UUID) error
+
+	// UpdateLastAvgPrice updates only last_avg_price (for 부분체결/정정)
+	UpdateLastAvgPrice(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error
 
 	// ResetStateToOpen resets state to OPEN phase (for 평단가 변경 시)
 	// Resets: Phase=OPEN, HWM=null, StopFloor=null, BreachTicks=0, LastAvgPrice=newAvgPrice
@@ -79,6 +94,9 @@ type ExitControlRepository interface {
 type ExitProfileRepository interface {
 	// GetProfile retrieves a profile by ID
 	GetProfile(ctx context.Context, profileID string) (*ExitProfile, error)
+
+	// GetDefaultProfile retrieves the default profile (profile_id='default')
+	GetDefaultProfile(ctx context.Context) (*ExitProfile, error)
 
 	// GetActiveProfiles retrieves all active profiles
 	GetActiveProfiles(ctx context.Context) ([]*ExitProfile, error)
@@ -112,6 +130,9 @@ type OrderIntentRepository interface {
 
 	// GetIntentByActionKey retrieves an intent by action key (for idempotency check)
 	GetIntentByActionKey(ctx context.Context, actionKey string) (*OrderIntent, error)
+
+	// GetActiveIntentsByPosition retrieves active intents for a position (NEW, PENDING_APPROVAL, ACK)
+	GetActiveIntentsByPosition(ctx context.Context, positionID uuid.UUID) ([]*OrderIntent, error)
 
 	// UpdateIntentStatus updates intent status
 	UpdateIntentStatus(ctx context.Context, intentID uuid.UUID, status string) error

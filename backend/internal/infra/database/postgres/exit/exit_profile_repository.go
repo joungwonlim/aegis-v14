@@ -64,6 +64,11 @@ func (r *ExitProfileRepository) GetProfile(ctx context.Context, profileID string
 	return &profile, nil
 }
 
+// GetDefaultProfile retrieves the default profile (profile_id='default')
+func (r *ExitProfileRepository) GetDefaultProfile(ctx context.Context) (*exit.ExitProfile, error) {
+	return r.GetProfile(ctx, "default")
+}
+
 // GetActiveProfiles retrieves all active profiles
 func (r *ExitProfileRepository) GetActiveProfiles(ctx context.Context) ([]*exit.ExitProfile, error) {
 	query := `

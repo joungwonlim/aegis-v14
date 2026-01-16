@@ -217,6 +217,24 @@ func (r *PositionStateRepository) ResetBreachTicks(ctx context.Context, position
 	return nil
 }
 
+// UpdateLastAvgPrice updates only last_avg_price (for 부분체결/정정)
+func (r *PositionStateRepository) UpdateLastAvgPrice(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			last_avg_price = $1,
+			updated_ts = NOW()
+		WHERE position_id = $2
+	`
+
+	_, err := r.pool.Exec(ctx, query, newAvgPrice, positionID)
+	if err != nil {
+		return fmt.Errorf("update last_avg_price: %w", err)
+	}
+
+	return nil
+}
+
 // ResetStateToOpen resets state to OPEN phase (for 평단가 변경 시)
 // Resets: Phase=OPEN, HWM=null, StopFloor=null, BreachTicks=0, LastAvgPrice=newAvgPrice
 func (r *PositionStateRepository) ResetStateToOpen(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error {
@@ -247,6 +265,78 @@ func (r *PositionStateRepository) ResetStateToOpen(ctx context.Context, position
 	_, err := r.pool.Exec(ctx, query, positionID, exit.PhaseOpen, newAvgPrice)
 	if err != nil {
 		return fmt.Errorf("reset state to open: %w", err)
+	}
+
+	return nil
+}
+
+// IncrementStopFloorBreachTicks increments stop floor breach tick counter
+func (r *PositionStateRepository) IncrementStopFloorBreachTicks(ctx context.Context, positionID uuid.UUID) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			stop_floor_breach_ticks = stop_floor_breach_ticks + 1,
+			updated_ts = NOW()
+		WHERE position_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID)
+	if err != nil {
+		return fmt.Errorf("increment stop_floor_breach_ticks: %w", err)
+	}
+
+	return nil
+}
+
+// ResetStopFloorBreachTicks resets stop floor breach tick counter to 0
+func (r *PositionStateRepository) ResetStopFloorBreachTicks(ctx context.Context, positionID uuid.UUID) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			stop_floor_breach_ticks = 0,
+			updated_ts = NOW()
+		WHERE position_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID)
+	if err != nil {
+		return fmt.Errorf("reset stop_floor_breach_ticks: %w", err)
+	}
+
+	return nil
+}
+
+// IncrementTrailingBreachTicks increments trailing breach tick counter
+func (r *PositionStateRepository) IncrementTrailingBreachTicks(ctx context.Context, positionID uuid.UUID) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			trailing_breach_ticks = trailing_breach_ticks + 1,
+			updated_ts = NOW()
+		WHERE position_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID)
+	if err != nil {
+		return fmt.Errorf("increment trailing_breach_ticks: %w", err)
+	}
+
+	return nil
+}
+
+// ResetTrailingBreachTicks resets trailing breach tick counter to 0
+func (r *PositionStateRepository) ResetTrailingBreachTicks(ctx context.Context, positionID uuid.UUID) error {
+	query := `
+		UPDATE trade.position_state
+		SET
+			trailing_breach_ticks = 0,
+			updated_ts = NOW()
+		WHERE position_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, positionID)
+	if err != nil {
+		return fmt.Errorf("reset trailing_breach_ticks: %w", err)
 	}
 
 	return nil
