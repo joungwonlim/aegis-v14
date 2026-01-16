@@ -10,7 +10,8 @@ import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/stock-detail-sheet'
 import { ChangeIndicator } from '@/components/ui/change-indicator'
 import { approveIntent, rejectIntent, updateExitMode, cancelKISOrder, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
-import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders } from '@/hooks/useRuntimeData'
+import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders, useExitProfiles, useSymbolOverride } from '@/hooks/useRuntimeData'
+import { SymbolOverrideDialog } from '@/components/SymbolOverrideDialog'
 import { toast } from 'sonner'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
@@ -33,6 +34,17 @@ export default function RuntimeDashboard() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc') // 내림차순 (높은 순)
   const [intentSortField, setIntentSortField] = useState<IntentSortField | null>(null)
   const [intentSortOrder, setIntentSortOrder] = useState<SortOrder>('desc')
+
+  // Symbol Override Dialog 상태
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false)
+  const [selectedSymbol, setSelectedSymbol] = useState<string>('')
+  const [selectedSymbolName, setSelectedSymbolName] = useState<string>('')
+
+  // Exit Profiles 조회
+  const { data: exitProfiles = [] } = useExitProfiles(true)
+
+  // 선택된 Symbol의 Override 조회
+  const { data: symbolOverride } = useSymbolOverride(selectedSymbol)
 
   // StockDetailSheet 훅
   const { selectedStock, isOpen: isStockDetailOpen, openStockDetail, handleOpenChange: handleStockDetailOpenChange } = useStockDetail()
@@ -204,7 +216,12 @@ export default function RuntimeDashboard() {
       // 주문 승인 성공 toast
       toast.success('주문 승인 완료', {
         description: '주문이 실행 대기열에 추가되었습니다.',
-        duration: 3000,
+        duration: 10000,
+        style: {
+          background: '#10b981',
+          color: '#ffffff',
+          border: '1px solid #059669',
+        },
       })
     } catch (err) {
       console.error('Failed to approve intent:', err)
@@ -216,12 +233,22 @@ export default function RuntimeDashboard() {
       if (errorMessage.includes('market') || errorMessage.includes('시간') || errorMessage.includes('장중')) {
         toast.error('주문 실행 실패', {
           description: '장중이 아니라서 주문을 실행할 수 없습니다.',
-          duration: 5000,
+          duration: 10000,
+          style: {
+            background: '#ef4444',
+            color: '#ffffff',
+            border: '1px solid #dc2626',
+          },
         })
       } else {
         toast.error('주문 실행 실패', {
           description: errorMessage,
-          duration: 5000,
+          duration: 10000,
+          style: {
+            background: '#ef4444',
+            color: '#ffffff',
+            border: '1px solid #dc2626',
+          },
         })
       }
     }
@@ -235,7 +262,12 @@ export default function RuntimeDashboard() {
       // 주문 취소 성공 toast
       toast.info('주문 취소됨', {
         description: 'Exit Intent가 취소되었습니다.',
-        duration: 3000,
+        duration: 10000,
+        style: {
+          background: '#3b82f6',
+          color: '#ffffff',
+          border: '1px solid #2563eb',
+        },
       })
     } catch (err) {
       console.error('Failed to reject intent:', err)
@@ -243,7 +275,12 @@ export default function RuntimeDashboard() {
       const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류'
       toast.error('주문 취소 실패', {
         description: errorMessage,
-        duration: 5000,
+        duration: 10000,
+        style: {
+          background: '#ef4444',
+          color: '#ffffff',
+          border: '1px solid #dc2626',
+        },
       })
     }
   }
@@ -516,12 +553,13 @@ export default function RuntimeDashboard() {
                     )}
                   </div>
                 </TableHead>
+                <TableHead className="text-center">설정</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {holdings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
+                  <TableCell colSpan={12} className="text-center text-muted-foreground">
                     보유종목이 없습니다
                   </TableCell>
                 </TableRow>
@@ -568,6 +606,20 @@ export default function RuntimeDashboard() {
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{weight.toFixed(1)}%</TableCell>
+                        <TableCell className="text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedSymbol(holding.symbol)
+                              setSelectedSymbolName(symbolName)
+                              setOverrideDialogOpen(true)
+                            }}
+                            className="h-7 w-7 p-0"
+                          >
+                            ⚙️
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     )
                   })}
@@ -584,6 +636,7 @@ export default function RuntimeDashboard() {
                     <TableCell className="text-right font-mono">{formatNumber(totals.purchaseAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">100.0%</TableCell>
+                    <TableCell></TableCell>
                   </TableRow>
                 </>
               )}
@@ -761,12 +814,12 @@ export default function RuntimeDashboard() {
         </CardContent>
       </Card>
 
-      {/* KIS Orders Execution */}
+      {/* KIS 주문 대기 - PENDING_APPROVAL */}
       <Card>
         <CardHeader>
-          <CardTitle>📤 KIS Orders Execution</CardTitle>
+          <CardTitle>🕐 KIS 주문 대기</CardTitle>
           <CardDescription>
-            승인 대기 중인 Exit Intent ({sortedIntents.filter(i => (i.status === 'PENDING_APPROVAL') && holdings.some(h => h.symbol === i.symbol && h.qty > 0)).length}개)
+            수동 승인 필요 ({sortedIntents.filter(i => i.status === 'PENDING_APPROVAL' && holdings.some(h => h.symbol === i.symbol && h.qty > 0)).length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -850,13 +903,13 @@ export default function RuntimeDashboard() {
             </TableHeader>
             <TableBody>
               {(() => {
-                // 보유종목이 있고 승인 대기/진행 중인 intent만 표시
-                const pendingIntents = sortedIntents.filter(i =>
-                  (i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED') &&
+                // PENDING_APPROVAL 상태의 intent만 표시
+                const pendingApprovalIntents = sortedIntents.filter(i =>
+                  i.status === 'PENDING_APPROVAL' &&
                   holdings.some(h => h.symbol === i.symbol && h.qty > 0)
                 )
 
-                if (pendingIntents.length === 0) {
+                if (pendingApprovalIntents.length === 0) {
                   return (
                     <TableRow>
                       <TableCell colSpan={12} className="text-center text-muted-foreground">
@@ -866,7 +919,7 @@ export default function RuntimeDashboard() {
                   )
                 }
 
-                return pendingIntents.map((intent) => {
+                return pendingApprovalIntents.map((intent) => {
                     // holdings에서 현재가 정보 가져오기
                     const holding = holdings.find(h => h.symbol === intent.symbol)
                     const currentPrice = typeof holding?.current_price === 'string'
@@ -916,26 +969,188 @@ export default function RuntimeDashboard() {
                         <TableCell>{getStatusBadge(intent.status)}</TableCell>
                         <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
                         <TableCell className="text-center">
-                          {intent.status === 'PENDING_APPROVAL' ? (
-                            <div className="flex gap-2 justify-center">
-                              <Button
-                                size="sm"
-                                onClick={() => handleApprove(intent.intent_id)}
-                                className="bg-green-600 hover:bg-green-700"
-                              >
-                                주문 실행
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => handleReject(intent.intent_id)}
-                              >
-                                삭제
-                              </Button>
-                            </div>
-                          ) : (
-                            <Badge variant="secondary">{intent.status === 'NEW' ? '주문 대기 중' : '주문 완료'}</Badge>
-                          )}
+                          <div className="flex gap-2 justify-center">
+                            <Button
+                              size="sm"
+                              onClick={() => handleApprove(intent.intent_id)}
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              주문 실행
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleReject(intent.intent_id)}
+                            >
+                              삭제
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+              })()}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* KIS Orders Execution */}
+      <Card>
+        <CardHeader>
+          <CardTitle>📤 KIS Orders Execution</CardTitle>
+          <CardDescription>
+            승인 완료 Exit Intent ({sortedIntents.filter(i => (i.status === 'NEW' || i.status === 'SUBMITTED') && holdings.some(h => h.symbol === i.symbol && h.qty > 0)).length}개)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('symbol')}
+                >
+                  <div className="flex items-center gap-1">
+                    종목명
+                    {intentSortField === 'symbol' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('current_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    현재가
+                    {intentSortField === 'current_price' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead className="text-right">전일대비</TableHead>
+                <TableHead className="text-right">매입단가</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('order_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    주문가격
+                    {intentSortField === 'order_price' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('deviation')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    괴리율
+                    {intentSortField === 'deviation' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead>타입</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('qty')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    수량
+                    {intentSortField === 'qty' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead>주문유형</TableHead>
+                <TableHead>사유</TableHead>
+                <TableHead>상태</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleIntentSort('created_ts')}
+                >
+                  <div className="flex items-center gap-1">
+                    생성시각
+                    {intentSortField === 'created_ts' && (
+                      <span className="text-xs">{intentSortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead className="text-center">상태</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(() => {
+                // 승인 완료된 intent만 표시 (NEW, SUBMITTED)
+                const executingIntents = sortedIntents.filter(i =>
+                  (i.status === 'NEW' || i.status === 'SUBMITTED') &&
+                  holdings.some(h => h.symbol === i.symbol && h.qty > 0)
+                )
+
+                if (executingIntents.length === 0) {
+                  return (
+                    <TableRow>
+                      <TableCell colSpan={12} className="text-center text-muted-foreground">
+                        승인 완료된 Intent가 없습니다
+                      </TableCell>
+                    </TableRow>
+                  )
+                }
+
+                return executingIntents.map((intent) => {
+                    // holdings에서 현재가 정보 가져오기
+                    const holding = holdings.find(h => h.symbol === intent.symbol)
+                    const currentPrice = typeof holding?.current_price === 'string'
+                      ? parseFloat(holding.current_price)
+                      : (holding?.current_price || 0)
+                    const pnlPct = holding?.pnl_pct || 0
+                    const avgPrice = holding
+                      ? (typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price)
+                      : 0
+
+                    // 주문가격 (limit_price 또는 현재가)
+                    const orderPrice = intent.limit_price || currentPrice
+
+                    // 괴리율 계산: (현재가 - 주문가격) / 주문가격 * 100
+                    const deviationPct = orderPrice > 0 ? ((currentPrice - orderPrice) / orderPrice) * 100 : 0
+
+                    return (
+                      <TableRow key={intent.intent_id}>
+                        <TableCell>
+                          <StockSymbol
+                            symbol={intent.symbol}
+                            symbolName={intent.symbol_name}
+                            size="sm"
+                            isHolding={!!holding}
+                            isExitEnabled={holding?.exit_mode === 'ENABLED'}
+                            market={holding?.raw?.market}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          <ChangeIndicator
+                            changePrice={holding?.change_price}
+                            changeRate={holding?.change_rate}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          {holding ? formatNumber(avgPrice, 0) : '-'}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(orderPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(deviationPct)}</TableCell>
+                        <TableCell>{intent.intent_type}</TableCell>
+                        <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
+                        <TableCell>{intent.order_type}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{intent.reason_code}</Badge>
+                        </TableCell>
+                        <TableCell>{getStatusBadge(intent.status)}</TableCell>
+                        <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="secondary">{intent.status === 'NEW' ? '주문 대기 중' : '주문 완료'}</Badge>
                         </TableCell>
                       </TableRow>
                     )
@@ -1326,6 +1541,18 @@ export default function RuntimeDashboard() {
         unfilledOrders={kisUnfilledOrders}
         executedOrders={kisFilledOrders}
         totalEvaluation={totalEvaluation}
+        onExitModeToggle={handleExitModeToggle}
+      />
+
+      {/* Symbol Override Dialog - 종목별 Exit 전략 설정 */}
+      <SymbolOverrideDialog
+        open={overrideDialogOpen}
+        onOpenChange={setOverrideDialogOpen}
+        symbol={selectedSymbol}
+        symbolName={selectedSymbolName}
+        currentProfileId={symbolOverride?.profile_id}
+        profiles={exitProfiles}
+        holding={holdings.find(h => h.symbol === selectedSymbol)}
         onExitModeToggle={handleExitModeToggle}
       />
     </div>

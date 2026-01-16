@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import { setSymbolOverride, deleteSymbolOverride, createExitProfile, type ExitProfile, type CustomExitRule } from '@/lib/api'
 import { CustomRulesEditor } from './CustomRulesEditor'
@@ -32,6 +33,8 @@ interface SymbolOverrideDialogProps {
   symbolName?: string
   currentProfileId?: string | null
   profiles: ExitProfile[]
+  holding?: any // Exit Mode 확인 및 변경용
+  onExitModeToggle?: (holding: any, enabled: boolean) => void
 }
 
 export function SymbolOverrideDialog({
@@ -41,6 +44,8 @@ export function SymbolOverrideDialog({
   symbolName,
   currentProfileId,
   profiles,
+  holding,
+  onExitModeToggle,
 }: SymbolOverrideDialogProps) {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<string>('existing')
@@ -255,6 +260,30 @@ export function SymbolOverrideDialog({
             {symbolName ? `${symbolName} (${symbol})` : symbol}에 적용할 Exit 전략을 선택하세요.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Exit Engine 토글 */}
+        {holding && onExitModeToggle && (
+          <div className="flex items-center justify-between rounded-lg border bg-muted/50 p-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="exit-engine-toggle" className="text-base font-semibold">
+                Exit Engine
+              </Label>
+              <div className="text-sm text-muted-foreground">
+                자동 손절/익절 시스템 활성화
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="exit-engine-toggle"
+                checked={holding.exit_mode === 'ENABLED'}
+                onCheckedChange={(enabled) => onExitModeToggle(holding, enabled)}
+              />
+              <span className="text-xs text-muted-foreground">
+                {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
+              </span>
+            </div>
+          </div>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
