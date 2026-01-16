@@ -125,24 +125,26 @@ export function CustomRulesEditor({ onSave }: CustomRulesEditorProps) {
             규칙을 추가하여 맞춤형 청산 전략을 만드세요
           </div>
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={rules.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2">
-                {rules.map((rule) => (
-                  <CustomRuleItem
-                    key={rule.id}
-                    rule={rule}
-                    onUpdate={(updates) => updateRule(rule.id, updates)}
-                    onDelete={() => deleteRule(rule.id)}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+          <div className="max-h-[300px] overflow-y-auto rounded-md border p-2">
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={rules.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-2">
+                  {rules.map((rule) => (
+                    <CustomRuleItem
+                      key={rule.id}
+                      rule={rule}
+                      onUpdate={(updates) => updateRule(rule.id, updates)}
+                      onDelete={() => deleteRule(rule.id)}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
         )}
       </div>
 
