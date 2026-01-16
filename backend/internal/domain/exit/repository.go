@@ -55,12 +55,6 @@ type PositionStateRepository interface {
 	// UpdateATR updates cached ATR
 	UpdateATR(ctx context.Context, positionID uuid.UUID, atr decimal.Decimal) error
 
-	// IncrementBreachTicks increments breach tick counter (Phase 1: confirm_ticks) - DEPRECATED
-	IncrementBreachTicks(ctx context.Context, positionID uuid.UUID) error
-
-	// ResetBreachTicks resets breach tick counter to 0 - DEPRECATED
-	ResetBreachTicks(ctx context.Context, positionID uuid.UUID) error
-
 	// IncrementStopFloorBreachTicks increments stop floor breach tick counter
 	IncrementStopFloorBreachTicks(ctx context.Context, positionID uuid.UUID) error
 
@@ -77,7 +71,7 @@ type PositionStateRepository interface {
 	UpdateLastAvgPrice(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error
 
 	// ResetStateToOpen resets state to OPEN phase (for 평단가 변경 시)
-	// Resets: Phase=OPEN, HWM=null, StopFloor=null, BreachTicks=0, LastAvgPrice=newAvgPrice
+	// Resets: Phase=OPEN, HWM=null, StopFloor=null, StopFloorBreachTicks=0, TrailingBreachTicks=0, LastAvgPrice=newAvgPrice
 	ResetStateToOpen(ctx context.Context, positionID uuid.UUID, newAvgPrice decimal.Decimal) error
 }
 

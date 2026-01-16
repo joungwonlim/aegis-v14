@@ -190,16 +190,25 @@ func CalculateQualityScore(source Source, staleness int64, thresholdMS int64) in
 
 // SelectBestSource selects best source based on freshness
 // Returns the source with highest quality score
+// IMPORTANT: Recalculates quality score based on current time to handle stale sources
 func SelectBestSource(freshnesses []Freshness) (Source, bool) {
 	var bestSource Source
 	bestScore := -1
+	now := time.Now()
 
 	for _, f := range freshnesses {
-		if f.QualityScore == nil {
+		if f.LastTS == nil {
 			continue
 		}
-		if *f.QualityScore > bestScore {
-			bestScore = *f.QualityScore
+
+		// Recalculate quality score based on current time
+		// This ensures stale WS data doesn't win over fresh REST data
+		staleness := CalculateStaleness(*f.LastTS, now)
+		threshold := GetThreshold(f.Source, true) // Assume trading hours for now
+		score := CalculateQualityScore(f.Source, staleness, threshold)
+
+		if score > bestScore {
+			bestScore = score
 			bestSource = f.Source
 		}
 	}

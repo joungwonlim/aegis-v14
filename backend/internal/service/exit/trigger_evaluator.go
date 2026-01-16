@@ -278,13 +278,13 @@ func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice deci
 	// Check if current price hit Stop Floor
 	if currentPrice.LessThanOrEqual(*state.StopFloorPrice) {
 		// Phase 1: Increment breach counter
-		err := s.stateRepo.IncrementBreachTicks(ctx, snapshot.PositionID)
+		err := s.stateRepo.IncrementStopFloorBreachTicks(ctx, snapshot.PositionID)
 		if err != nil {
-			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to increment breach_ticks")
+			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to increment stop_floor_breach_ticks")
 			return nil
 		}
 
-		// Reload state to get updated breach_ticks
+		// Reload state to get updated stop_floor_breach_ticks
 		state, err = s.stateRepo.GetState(ctx, snapshot.PositionID)
 		if err != nil {
 			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to reload state")
@@ -295,20 +295,20 @@ func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice deci
 			Str("symbol", snapshot.Symbol).
 			Str("current_price", currentPrice.String()).
 			Str("stop_floor_price", state.StopFloorPrice.String()).
-			Int("breach_ticks", state.BreachTicks).
+			Int("stop_floor_breach_ticks", state.StopFloorBreachTicks).
 			Msg("Stop Floor breach detected")
 
 		// Phase 1: confirm_ticks=2 (6초 연속 조건 충족 필요)
-		if state.BreachTicks >= 2 {
+		if state.StopFloorBreachTicks >= 2 {
 			log.Info().
 				Str("symbol", snapshot.Symbol).
 				Str("current_price", currentPrice.String()).
 				Str("stop_floor_price", state.StopFloorPrice.String()).
-				Int("breach_ticks", state.BreachTicks).
+				Int("stop_floor_breach_ticks", state.StopFloorBreachTicks).
 				Msg("Stop Floor trigger hit (confirmed)")
 
 			// Reset counter after trigger
-			_ = s.stateRepo.ResetBreachTicks(ctx, snapshot.PositionID)
+			_ = s.stateRepo.ResetStopFloorBreachTicks(ctx, snapshot.PositionID)
 
 			return &exit.ExitTrigger{
 				ReasonCode: exit.ReasonStopFloor,
@@ -322,14 +322,14 @@ func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice deci
 	}
 
 	// Breach 조건 미충족: 카운터 리셋
-	if state.BreachTicks > 0 {
-		err := s.stateRepo.ResetBreachTicks(ctx, snapshot.PositionID)
+	if state.StopFloorBreachTicks > 0 {
+		err := s.stateRepo.ResetStopFloorBreachTicks(ctx, snapshot.PositionID)
 		if err != nil {
-			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to reset breach_ticks")
+			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to reset stop_floor_breach_ticks")
 		} else {
 			log.Debug().
 				Str("symbol", snapshot.Symbol).
-				Msg("Stop Floor breach condition cleared, reset breach_ticks")
+				Msg("Stop Floor breach condition cleared, reset stop_floor_breach_ticks")
 		}
 	}
 
@@ -511,13 +511,13 @@ func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decim
 
 	if currentPrice.LessThanOrEqual(trailingStopPrice) {
 		// Phase 1: Increment breach counter
-		err := s.stateRepo.IncrementBreachTicks(ctx, snapshot.PositionID)
+		err := s.stateRepo.IncrementTrailingBreachTicks(ctx, snapshot.PositionID)
 		if err != nil {
-			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to increment breach_ticks")
+			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to increment trailing_breach_ticks")
 			return nil
 		}
 
-		// Reload state to get updated breach_ticks
+		// Reload state to get updated trailing_breach_ticks
 		state, err = s.stateRepo.GetState(ctx, snapshot.PositionID)
 		if err != nil {
 			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to reload state")
@@ -530,11 +530,11 @@ func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decim
 			Str("current_price", currentPrice.String()).
 			Str("hwm_price", state.HWMPrice.String()).
 			Str("trailing_stop_price", trailingStopPrice.String()).
-			Int("breach_ticks", state.BreachTicks).
+			Int("trailing_breach_ticks", state.TrailingBreachTicks).
 			Msg("Trailing breach detected")
 
 		// Phase 1: confirm_ticks=2 (6초 연속 조건 충족 필요)
-		if state.BreachTicks >= 2 {
+		if state.TrailingBreachTicks >= 2 {
 			// Phase별 수량 계산
 			var qty int64
 			var reasonCode string
@@ -565,7 +565,7 @@ func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decim
 					Int64("current_qty", snapshot.Qty).
 					Int64("qty", qty).
 					Float64("qty_pct", qtyPct).
-					Int("breach_ticks", state.BreachTicks).
+					Int("trailing_breach_ticks", state.TrailingBreachTicks).
 					Msg("Trailing PARTIAL trigger hit (원본 기준, TP2 부분 트레일, confirmed)")
 			} else {
 				// TRAIL_ACTIVE: 잔량 전량
@@ -579,12 +579,12 @@ func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decim
 					Str("hwm_price", state.HWMPrice.String()).
 					Str("trailing_stop_price", trailingStopPrice.String()).
 					Int64("qty", qty).
-					Int("breach_ticks", state.BreachTicks).
+					Int("trailing_breach_ticks", state.TrailingBreachTicks).
 					Msg("Trailing FULL trigger hit (confirmed)")
 			}
 
 			// Reset counter after trigger
-			_ = s.stateRepo.ResetBreachTicks(ctx, snapshot.PositionID)
+			_ = s.stateRepo.ResetTrailingBreachTicks(ctx, snapshot.PositionID)
 
 			return &exit.ExitTrigger{
 				ReasonCode: reasonCode,
@@ -598,15 +598,15 @@ func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decim
 	}
 
 	// Breach 조건 미충족: 카운터 리셋
-	if state.BreachTicks > 0 {
-		err := s.stateRepo.ResetBreachTicks(ctx, snapshot.PositionID)
+	if state.TrailingBreachTicks > 0 {
+		err := s.stateRepo.ResetTrailingBreachTicks(ctx, snapshot.PositionID)
 		if err != nil {
-			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to reset breach_ticks")
+			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to reset trailing_breach_ticks")
 		} else {
 			log.Debug().
 				Str("symbol", snapshot.Symbol).
 				Str("phase", state.Phase).
-				Msg("Trailing breach condition cleared, reset breach_ticks")
+				Msg("Trailing breach condition cleared, reset trailing_breach_ticks")
 		}
 	}
 

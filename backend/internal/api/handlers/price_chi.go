@@ -32,8 +32,8 @@ func (h *PriceHandlerChi) GetPrice(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Get latest price from DB
-	price, err := h.priceRepo.GetLatestPrice(ctx, symbol)
+	// Get best price from DB
+	price, err := h.priceRepo.GetBestPrice(ctx, symbol)
 	if err != nil {
 		log.Debug().Err(err).Str("symbol", symbol).Msg("Price not found")
 		http.Error(w, "Price not found", http.StatusNotFound)
@@ -75,7 +75,7 @@ func (h *PriceHandlerChi) GetPrices(w http.ResponseWriter, r *http.Request) {
 
 	results := make([]PriceResult, 0, len(req.Symbols))
 	for _, symbol := range req.Symbols {
-		price, err := h.priceRepo.GetLatestPrice(ctx, symbol)
+		price, err := h.priceRepo.GetBestPrice(ctx, symbol)
 		if err != nil {
 			results = append(results, PriceResult{
 				Symbol: symbol,
@@ -95,10 +95,10 @@ func (h *PriceHandlerChi) GetPrices(w http.ResponseWriter, r *http.Request) {
 
 		results = append(results, PriceResult{
 			Symbol:      symbol,
-			LastPrice:   price.LastPrice,
+			LastPrice:   price.BestPrice,
 			ChangePrice: changePrice,
 			ChangeRate:  changeRate,
-			Source:      string(price.Source),
+			Source:      string(price.BestSource),
 			Found:       true,
 		})
 	}

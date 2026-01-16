@@ -55,10 +55,11 @@ type PositionState struct {
 	StopFloorPrice *decimal.Decimal `json:"stop_floor_price"` // Stop Floor (breakeven protect)
 	ATR            *decimal.Decimal `json:"atr"`              // ATR (cached, daily)
 	CooldownUntil  *time.Time       `json:"cooldown_until"`   // Re-entry cooldown
-	LastEvalTS     *time.Time       `json:"last_eval_ts"`
-	LastAvgPrice   *decimal.Decimal `json:"last_avg_price"`   // 마지막 평단가 (추가매수 감지용)
-	UpdatedTS      time.Time        `json:"updated_ts"`
-	BreachTicks    int              `json:"breach_ticks"` // Phase 1: 연속 breach 카운터 (confirm_ticks)
+	LastEvalTS            *time.Time       `json:"last_eval_ts"`
+	LastAvgPrice          *decimal.Decimal `json:"last_avg_price"` // 마지막 평단가 (추가매수 감지용)
+	UpdatedTS             time.Time        `json:"updated_ts"`
+	StopFloorBreachTicks  int              `json:"stop_floor_breach_ticks"`  // StopFloor 연속 breach 카운터
+	TrailingBreachTicks   int              `json:"trailing_breach_ticks"`    // Trailing 연속 breach 카운터
 }
 
 // FSM Phases

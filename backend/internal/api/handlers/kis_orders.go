@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -60,8 +61,10 @@ func (h *KISOrdersHandler) GetUnfilledOrders(w http.ResponseWriter, r *http.Requ
 	// Get unfilled orders from KIS
 	orders, err := h.kisAdapter.GetUnfilledOrders(ctx, h.accountID)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get unfilled orders from KIS")
-		http.Error(w, "Failed to get unfilled orders", http.StatusInternalServerError)
+		log.Error().Err(err).Str("account_id", h.accountID).Msg("Failed to get unfilled orders from KIS")
+		// Return more specific error message for debugging
+		errMsg := fmt.Sprintf("Failed to get unfilled orders: %s", err.Error())
+		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
 
@@ -106,8 +109,9 @@ func (h *KISOrdersHandler) GetFilledOrders(w http.ResponseWriter, r *http.Reques
 	since := time.Now().Truncate(24 * time.Hour)
 	fills, err := h.kisAdapter.GetFills(ctx, h.accountID, since)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get filled orders from KIS")
-		http.Error(w, "Failed to get filled orders", http.StatusInternalServerError)
+		log.Error().Err(err).Str("account_id", h.accountID).Msg("Failed to get filled orders from KIS")
+		errMsg := fmt.Sprintf("Failed to get filled orders: %s", err.Error())
+		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
 
