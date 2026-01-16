@@ -1,6 +1,7 @@
 package exit
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -296,6 +297,7 @@ func TestEvaluateTP3(t *testing.T) {
 
 // TestEvaluateStopFloor tests Stop Floor trigger evaluation
 func TestEvaluateStopFloor(t *testing.T) {
+	ctx := context.Background()
 	svc := &Service{}
 
 	snapshot := PositionSnapshot{
@@ -318,7 +320,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(70300) // Below Stop Floor
 
-		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+		trigger := svc.evaluateStopFloor(ctx, snapshot, currentPrice, state)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger on first breach, got %+v", trigger)
@@ -334,7 +336,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(70300) // Below Stop Floor
 
-		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+		trigger := svc.evaluateStopFloor(ctx, snapshot, currentPrice, state)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger when StopFloorBreachTicks=1, got %+v", trigger)
@@ -350,7 +352,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(70300) // Below Stop Floor
 
-		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+		trigger := svc.evaluateStopFloor(ctx, snapshot, currentPrice, state)
 
 		if trigger == nil {
 			t.Fatal("Expected Stop Floor trigger when StopFloorBreachTicks >= 2, got nil")
@@ -374,7 +376,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(71000) // Above Stop Floor
 
-		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+		trigger := svc.evaluateStopFloor(ctx, snapshot, currentPrice, state)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -389,7 +391,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(70000)
 
-		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+		trigger := svc.evaluateStopFloor(ctx, snapshot, currentPrice, state)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger (Stop Floor not set), got %+v", trigger)
@@ -399,6 +401,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 // TestEvaluateTrailing tests Trailing Stop trigger evaluation
 func TestEvaluateTrailing(t *testing.T) {
+	ctx := context.Background()
 	svc := &Service{}
 
 	snapshot := PositionSnapshot{
@@ -430,7 +433,7 @@ func TestEvaluateTrailing(t *testing.T) {
 		// Trailing stop price = 85000 * 0.96 = 81600
 		currentPrice := decimal.NewFromInt(81500) // Below trailing stop
 
-		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+		trigger := svc.evaluateTrailing(ctx, snapshot, currentPrice, state, profile)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger on first breach, got %+v", trigger)
@@ -447,7 +450,7 @@ func TestEvaluateTrailing(t *testing.T) {
 		// Trailing stop price = 85000 * 0.96 = 81600
 		currentPrice := decimal.NewFromInt(81500) // Below trailing stop
 
-		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+		trigger := svc.evaluateTrailing(ctx, snapshot, currentPrice, state, profile)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger when TrailingBreachTicks=1, got %+v", trigger)
@@ -464,7 +467,7 @@ func TestEvaluateTrailing(t *testing.T) {
 		// Trailing stop price = 85000 * 0.96 = 81600
 		currentPrice := decimal.NewFromInt(81500) // Below trailing stop
 
-		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+		trigger := svc.evaluateTrailing(ctx, snapshot, currentPrice, state, profile)
 
 		if trigger == nil {
 			t.Fatal("Expected Trailing trigger when TrailingBreachTicks >= 2, got nil")
@@ -488,7 +491,7 @@ func TestEvaluateTrailing(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(82000) // Above trailing stop
 
-		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+		trigger := svc.evaluateTrailing(ctx, snapshot, currentPrice, state, profile)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger, got %+v", trigger)
@@ -503,7 +506,7 @@ func TestEvaluateTrailing(t *testing.T) {
 
 		currentPrice := decimal.NewFromInt(82000)
 
-		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+		trigger := svc.evaluateTrailing(ctx, snapshot, currentPrice, state, profile)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger (HWM not set), got %+v", trigger)
@@ -513,6 +516,7 @@ func TestEvaluateTrailing(t *testing.T) {
 
 // TestTriggerPriority tests trigger priority order
 func TestTriggerPriority(t *testing.T) {
+	ctx := context.Background()
 	svc := &Service{}
 
 	snapshot := PositionSnapshot{
@@ -541,7 +545,7 @@ func TestTriggerPriority(t *testing.T) {
 	}
 
 	t.Run("SL2 has highest priority (both SL1 and SL2 triggered)", func(t *testing.T) {
-		trigger := svc.evaluateTriggers(snapshot, state, bestPrice, profile, exit.ControlModeRunning)
+		trigger := svc.evaluateTriggers(ctx, snapshot, state,bestPrice, profile, exit.ControlModeRunning)
 
 		if trigger == nil {
 			t.Fatal("Expected trigger, got nil")
@@ -556,7 +560,7 @@ func TestTriggerPriority(t *testing.T) {
 			BestPrice: 75000, // +7.1% (TP1 would trigger)
 		}
 
-		trigger := svc.evaluateTriggers(snapshot, state, profitBestPrice, profile, exit.ControlModePauseProfit)
+		trigger := svc.evaluateTriggers(ctx, snapshot, state,profitBestPrice, profile, exit.ControlModePauseProfit)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger (TP blocked by PAUSE_PROFIT), got %+v", trigger)
@@ -568,7 +572,7 @@ func TestTriggerPriority(t *testing.T) {
 			BestPrice: 67500, // -3.6% (SL1 triggers)
 		}
 
-		trigger := svc.evaluateTriggers(snapshot, state, lossBestPrice, profile, exit.ControlModePauseProfit)
+		trigger := svc.evaluateTriggers(ctx, snapshot, state,lossBestPrice, profile, exit.ControlModePauseProfit)
 
 		if trigger == nil {
 			t.Fatal("Expected SL1 trigger, got nil")
@@ -579,7 +583,7 @@ func TestTriggerPriority(t *testing.T) {
 	})
 
 	t.Run("PAUSE_ALL blocks all triggers", func(t *testing.T) {
-		trigger := svc.evaluateTriggers(snapshot, state, bestPrice, profile, exit.ControlModePauseAll)
+		trigger := svc.evaluateTriggers(ctx, snapshot, state,bestPrice, profile, exit.ControlModePauseAll)
 
 		if trigger != nil {
 			t.Errorf("Expected no trigger (PAUSE_ALL), got %+v", trigger)

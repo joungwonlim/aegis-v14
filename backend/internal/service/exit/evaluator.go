@@ -266,7 +266,7 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 	}
 
 	// 8. Evaluate triggers (우선순위 순서)
-	trigger := s.evaluateTriggers(snapshot, state, bestPrice, profile, controlMode)
+	trigger := s.evaluateTriggers(ctx, snapshot, state, bestPrice, profile, controlMode)
 
 	// 8.5. Check if new trigger is more severe than existing intents
 	if trigger != nil && existingIntents != nil && len(existingIntents) > 0 {

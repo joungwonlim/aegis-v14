@@ -1,6 +1,7 @@
 package exit
 
 import (
+	"context"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -90,6 +91,7 @@ func calculateATRFactor(currentATR *decimal.Decimal, atrConfig exit.ATRConfig) f
 // - PAUSE_PROFIT: Only SL/STOP_FLOOR triggers (block TP/TRAIL)
 // - PAUSE_ALL: No triggers (except HardStop if configured)
 func (s *Service) evaluateTriggers(
+	ctx context.Context,
 	snapshot PositionSnapshot,
 	state *exit.PositionState,
 	bestPrice *price.BestPrice,
@@ -149,7 +151,7 @@ func (s *Service) evaluateTriggers(
 	// v14 핵심 안전장치: SL1보다 먼저 평가
 	// TP1_DONE 또는 TP2_DONE phase에서만 평가
 	if state.Phase == exit.PhaseTP1Done || state.Phase == exit.PhaseTP2Done || state.Phase == exit.PhaseTP3Done {
-		if trigger := s.evaluateStopFloor(snapshot, currentPrice, state); trigger != nil {
+		if trigger := s.evaluateStopFloor(ctx, snapshot, currentPrice, state); trigger != nil {
 			return trigger
 		}
 	}
@@ -184,7 +186,7 @@ func (s *Service) evaluateTriggers(
 	// - TP2_DONE: 원본 20% 부분 트레일 (단발)
 	// - TRAILING_ACTIVE: 잔량 100% 전량 트레일
 	if state.Phase == exit.PhaseTP2Done || state.Phase == exit.PhaseTrailingActive {
-		if trigger := s.evaluateTrailing(snapshot, currentPrice, state, profile); trigger != nil {
+		if trigger := s.evaluateTrailing(ctx, snapshot, currentPrice, state, profile); trigger != nil {
 			return trigger
 		}
 	}
@@ -266,14 +268,12 @@ func (s *Service) evaluateSL1(snapshot PositionSnapshot, pnlPct decimal.Decimal,
 
 // evaluateStopFloor evaluates Stop Floor trigger (본전 방어, TP1 체결 후)
 // Phase 1: 2틱 연속 breach 확인 (confirm_ticks=2, 노이즈 청산 방지)
-func (s *Service) evaluateStopFloor(snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState) *exit.ExitTrigger {
+func (s *Service) evaluateStopFloor(ctx context.Context, snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState) *exit.ExitTrigger {
 	// Check if Stop Floor is set
 	if state.StopFloorPrice == nil {
 		log.Warn().Str("symbol", snapshot.Symbol).Msg("Stop Floor phase but price not set, skipping")
 		return nil
 	}
-
-	ctx := s.ctx
 
 	// Check if current price hit Stop Floor
 	if currentPrice.LessThanOrEqual(*state.StopFloorPrice) {
@@ -496,14 +496,12 @@ func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct, currentPrice de
 // Phase 1: Phase별 분기 + 2틱 연속 확인 (confirm_ticks=2)
 // - TP2_DONE: 원본 20% 부분 트레일 (단발, fire_once)
 // - TRAIL_ACTIVE: 잔량 100% 전량 트레일
-func (s *Service) evaluateTrailing(snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState, profile *exit.ExitProfile) *exit.ExitTrigger {
+func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState, profile *exit.ExitProfile) *exit.ExitTrigger {
 	// Check if HWM is set
 	if state.HWMPrice == nil {
 		log.Warn().Str("symbol", snapshot.Symbol).Str("phase", state.Phase).Msg("Trailing phase but HWM not set, skipping")
 		return nil
 	}
-
-	ctx := s.ctx
 
 	// Calculate trailing stop price
 	trailingPct := decimal.NewFromFloat(profile.Config.Trailing.PctTrail) // e.g., 0.03 (3%)
