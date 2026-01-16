@@ -309,10 +309,43 @@ func TestEvaluateStopFloor(t *testing.T) {
 
 	stopFloorPrice := decimal.NewFromInt(70420) // 70000 * 1.006
 
-	t.Run("Stop Floor hit", func(t *testing.T) {
+	t.Run("Stop Floor - first breach (no trigger yet)", func(t *testing.T) {
 		state := &exit.PositionState{
-			Phase:          exit.PhaseTP1Done,
-			StopFloorPrice: &stopFloorPrice,
+			Phase:                exit.PhaseTP1Done,
+			StopFloorPrice:       &stopFloorPrice,
+			StopFloorBreachTicks: 0, // First breach
+		}
+
+		currentPrice := decimal.NewFromInt(70300) // Below Stop Floor
+
+		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger on first breach, got %+v", trigger)
+		}
+	})
+
+	t.Run("Stop Floor - second breach but not confirmed (tick=1)", func(t *testing.T) {
+		state := &exit.PositionState{
+			Phase:                exit.PhaseTP1Done,
+			StopFloorPrice:       &stopFloorPrice,
+			StopFloorBreachTicks: 1, // Second breach, not yet >= 2
+		}
+
+		currentPrice := decimal.NewFromInt(70300) // Below Stop Floor
+
+		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger when StopFloorBreachTicks=1, got %+v", trigger)
+		}
+	})
+
+	t.Run("Stop Floor - confirmed breach (tick=2, triggers)", func(t *testing.T) {
+		state := &exit.PositionState{
+			Phase:                exit.PhaseTP1Done,
+			StopFloorPrice:       &stopFloorPrice,
+			StopFloorBreachTicks: 2, // Confirmed (2 consecutive breaches)
 		}
 
 		currentPrice := decimal.NewFromInt(70300) // Below Stop Floor
@@ -320,7 +353,7 @@ func TestEvaluateStopFloor(t *testing.T) {
 		trigger := svc.evaluateStopFloor(snapshot, currentPrice, state)
 
 		if trigger == nil {
-			t.Fatal("Expected Stop Floor trigger, got nil")
+			t.Fatal("Expected Stop Floor trigger when StopFloorBreachTicks >= 2, got nil")
 		}
 		if trigger.ReasonCode != exit.ReasonStopFloor {
 			t.Errorf("Expected ReasonStopFloor, got %s", trigger.ReasonCode)
@@ -387,10 +420,45 @@ func TestEvaluateTrailing(t *testing.T) {
 
 	hwmPrice := decimal.NewFromInt(85000) // High-Water Mark
 
-	t.Run("Trailing stop hit", func(t *testing.T) {
+	t.Run("Trailing stop - first breach (no trigger yet)", func(t *testing.T) {
 		state := &exit.PositionState{
-			Phase:    exit.PhaseTrailingActive,
-			HWMPrice: &hwmPrice,
+			Phase:               exit.PhaseTrailingActive,
+			HWMPrice:            &hwmPrice,
+			TrailingBreachTicks: 0, // First breach
+		}
+
+		// Trailing stop price = 85000 * 0.96 = 81600
+		currentPrice := decimal.NewFromInt(81500) // Below trailing stop
+
+		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger on first breach, got %+v", trigger)
+		}
+	})
+
+	t.Run("Trailing stop - second breach but not confirmed (tick=1)", func(t *testing.T) {
+		state := &exit.PositionState{
+			Phase:               exit.PhaseTrailingActive,
+			HWMPrice:            &hwmPrice,
+			TrailingBreachTicks: 1, // Second breach, not yet >= 2
+		}
+
+		// Trailing stop price = 85000 * 0.96 = 81600
+		currentPrice := decimal.NewFromInt(81500) // Below trailing stop
+
+		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
+
+		if trigger != nil {
+			t.Errorf("Expected no trigger when TrailingBreachTicks=1, got %+v", trigger)
+		}
+	})
+
+	t.Run("Trailing stop - confirmed breach (tick=2, triggers)", func(t *testing.T) {
+		state := &exit.PositionState{
+			Phase:               exit.PhaseTrailingActive,
+			HWMPrice:            &hwmPrice,
+			TrailingBreachTicks: 2, // Confirmed (2 consecutive breaches)
 		}
 
 		// Trailing stop price = 85000 * 0.96 = 81600
@@ -399,7 +467,7 @@ func TestEvaluateTrailing(t *testing.T) {
 		trigger := svc.evaluateTrailing(snapshot, currentPrice, state, profile)
 
 		if trigger == nil {
-			t.Fatal("Expected Trailing trigger, got nil")
+			t.Fatal("Expected Trailing trigger when TrailingBreachTicks >= 2, got nil")
 		}
 		if trigger.ReasonCode != exit.ReasonTrail {
 			t.Errorf("Expected ReasonTrail, got %s", trigger.ReasonCode)
