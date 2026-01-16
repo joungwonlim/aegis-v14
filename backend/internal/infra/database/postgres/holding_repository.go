@@ -20,7 +20,7 @@ func NewHoldingRepository(pool *pgxpool.Pool) *HoldingRepository {
 	}
 }
 
-// GetAllHoldings retrieves all holdings
+// GetAllHoldings retrieves all holdings with qty > 0
 func (r *HoldingRepository) GetAllHoldings(ctx context.Context) ([]*execution.Holding, error) {
 	query := `
 		SELECT
@@ -164,6 +164,23 @@ func (r *HoldingRepository) DeleteHolding(ctx context.Context, accountID, symbol
 	return nil
 }
 
+// SetHoldingQtyZero sets a holding's qty to 0 (for syncing with KIS)
+func (r *HoldingRepository) SetHoldingQtyZero(ctx context.Context, accountID, symbol string) error {
+	query := `
+		UPDATE trade.holdings
+		SET qty = 0,
+			updated_ts = NOW()
+		WHERE account_id = $1 AND symbol = $2
+	`
+
+	_, err := r.pool.Exec(ctx, query, accountID, symbol)
+	if err != nil {
+		return fmt.Errorf("set holding qty zero: %w", err)
+	}
+
+	return nil
+}
+
 // LoadHoldings loads all holdings for an account
 func (r *HoldingRepository) LoadHoldings(ctx context.Context, accountID string) ([]*execution.Holding, error) {
 	query := `
@@ -187,6 +204,60 @@ func (r *HoldingRepository) LoadHoldings(ctx context.Context, accountID string) 
 	rows, err := r.pool.Query(ctx, query, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("query holdings for account: %w", err)
+	}
+	defer rows.Close()
+
+	var holdings []*execution.Holding
+	for rows.Next() {
+		h := &execution.Holding{}
+		err := rows.Scan(
+			&h.AccountID,
+			&h.Symbol,
+			&h.Qty,
+			&h.AvgPrice,
+			&h.CurrentPrice,
+			&h.Pnl,
+			&h.PnlPct,
+			&h.UpdatedTS,
+			&h.ExitMode,
+			&h.Raw,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan holding: %w", err)
+		}
+		holdings = append(holdings, h)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return holdings, nil
+}
+
+// GetAllHoldingsIncludingZero retrieves all holdings including those with qty=0 (for sync comparison)
+func (r *HoldingRepository) GetAllHoldingsIncludingZero(ctx context.Context, accountID string) ([]*execution.Holding, error) {
+	query := `
+		SELECT
+			h.account_id,
+			h.symbol,
+			h.qty,
+			h.avg_price,
+			h.current_price,
+			(h.current_price - h.avg_price) * h.qty as pnl,
+			((h.current_price - h.avg_price) / NULLIF(h.avg_price, 0) * 100) as pnl_pct,
+			h.updated_ts,
+			COALESCE(p.exit_mode, 'ENABLED') as exit_mode,
+			h.raw
+		FROM trade.holdings h
+		LEFT JOIN trade.positions p ON h.account_id = p.account_id AND h.symbol = p.symbol
+		WHERE h.account_id = $1
+		ORDER BY h.symbol ASC
+	`
+
+	rows, err := r.pool.Query(ctx, query, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("query all holdings (including zero): %w", err)
 	}
 	defer rows.Close()
 

@@ -19,7 +19,8 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 		return fmt.Errorf("fetch holdings: %w", err)
 	}
 
-	// 2. Upsert holdings to DB
+	// 2. Upsert holdings to DB and build KIS symbol set
+	kisSymbolSet := make(map[string]bool)
 	var currHoldings []*execution.Holding
 	for _, kh := range kisHoldings {
 		holding := &execution.Holding{
@@ -39,18 +40,58 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 			continue
 		}
 
+		kisSymbolSet[kh.Symbol] = true
 		currHoldings = append(currHoldings, holding)
 	}
 
-	log.Debug().Int("count", len(currHoldings)).Msg("Holdings synced")
+	log.Debug().Int("count", len(currHoldings)).Msg("Holdings synced from KIS")
 
-	// 3. Detect and create ExitEvents (qty: N → 0)
+	// 3. Set qty=0 for DB holdings NOT in KIS response (매도 완료된 종목)
+	dbHoldings, err := s.holdingRepo.GetAllHoldingsIncludingZero(ctx, s.accountID)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load DB holdings for comparison")
+	} else {
+		for _, dbHolding := range dbHoldings {
+			if dbHolding.Qty > 0 && !kisSymbolSet[dbHolding.Symbol] {
+				// KIS에 없음 → 매도 완료 → qty=0 설정
+				err := s.holdingRepo.SetHoldingQtyZero(ctx, dbHolding.AccountID, dbHolding.Symbol)
+				if err != nil {
+					log.Error().
+						Err(err).
+						Str("symbol", dbHolding.Symbol).
+						Msg("Failed to set holding qty to zero")
+					continue
+				}
+
+				log.Info().
+					Str("symbol", dbHolding.Symbol).
+					Int64("prev_qty", dbHolding.Qty).
+					Msg("Holding cleared (not in KIS response)")
+
+				// Add to currHoldings with qty=0 for ExitEvent detection
+				clearedHolding := &execution.Holding{
+					AccountID:    dbHolding.AccountID,
+					Symbol:       dbHolding.Symbol,
+					Qty:          0,
+					AvgPrice:     dbHolding.AvgPrice,
+					CurrentPrice: dbHolding.CurrentPrice,
+					Pnl:          decimal.Zero,
+					PnlPct:       0.0,
+					UpdatedTS:    time.Now(),
+					Raw:          dbHolding.Raw,
+				}
+				currHoldings = append(currHoldings, clearedHolding)
+			}
+		}
+	}
+
+	// 4. Detect and create ExitEvents (qty: N → 0)
 	if err := s.detectAndCreateExitEvents(ctx, s.prevHoldings, currHoldings); err != nil {
 		log.Error().Err(err).Msg("Failed to detect exit events")
 		// Don't return error - holdings sync succeeded
 	}
 
-	// 4. Update previous holdings snapshot
+	// 5. Update previous holdings snapshot
 	s.prevHoldings = currHoldings
 
 	return nil

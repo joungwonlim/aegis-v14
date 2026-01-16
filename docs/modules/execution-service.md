@@ -599,17 +599,125 @@ func (s *ExecutionService) SyncFillsSinceCursor(ctx context.Context) error {
 ```mermaid
 flowchart TD
     A[Every 10~30초] --> B[KIS REST: 보유종목 조회]
-    B --> C[For each holding]
+    B --> C[For each holding from KIS]
     C --> D[Upsert holdings table]
-    D --> E[Compare holdings vs positions]
-    E --> F{Mismatch?}
-    F -->|No| G[OK]
-    F -->|Yes| H[Log discrepancy]
-    H --> I[Trigger fills reconcile]
-    I --> J[Recompute positions optional]
+    D --> E{More holdings from KIS?}
+    E -->|yes| C
+    E -->|no| F[Find DB holdings NOT in KIS response]
+    F --> G[For each disappeared holding]
+    G --> H[Set qty=0 in DB]
+    H --> I[Compare holdings vs positions]
+    I --> J{Mismatch?}
+    J -->|No| K[OK]
+    J -->|Yes| L[Log discrepancy]
+    L --> M[Trigger fills reconcile]
+    M --> N[Recompute positions optional]
 ```
 
 **KIS API**: `GET /uapi/domestic-stock/v1/trading/inquire-balance` (잔고 조회)
+
+#### ⚠️ 버그 및 수정 이력 (2026-01-16)
+
+**문제**: 매도 완료된 종목이 Portfolio에 계속 표시되는 버그 발견
+
+**근본 원인**:
+- `syncHoldings()` 함수가 KIS에서 반환된 holdings만 **UPSERT**
+- KIS 응답에 없는 holdings (매도 완료)의 DB 레코드를 업데이트하지 않음
+- 결과: DB에 `qty > 0`인 오래된 레코드가 남음
+
+**재현 시나리오**:
+1. 종목 A를 100주 보유 → DB: qty=100
+2. 종목 A를 전량 매도 → KIS API 응답에서 제외
+3. `syncHoldings()` 실행 → DB에 qty=100 그대로 유지 (UPSERT 안 됨)
+4. `GetAllHoldings()` 조회 → WHERE qty > 0 → 여전히 반환됨
+5. Frontend Portfolio에 매도된 종목이 표시됨 ❌
+
+**수정 방안**:
+```go
+// BEFORE (버그)
+func (s *Service) syncHoldings(ctx context.Context) error {
+    kisHoldings, err := s.kisAdapter.GetHoldings(ctx, s.accountID)
+    // ...
+    for _, kh := range kisHoldings {
+        holding := &execution.Holding{...}
+        s.holdingRepo.UpsertHolding(ctx, holding)  // KIS에 있는 것만 upsert
+    }
+    // ❌ KIS에 없는 holdings를 처리하지 않음!
+}
+
+// AFTER (수정)
+func (s *Service) syncHoldings(ctx context.Context) error {
+    kisHoldings, err := s.kisAdapter.GetHoldings(ctx, s.accountID)
+    // ...
+
+    // 1. KIS holdings upsert
+    kisSymbolSet := make(map[string]bool)
+    for _, kh := range kisHoldings {
+        holding := &execution.Holding{...}
+        s.holdingRepo.UpsertHolding(ctx, holding)
+        kisSymbolSet[kh.Symbol] = true
+    }
+
+    // 2. DB에 있지만 KIS에 없는 holdings를 qty=0으로 설정
+    dbHoldings, err := s.holdingRepo.GetAllHoldings(ctx)
+    if err != nil {
+        log.Error().Err(err).Msg("Failed to load DB holdings")
+        return err
+    }
+
+    for _, dbHolding := range dbHoldings {
+        if dbHolding.Qty > 0 && !kisSymbolSet[dbHolding.Symbol] {
+            // KIS에 없음 → 매도 완료 → qty=0 설정
+            err := s.holdingRepo.SetHoldingQtyZero(ctx, dbHolding.AccountID, dbHolding.Symbol)
+            if err != nil {
+                log.Error().
+                    Err(err).
+                    Str("symbol", dbHolding.Symbol).
+                    Msg("Failed to set holding qty to zero")
+                continue
+            }
+
+            log.Info().
+                Str("symbol", dbHolding.Symbol).
+                Int64("prev_qty", dbHolding.Qty).
+                Msg("Holding cleared (not in KIS response)")
+        }
+    }
+}
+```
+
+**새 Repository 메서드 추가**:
+```go
+// HoldingRepository에 추가
+func (r *HoldingRepository) SetHoldingQtyZero(ctx context.Context, accountID, symbol string) error {
+    query := `
+        UPDATE trade.holdings
+        SET qty = 0,
+            updated_ts = NOW()
+        WHERE account_id = $1 AND symbol = $2
+    `
+
+    _, err := r.pool.Exec(ctx, query, accountID, symbol)
+    if err != nil {
+        return fmt.Errorf("set holding qty zero: %w", err)
+    }
+
+    return nil
+}
+```
+
+**영향 범위**:
+- `backend/internal/service/execution/holdings_sync.go` - sync 로직 수정
+- `backend/internal/infra/database/postgres/holding_repository.go` - SetHoldingQtyZero 메서드 추가
+- `docs/modules/execution-service.md` - 버그 및 수정 문서화
+
+**테스트 시나리오**:
+1. ✅ KIS에 있는 holdings → 정상 upsert
+2. ✅ KIS에 없는 DB holdings (qty > 0) → qty=0으로 설정
+3. ✅ 이미 qty=0인 holdings → 변경 없음
+4. ✅ ExitEvent 생성 로직 정상 작동 (qty: N → 0 감지)
+
+**관련 이슈**: Holdings not synced correctly after full exit - 셀루메드(234100) Portfolio 표시 버그
 
 **처리 로직**:
 
