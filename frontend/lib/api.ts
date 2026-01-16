@@ -160,7 +160,7 @@ export async function getFills(): Promise<Fill[]> {
   return response.json()
 }
 
-export async function approveIntent(intentId: string): Promise<{ status: string }> {
+export async function approveIntent(intentId: string): Promise<{ status: string; message?: string }> {
   const response = await fetch(`${API_BASE_URL}/intents/${intentId}/approve`, {
     method: 'POST',
     headers: {
@@ -169,7 +169,8 @@ export async function approveIntent(intentId: string): Promise<{ status: string 
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to approve intent: ${response.statusText}`)
+    const errorText = await response.text()
+    throw new Error(errorText || response.statusText)
   }
 
   return response.json()

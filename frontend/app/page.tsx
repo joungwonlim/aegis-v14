@@ -11,6 +11,7 @@ import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/s
 import { ChangeIndicator } from '@/components/ui/change-indicator'
 import { approveIntent, rejectIntent, updateExitMode, cancelKISOrder, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
 import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders } from '@/hooks/useRuntimeData'
+import { toast } from 'sonner'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
 type IntentSortField = 'symbol' | 'current_price' | 'order_price' | 'deviation' | 'qty' | 'created_ts'
@@ -197,10 +198,32 @@ export default function RuntimeDashboard() {
 
   const handleApprove = async (intentId: string) => {
     try {
-      await approveIntent(intentId)
+      const result = await approveIntent(intentId)
       await refetchIntents() // Refresh intents after approval
+
+      // 주문 승인 성공 toast
+      toast.success('주문 승인 완료', {
+        description: '주문이 실행 대기열에 추가되었습니다.',
+        duration: 3000,
+      })
     } catch (err) {
       console.error('Failed to approve intent:', err)
+
+      // 에러 메시지 파싱
+      const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류'
+
+      // 장중 체크 에러인지 확인
+      if (errorMessage.includes('market') || errorMessage.includes('시간') || errorMessage.includes('장중')) {
+        toast.error('주문 실행 실패', {
+          description: '장중이 아니라서 주문을 실행할 수 없습니다.',
+          duration: 5000,
+        })
+      } else {
+        toast.error('주문 실행 실패', {
+          description: errorMessage,
+          duration: 5000,
+        })
+      }
     }
   }
 
@@ -208,8 +231,20 @@ export default function RuntimeDashboard() {
     try {
       await rejectIntent(intentId)
       await refetchIntents() // Refresh intents after rejection
+
+      // 주문 취소 성공 toast
+      toast.info('주문 취소됨', {
+        description: 'Exit Intent가 취소되었습니다.',
+        duration: 3000,
+      })
     } catch (err) {
       console.error('Failed to reject intent:', err)
+
+      const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류'
+      toast.error('주문 취소 실패', {
+        description: errorMessage,
+        duration: 5000,
+      })
     }
   }
 
