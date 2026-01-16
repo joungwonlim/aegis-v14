@@ -201,7 +201,8 @@ export async function updateExitMode(accountId: string, symbol: string, exitMode
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to update exit mode: ${response.statusText}`)
+    const errorText = await response.text()
+    throw new Error(`Failed to update exit mode: ${errorText || response.statusText}`)
   }
 
   return response.json()
