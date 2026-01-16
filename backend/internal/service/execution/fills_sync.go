@@ -183,13 +183,8 @@ func (s *Service) ensureOrderExists(ctx context.Context, orderID string) error {
 		return nil // Order exists
 	}
 
-	// 2. If not found, need to create it (fetch from KIS or create placeholder)
-	if err != execution.ErrOrderNotFound {
-		// Unexpected error
-		return fmt.Errorf("check order existence: %w", err)
-	}
-
-	// 3. Order not found - try to fetch from KIS unfilled orders
+	// 2. Order not found - try to fetch from KIS unfilled orders
+	// (Treat all GetOrder errors as "not found" to be resilient)
 	log.Info().
 		Str("order_id", orderID).
 		Msg("Order not in DB, attempting to fetch from KIS unfilled orders")
