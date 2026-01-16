@@ -153,12 +153,18 @@ func (s *Service) CreateManualIntent(ctx context.Context, positionID uuid.UUID, 
 	// action_key에 Phase 포함 (형식: {position_id}:{phase}:{reason_code})
 	actionKey := fmt.Sprintf("%s:%s:%s", positionID.String(), state.Phase, exit.ReasonManual)
 
+	// Determine IntentType based on qty
+	intentType := exit.IntentTypeExitFull
+	if qty < pos.Qty {
+		intentType = exit.IntentTypeExitPartial
+	}
+
 	// Create intent
 	intent := &exit.OrderIntent{
 		IntentID:   uuid.New(),
 		PositionID: positionID,
 		Symbol:     pos.Symbol,
-		IntentType: exit.IntentTypeExitFull,
+		IntentType: intentType,
 		Qty:        qty,
 		OrderType:  orderType,
 		ReasonCode: exit.ReasonManual,
