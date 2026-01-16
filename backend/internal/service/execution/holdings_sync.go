@@ -23,14 +23,29 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 	kisSymbolSet := make(map[string]bool)
 	var currHoldings []*execution.Holding
 	for _, kh := range kisHoldings {
+		// Calculate real PnL (HTS-style: including sell fees/taxes)
+		realPnl, realPnlPct := s.calculateRealPnL(kh)
+
+		// Debug log for specific symbol (temporary INFO level)
+		if kh.Symbol == "234100" {
+			log.Info().
+				Str("symbol", kh.Symbol).
+				Str("kis_pnl", kh.Pnl.String()).
+				Str("real_pnl", realPnl.String()).
+				Float64("kis_pnl_pct", kh.PnlPct).
+				Float64("real_pnl_pct", realPnlPct).
+				Str("market", fmt.Sprintf("%v", kh.Raw["market"])).
+				Msg("🔍 PnL calculation comparison")
+		}
+
 		holding := &execution.Holding{
 			AccountID:    kh.AccountID,
 			Symbol:       kh.Symbol,
 			Qty:          kh.Qty,
 			AvgPrice:     kh.AvgPrice,
 			CurrentPrice: kh.CurrentPrice,
-			Pnl:          kh.Pnl,
-			PnlPct:       kh.PnlPct,
+			Pnl:          realPnl,
+			PnlPct:       realPnlPct,
 			UpdatedTS:    time.Now(),
 			Raw:          kh.Raw,
 		}
@@ -270,4 +285,51 @@ func (s *Service) calculateExitAvgPrice(ctx context.Context, positionID uuid.UUI
 	}
 
 	return totalValue.Div(decimal.NewFromInt(totalQty))
+}
+
+// calculateRealPnL calculates real PnL (HTS-style) including sell fees and taxes
+func (s *Service) calculateRealPnL(kh *execution.KISHolding) (decimal.Decimal, float64) {
+	// Simple PnL (without fees)
+	simplePnl := kh.CurrentPrice.Sub(kh.AvgPrice).Mul(decimal.NewFromInt(kh.Qty))
+
+	// Sell amount
+	sellAmount := kh.CurrentPrice.Mul(decimal.NewFromInt(kh.Qty))
+
+	// Determine fee rate by market
+	var feeRate decimal.Decimal
+	market, ok := kh.Raw["market"].(string)
+	if !ok {
+		market = "UNKNOWN"
+	}
+
+	switch market {
+	case "KOSPI":
+		// Securities transaction tax: 0.15%
+		// Rural special tax: 0.15%
+		// Commission: 0.015%
+		// Total: 0.315%
+		feeRate = decimal.NewFromFloat(0.00315)
+	case "KOSDAQ":
+		// Securities transaction tax: 0.23%
+		// Commission: 0.015%
+		// Total: 0.245%
+		feeRate = decimal.NewFromFloat(0.00245)
+	default:
+		// Default to KOSDAQ rate
+		feeRate = decimal.NewFromFloat(0.00245)
+	}
+
+	// Calculate fees
+	fees := sellAmount.Mul(feeRate)
+
+	// Real PnL (HTS-style)
+	realPnl := simplePnl.Sub(fees)
+
+	// Real PnL %
+	var realPnlPct float64
+	if !kh.AvgPrice.IsZero() {
+		realPnlPct, _ = realPnl.Div(kh.AvgPrice.Mul(decimal.NewFromInt(kh.Qty))).Mul(decimal.NewFromInt(100)).Float64()
+	}
+
+	return realPnl, realPnlPct
 }
