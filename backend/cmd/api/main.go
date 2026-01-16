@@ -9,14 +9,19 @@ import (
 	"syscall"
 	"time"
 
+	gorillaHandlers "github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/api/handlers"
-	"github.com/wonny/aegis/v14/internal/api/router"
+	"github.com/wonny/aegis/v14/internal/api/routes"
+	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	exitrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
+	exitservice "github.com/wonny/aegis/v14/internal/service/exit"
+	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
 const (
@@ -70,6 +75,13 @@ func main() {
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
 	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
 
+	// Exit Engine repositories
+	stateRepo := exitrepo.NewPositionStateRepository(dbPool.Pool)
+	controlRepo := exitrepo.NewExitControlRepository(dbPool.Pool)
+	profileRepo := exitrepo.NewExitProfileRepository(dbPool.Pool)
+	symbolOverrideRepo := exitrepo.NewSymbolExitOverrideRepository(dbPool.Pool)
+	signalRepo := exitrepo.NewExitSignalRepository(dbPool.Pool)
+
 	// Initialize KIS client and adapter
 	kisClient, err := kis.NewClientFromEnv()
 	if err != nil {
@@ -88,6 +100,31 @@ func main() {
 
 	log.Info().Str("account_id", accountID).Msg("✅ KIS client initialized")
 
+	// Initialize PriceSync Service (needed by Exit Service)
+	priceService := pricesync.NewService(priceRepo)
+
+	// Initialize Exit Service (without starting the evaluation loop)
+	// Default profile (simple conservative profile for API)
+	defaultProfile := &exit.ExitProfile{
+		ProfileID:   "default",
+		Name:        "Default Profile",
+		Description: "Conservative exit strategy",
+		Config:      exit.ExitProfileConfig{}, // Will be loaded from DB if needed
+		IsActive:    true,
+		CreatedBy:   "system",
+	}
+	exitSvc := exitservice.NewService(
+		positionRepo,
+		stateRepo,
+		controlRepo,
+		orderIntentRepo,
+		profileRepo,
+		symbolOverrideRepo,
+		signalRepo,
+		priceService,
+		defaultProfile,
+	)
+
 	// Initialize handlers
 	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo, positionRepo, priceRepo)
 	intentsHandler := handlers.NewIntentsHandler(orderIntentRepo, orderIntentRepo) // Reader and Writer
@@ -95,16 +132,52 @@ func main() {
 	fillsHandler := handlers.NewFillsHandler(fillRepo)
 	kisOrdersHandler := handlers.NewKISOrdersHandler(kisAdapter, accountID)
 
-	// Initialize router
-	routerCfg := &router.Config{
-		HoldingsHandler:  holdingsHandler,
-		IntentsHandler:   intentsHandler,
-		OrdersHandler:    ordersHandler,
-		FillsHandler:     fillsHandler,
-		KISOrdersHandler: kisOrdersHandler,
-	}
+	// Create gorilla/mux router
+	httpRouter := mux.NewRouter()
 
-	httpRouter := router.NewRouter(routerCfg)
+	// CORS configuration
+	allowedOrigins := gorillaHandlers.AllowedOrigins([]string{"http://localhost:3099"})
+	allowedMethods := gorillaHandlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"})
+	allowedHeaders := gorillaHandlers.AllowedHeaders([]string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"})
+	allowCredentials := gorillaHandlers.AllowCredentials()
+
+	// Register existing routes
+	httpRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET")
+
+	// API routes
+	apiRouter := httpRouter.PathPrefix("/api").Subrouter()
+
+	// Holdings
+	apiRouter.HandleFunc("/holdings", holdingsHandler.GetHoldings).Methods("GET")
+	apiRouter.HandleFunc("/holdings/{account_id}/{symbol}/exit-mode", holdingsHandler.UpdateExitMode).Methods("PUT")
+
+	// Order Intents
+	apiRouter.HandleFunc("/intents", intentsHandler.GetIntents).Methods("GET")
+	apiRouter.HandleFunc("/intents/{intent_id}/approve", intentsHandler.ApproveIntent).Methods("POST")
+	apiRouter.HandleFunc("/intents/{intent_id}/reject", intentsHandler.RejectIntent).Methods("POST")
+
+	// Orders
+	apiRouter.HandleFunc("/orders", ordersHandler.GetOrders).Methods("GET")
+
+	// Fills
+	apiRouter.HandleFunc("/fills", fillsHandler.GetFills).Methods("GET")
+
+	// KIS Orders
+	apiRouter.HandleFunc("/kis/unfilled-orders", kisOrdersHandler.GetUnfilledOrders).Methods("GET")
+	apiRouter.HandleFunc("/kis/filled-orders", kisOrdersHandler.GetFilledOrders).Methods("GET")
+	apiRouter.HandleFunc("/kis/orders", kisOrdersHandler.PlaceOrder).Methods("POST")
+	apiRouter.HandleFunc("/kis/orders/{order_no}", kisOrdersHandler.CancelOrder).Methods("DELETE")
+
+	// Register Exit routes
+	routes.RegisterExitRoutes(httpRouter, exitSvc)
+
+	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS)")
+
+	// Wrap with CORS
+	handler := gorillaHandlers.CORS(allowedOrigins, allowedMethods, allowedHeaders, allowCredentials)(httpRouter)
 
 	// HTTP server port
 	port := os.Getenv("API_PORT")
@@ -116,7 +189,7 @@ func main() {
 	addr := fmt.Sprintf(":%s", port)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      httpRouter,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
