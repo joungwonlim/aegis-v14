@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
@@ -8,22 +8,25 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/stock-detail-sheet'
-import { getHoldings, getOrderIntents, getOrders, getFills, getKISUnfilledOrders, getKISFilledOrders, approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
+import { ChangeIndicator } from '@/components/ui/change-indicator'
+import { approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
+import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders } from '@/hooks/useRuntimeData'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
 type IntentSortField = 'symbol' | 'current_price' | 'order_price' | 'deviation' | 'qty' | 'created_ts'
 type SortOrder = 'asc' | 'desc'
 
 export default function RuntimeDashboard() {
-  const [holdings, setHoldings] = useState<Holding[]>([])
-  const [intents, setIntents] = useState<OrderIntent[]>([])
-  const [orders, setOrders] = useState<Order[]>([])
-  const [fills, setFills] = useState<Fill[]>([])
-  const [kisUnfilledOrders, setKisUnfilledOrders] = useState<KISUnfilledOrder[]>([])
-  const [kisFilledOrders, setKisFilledOrders] = useState<KISFill[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  // React Query 훅으로 데이터 조회 (3초마다 자동 갱신)
+  const { data: holdings = [], isLoading: holdingsLoading, error: holdingsError, refetch: refetchHoldings } = useHoldings()
+  const { data: intents = [], isLoading: intentsLoading, refetch: refetchIntents } = useOrderIntents()
+  const { data: orders = [], isLoading: ordersLoading } = useOrders()
+  const { data: fills = [], isLoading: fillsLoading } = useFills()
+  const { data: kisUnfilledOrders = [], isLoading: kisUnfilledLoading } = useKISUnfilledOrders()
+  const { data: kisFilledOrders = [], isLoading: kisFilledLoading } = useKISFilledOrders()
+
+  const loading = holdingsLoading || intentsLoading || ordersLoading || fillsLoading || kisUnfilledLoading || kisFilledLoading
+  const error = holdingsError ? (holdingsError as Error).message : null
   const [rulesDialogOpen, setRulesDialogOpen] = useState(false)
   const [sortField, setSortField] = useState<SortField>('eval_amount') // 기본 정렬: 평가금액
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc') // 내림차순 (높은 순)
@@ -192,66 +195,21 @@ export default function RuntimeDashboard() {
 
   const totalPnlPct = totals.purchaseAmount > 0 ? (totals.pnl / totals.purchaseAmount) * 100 : 0
 
-  const loadData = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      const results = await Promise.allSettled([
-        getHoldings(),
-        getOrderIntents(),
-        getOrders(),
-        getFills(),
-        getKISUnfilledOrders(),
-        getKISFilledOrders(),
-      ])
-
-      // Extract successful results, handle null responses
-      if (results[0].status === 'fulfilled') setHoldings(results[0].value || [])
-      if (results[1].status === 'fulfilled') setIntents(results[1].value || [])
-      if (results[2].status === 'fulfilled') setOrders(results[2].value || [])
-      if (results[3].status === 'fulfilled') setFills(results[3].value || [])
-      if (results[4].status === 'fulfilled') setKisUnfilledOrders(results[4].value || [])
-      if (results[5].status === 'fulfilled') setKisFilledOrders(results[5].value || [])
-
-      // Collect errors from failed requests
-      const errors = results
-        .map((result, index) => {
-          if (result.status === 'rejected') {
-            const names = ['Holdings', 'Intents', 'Orders', 'Fills', 'KIS Unfilled', 'KIS Filled']
-            return names[index]
-          }
-          return null
-        })
-        .filter(Boolean)
-
-      if (errors.length > 0) {
-        setError(`일부 데이터를 불러올 수 없습니다: ${errors.join(', ')} (DB 스키마 불일치)`)
-      }
-
-      setLastUpdate(new Date())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleApprove = async (intentId: string) => {
     try {
       await approveIntent(intentId)
-      await loadData() // Refresh data after approval
+      await refetchIntents() // Refresh intents after approval
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve intent')
+      console.error('Failed to approve intent:', err)
     }
   }
 
   const handleReject = async (intentId: string) => {
     try {
       await rejectIntent(intentId)
-      await loadData() // Refresh data after rejection
+      await refetchIntents() // Refresh intents after rejection
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reject intent')
+      console.error('Failed to reject intent:', err)
     }
   }
 
@@ -268,34 +226,17 @@ export default function RuntimeDashboard() {
       const exitMode = enabled ? 'ENABLED' : 'DISABLED'
       console.log('Updating exit mode:', { account_id: holding.account_id, symbol: holding.symbol, exitMode })
 
-      // Optimistic update - immediately update UI
-      const updatedHolding = { ...holding, exit_mode: exitMode }
-      setHoldings(prev => prev.map(h =>
-        h.account_id === holding.account_id && h.symbol === holding.symbol
-          ? updatedHolding
-          : h
-      ))
-
       const result = await updateExitMode(holding.account_id, holding.symbol, exitMode)
       console.log('Update result:', result)
 
-      // Refresh data to ensure consistency with server
-      await loadData()
+      // Refresh holdings after update
+      await refetchHoldings()
     } catch (err) {
       console.error('Failed to update exit mode:', err)
-      setError(err instanceof Error ? err.message : 'Failed to update exit mode')
-      // Revert optimistic update on error
-      await loadData()
+      // Revert by refetching
+      await refetchHoldings()
     }
   }
-
-  useEffect(() => {
-    loadData()
-
-    // Auto-refresh every 10 seconds (to avoid KIS API rate limit)
-    const interval = setInterval(loadData, 10000)
-    return () => clearInterval(interval)
-  }, [])
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -367,16 +308,20 @@ export default function RuntimeDashboard() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Aegis v14 Runtime Monitor</h1>
-          <p className="text-muted-foreground">실시간 트레이딩 엔진 모니터링</p>
+          <p className="text-muted-foreground">실시간 트레이딩 엔진 모니터링 (3초 자동 갱신)</p>
         </div>
         <div className="flex items-center gap-4">
-          {lastUpdate && (
-            <span className="text-sm text-muted-foreground">
-              Last updated: {lastUpdate.toLocaleTimeString('ko-KR')}
-            </span>
-          )}
-          <Button onClick={loadData} disabled={loading}>
-            {loading ? '새로고침 중...' : '새로고침'}
+          <span className="text-sm text-muted-foreground">
+            {loading ? '갱신 중...' : '✅ 실시간 연결'}
+          </span>
+          <Button
+            onClick={() => {
+              refetchHoldings()
+              refetchIntents()
+            }}
+            disabled={loading}
+          >
+            수동 새로고침
           </Button>
         </div>
       </div>
@@ -554,7 +499,12 @@ export default function RuntimeDashboard() {
                           />
                         </TableCell>
                         <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
-                        <TableCell className="text-right font-mono">{formatPercent(holding.change_rate || 0)}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          <ChangeIndicator
+                            changePrice={holding.change_price}
+                            changeRate={holding.change_rate}
+                          />
+                        </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPnL(pnl)}</TableCell>
