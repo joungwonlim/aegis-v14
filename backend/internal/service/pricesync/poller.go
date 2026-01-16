@@ -26,11 +26,15 @@ type TierConfig struct {
 }
 
 // DefaultTierConfigs returns default tier configurations
+// Note: Rate limiting is 50ms per KIS API call
+// Tier0: 40 symbols × 50ms = 2s minimum, interval 3s (safe margin)
+// Tier1: 100 symbols × 50ms = 5s minimum, interval 10s (safe margin)
+// Tier2: 200 symbols × 50ms = 10s minimum, interval 30s (batch of 200, then next batch)
 func DefaultTierConfigs() map[Tier]TierConfig {
 	return map[Tier]TierConfig{
-		Tier0: {Interval: 2 * time.Second, MaxSize: 80}, // Increased to include WS backup
-		Tier1: {Interval: 10 * time.Second, MaxSize: 100},
-		Tier2: {Interval: 60 * time.Second, MaxSize: 1000},
+		Tier0: {Interval: 3 * time.Second, MaxSize: 40},   // High priority (holdings + closing)
+		Tier1: {Interval: 10 * time.Second, MaxSize: 100}, // Medium priority (watchlist)
+		Tier2: {Interval: 30 * time.Second, MaxSize: 200}, // Low priority (universe subset)
 	}
 }
 
@@ -129,12 +133,18 @@ func (p *RESTPoller) fetchTierPrices(tier Tier) {
 
 	// Try KIS first
 	ticks, err := p.kisClient.GetCurrentPrices(p.ctx, symbols)
-	if err != nil {
+
+	// Trigger Naver fallback if:
+	// 1. KIS returned an error, OR
+	// 2. KIS returned 0 ticks (partial failure - all individual calls failed)
+	needFallback := err != nil || len(ticks) == 0
+	if needFallback {
 		log.Warn().
 			Err(err).
 			Int("tier", int(tier)).
 			Int("symbol_count", len(symbols)).
-			Msg("KIS price fetch failed, trying Naver fallback")
+			Int("kis_ticks", len(ticks)).
+			Msg("KIS price fetch failed or returned 0 ticks, trying Naver fallback")
 
 		// Update statistics
 		p.statsMu.Lock()

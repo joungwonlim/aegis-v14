@@ -372,19 +372,22 @@ func (m *Manager) RefreshSubscriptions(ctx context.Context) error {
 	}
 
 	// 5. Update REST tiers
-	// IMPORTANT: WS symbols are also added to Tier0 as fallback
-	// This ensures price updates when WebSocket is unstable
+	// Strategy:
+	// - Tier0 (3s): High priority non-WS symbols only (holdings without WS, closing positions)
+	// - Tier1 (10s): WS backup + watchlist (WS symbols need backup but not ultra-fast)
+	// - Tier2 (30s): Universe / low priority symbols
 	if m.restPoller != nil {
-		// Combine WS symbols with Tier0 symbols for redundancy
-		allTier0Symbols := make([]string, 0, len(wsSymbols)+len(tier0Symbols))
-		allTier0Symbols = append(allTier0Symbols, wsSymbols...)
-		allTier0Symbols = append(allTier0Symbols, tier0Symbols...)
-
-		if err := m.restPoller.SetTierSymbols(Tier0, allTier0Symbols); err != nil {
+		// Tier0: Only non-WS high priority symbols
+		if err := m.restPoller.SetTierSymbols(Tier0, tier0Symbols); err != nil {
 			log.Error().Err(err).Msg("Failed to set Tier0 symbols")
 		}
 
-		if err := m.restPoller.SetTierSymbols(Tier1, tier1Symbols); err != nil {
+		// Tier1: WS symbols as backup + original tier1 symbols
+		// This provides redundancy at 10s interval (acceptable for WS backup)
+		allTier1Symbols := make([]string, 0, len(wsSymbols)+len(tier1Symbols))
+		allTier1Symbols = append(allTier1Symbols, wsSymbols...)
+		allTier1Symbols = append(allTier1Symbols, tier1Symbols...)
+		if err := m.restPoller.SetTierSymbols(Tier1, allTier1Symbols); err != nil {
 			log.Error().Err(err).Msg("Failed to set Tier1 symbols")
 		}
 
@@ -393,11 +396,11 @@ func (m *Manager) RefreshSubscriptions(ctx context.Context) error {
 		}
 
 		log.Info().
-			Int("tier0", len(allTier0Symbols)).
-			Int("tier0_ws_backup", len(wsSymbols)).
-			Int("tier1", len(tier1Symbols)).
+			Int("tier0", len(tier0Symbols)).
+			Int("tier1", len(allTier1Symbols)).
+			Int("tier1_ws_backup", len(wsSymbols)).
 			Int("tier2", len(tier2Symbols)).
-			Msg("REST tiers updated (WS symbols included in Tier0 as fallback)")
+			Msg("REST tiers updated (WS symbols in Tier1 as backup)")
 	}
 
 	log.Info().Msg("✅ Subscriptions refreshed successfully")

@@ -202,23 +202,39 @@ func convertToTick(symbol string, output CurrentPriceOutput) (*price.Tick, error
 
 // GetCurrentPrices fetches current prices for multiple symbols
 func (c *RESTClient) GetCurrentPrices(ctx context.Context, symbols []string) ([]*price.Tick, error) {
-	ticks := make([]*price.Tick, 0, len(symbols))
+	if len(symbols) == 0 {
+		return nil, nil
+	}
 
-	for _, symbol := range symbols {
+	ticks := make([]*price.Tick, 0, len(symbols))
+	var lastErr error
+	failCount := 0
+
+	for i, symbol := range symbols {
+		// Rate limiting FIRST (except for first request)
+		// KIS allows ~20 req/sec, so sleep 50ms between requests
+		// This prevents burst on failures
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ticks, ctx.Err()
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+
 		tick, err := c.GetCurrentPrice(ctx, symbol)
 		if err != nil {
-			// Log error but continue with other symbols
-			// TODO: add logging
+			failCount++
+			lastErr = err
+			// Continue to next symbol, but error is tracked
 			continue
 		}
 		ticks = append(ticks, tick)
+	}
 
-		// Rate limiting: KIS allows ~20 req/sec, so sleep 50ms between requests
-		select {
-		case <-ctx.Done():
-			return ticks, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
+	// Return error if ALL calls failed
+	if len(ticks) == 0 && failCount > 0 {
+		return nil, fmt.Errorf("all %d price fetches failed, last error: %w", failCount, lastErr)
 	}
 
 	return ticks, nil
