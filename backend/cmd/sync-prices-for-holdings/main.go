@@ -78,6 +78,7 @@ func main() {
 	intentRepo := exitpg.NewOrderIntentRepository(dbPool.Pool)
 	profileRepo := exitpg.NewExitProfileRepository(dbPool.Pool)
 	overrideRepo := exitpg.NewSymbolExitOverrideRepository(dbPool.Pool)
+	signalRepo := exitpg.NewExitSignalRepository(dbPool.Pool)
 
 	// Create default exit profile manually (repository schema mismatch workaround)
 	// Phase 1: 기관식 안정화 (confirm_ticks + fire_once + phase 분기)
@@ -127,6 +128,7 @@ func main() {
 		intentRepo,
 		profileRepo,
 		overrideRepo,
+		signalRepo,
 		priceSyncService,
 		defaultProfile,
 	)
