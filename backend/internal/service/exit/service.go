@@ -81,9 +81,6 @@ func (s *Service) Start(ctx context.Context) error {
 	// Start evaluation loop
 	go s.evaluationLoop()
 
-	// Start reconciliation loop (30초마다)
-	go s.reconciliationLoop()
-
 	log.Info().Msg("✅ Exit Service started")
 
 	return nil

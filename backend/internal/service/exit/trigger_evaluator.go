@@ -501,7 +501,7 @@ func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct, currentPrice de
 // evaluateTrailing evaluates trailing stop trigger
 // Phase 1: Phase별 분기 + 2틱 연속 확인 (confirm_ticks=2)
 // - TP2_DONE: 원본 20% 부분 트레일 (단발, fire_once)
-// - TRAIL_ACTIVE: 잔량 100% 전량 트레일
+// - TRAILING_ACTIVE: 잔량 100% 전량 트레일
 func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState, profile *exit.ExitProfile) *exit.ExitTrigger {
 	// Check if HWM is set
 	if state.HWMPrice == nil {
@@ -572,7 +572,7 @@ func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapsho
 					Int("trailing_breach_ticks", state.TrailingBreachTicks).
 					Msg("Trailing PARTIAL trigger hit (원본 기준, TP2 부분 트레일, confirmed)")
 			} else {
-				// TRAIL_ACTIVE: 잔량 전량
+				// TRAILING_ACTIVE: 잔량 전량
 				qty = snapshot.Qty
 				reasonCode = exit.ReasonTrail
 

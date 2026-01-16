@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	evaluationInterval     = 3 * time.Second  // 1~5초 권장
-	reconciliationInterval = 30 * time.Second // Intent 조정 주기
-	maxRetries             = 3                // 최대 재평가 횟수
-	freshnessThreshold     = 25 * time.Second // 가격 신선도 임계값 (REST Tier1=10초 × 2 + 5초 버퍼)
+	evaluationInterval = 3 * time.Second  // 1~5초 권장
+	maxRetries         = 3                // 최대 재평가 횟수
+	freshnessThreshold = 25 * time.Second // 가격 신선도 임계값 (REST Tier1=10초 × 2 + 5초 버퍼)
 )
 
 // evaluationLoop runs the main exit evaluation loop (1~5초 주기)
@@ -29,28 +28,6 @@ func (s *Service) evaluationLoop() {
 			// Evaluate all positions
 			if err := s.evaluateAllPositions(s.ctx); err != nil {
 				log.Error().Err(err).Msg("Exit evaluation failed")
-			}
-
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-
-// reconciliationLoop runs the intent reconciliation loop (30초 주기)
-func (s *Service) reconciliationLoop() {
-	ticker := time.NewTicker(reconciliationInterval)
-	defer ticker.Stop()
-
-	// Wait a bit before first run to let other services initialize
-	time.Sleep(10 * time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			// Reconcile intents with actual holdings/fills
-			if err := s.ReconcileIntents(s.ctx); err != nil {
-				log.Error().Err(err).Msg("Intent reconciliation failed")
 			}
 
 		case <-s.ctx.Done():
