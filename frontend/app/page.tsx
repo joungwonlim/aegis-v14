@@ -481,7 +481,6 @@ export default function RuntimeDashboard() {
                     const pnl = typeof holding.pnl === 'string' ? parseFloat(holding.pnl) : holding.pnl
                     const currentPrice = typeof holding.current_price === 'string' ? parseFloat(holding.current_price) : holding.current_price
                     const avgPrice = typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price
-                    const priceColor = pnl >= 0 ? '#EA5455' : '#2196F3'
 
                     return (
                       <TableRow key={`${holding.account_id}-${holding.symbol}`}>
@@ -498,7 +497,7 @@ export default function RuntimeDashboard() {
                             market={holding.raw?.market}
                           />
                         </TableCell>
-                        <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
                         <TableCell className="text-right font-mono">
                           <ChangeIndicator
                             changePrice={holding.change_price}

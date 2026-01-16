@@ -79,14 +79,27 @@ func (s *Service) ProcessTick(ctx context.Context, tick price.Tick) error {
 		return fmt.Errorf("best tick not found for symbol=%s source=%s", tick.Symbol, bestSource)
 	}
 
-	// 7. Update best price
+	// 7. Fix ChangePrice sign if inconsistent with ChangeRate
+	changePrice := bestTick.ChangePrice
+	changeRate := bestTick.ChangeRate
+
+	// Ensure ChangePrice and ChangeRate have consistent signs
+	if changePrice != nil && changeRate != nil {
+		if (*changeRate > 0 && *changePrice < 0) || (*changeRate < 0 && *changePrice > 0) {
+			// Signs are inconsistent - fix ChangePrice to match ChangeRate sign
+			correctedPrice := -*changePrice
+			changePrice = &correctedPrice
+		}
+	}
+
+	// 8. Update best price
 	bestPriceInput := price.UpsertBestPriceInput{
 		Symbol:      bestTick.Symbol,
 		BestPrice:   bestTick.LastPrice,
 		BestSource:  bestTick.Source,
 		BestTS:      bestTick.TS,
-		ChangePrice: bestTick.ChangePrice,
-		ChangeRate:  bestTick.ChangeRate,
+		ChangePrice: changePrice,
+		ChangeRate:  changeRate,
 		Volume:      bestTick.Volume,
 		BidPrice:    bestTick.BidPrice,
 		AskPrice:    bestTick.AskPrice,

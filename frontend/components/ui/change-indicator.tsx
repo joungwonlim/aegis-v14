@@ -38,10 +38,11 @@ export function ChangeIndicator({
   const price = changePrice ?? 0
   const rate = changeRate ?? 0
 
-  // 상승/하락/변동없음 판단
-  const isPositive = price > 0 || rate > 0
-  const isNegative = price < 0 || rate < 0
-  const isZero = price === 0 && rate === 0
+  // 상승/하락/변동없음 판단 (changeRate 우선, 없으면 changePrice 기준)
+  const changeValue = rate !== 0 ? rate : price
+  const isPositive = changeValue > 0
+  const isNegative = changeValue < 0
+  const isZero = changeValue === 0
 
   // 색상 결정
   const color = isPositive ? "#EA5455" : isNegative ? "#2196F3" : "#888888"
@@ -66,7 +67,7 @@ export function ChangeIndicator({
 
   return (
     <span className={className} style={{ color }}>
-      {arrow}{" "}
+      <span style={{ fontSize: '0.6em' }}>{arrow}</span>{" "}
       {showPrice && <>{formatNumber(price)}</>}
       {showPrice && showRate && " "}
       {showRate && <>({formatPercent(rate)})</>}
