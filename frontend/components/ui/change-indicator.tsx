@@ -65,8 +65,11 @@ export function ChangeIndicator({
     return <span className={cn("text-muted-foreground", className)}>-</span>
   }
 
+  // ±5% 이상이면 bold 처리
+  const isBold = Math.abs(rate) >= 5.0
+
   return (
-    <span className={className} style={{ color }}>
+    <span className={className} style={{ color, fontWeight: isBold ? 'bold' : 'normal' }}>
       <span style={{ fontSize: '0.6em' }}>{arrow}</span>{" "}
       {showPrice && <>{formatNumber(price)}</>}
       {showPrice && showRate && " "}
