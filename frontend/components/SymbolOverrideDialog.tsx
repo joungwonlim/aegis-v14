@@ -137,12 +137,62 @@ export function SymbolOverrideDialog({
     mutationFn: async ({ profileName, rules }: { profileName: string; rules: CustomExitRule[] }) => {
       const profileId = `custom_${symbol}_${Date.now()}`
 
-      // Create profile with custom rules
+      // Create profile with custom rules + minimal default config
       await createExitProfile({
         profile_id: profileId,
         name: profileName,
         description: `${symbolName || symbol} 맞춤형 전략`,
         config: {
+          atr: {
+            ref: 0.02,
+            factor_min: 0.7,
+            factor_max: 1.6,
+          },
+          sl1: {
+            base_pct: -0.05,
+            min_pct: -0.03,
+            max_pct: -0.08,
+            qty_pct: 0.5,
+          },
+          sl2: {
+            base_pct: -0.10,
+            min_pct: -0.08,
+            max_pct: -0.15,
+            qty_pct: 1.0,
+          },
+          tp1: {
+            base_pct: 0.05,
+            min_pct: 0.03,
+            max_pct: 0.10,
+            qty_pct: 0,
+            stop_floor_profit: 0.02,
+          },
+          tp2: {
+            base_pct: 0.10,
+            min_pct: 0.08,
+            max_pct: 0.15,
+            qty_pct: 0,
+          },
+          tp3: {
+            base_pct: 0.15,
+            min_pct: 0.12,
+            max_pct: 0.20,
+            qty_pct: 0,
+            start_trailing: false,
+          },
+          trailing: {
+            pct_trail: 0.04,
+            atr_k: 2.0,
+          },
+          time_stop: {
+            max_hold_days: 30,
+            no_momentum_days: 0,
+            no_momentum_profit: 0.02,
+          },
+          hardstop: {
+            enabled: false,
+            pct: -0.15,
+          },
           custom_rules: rules,
         },
       })
