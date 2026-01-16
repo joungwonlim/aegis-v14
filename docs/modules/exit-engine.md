@@ -29,7 +29,7 @@
 ### 이 모듈이 소유하는 것 (유일한 소유자)
 
 ✅ **데이터:**
-- `trade.positions` - 포지션 마스터
+- `trade.positions` (**컬럼 단위 소유**): `status`, `exit_mode`, `exit_profile_id` (전략 FSM 관련)
 - `trade.position_state` - Exit FSM 상태
 - `trade.exit_control` - 전역 제어 (킬 스위치)
 - `trade.exit_profiles` - Exit 룰 프로파일
@@ -252,15 +252,9 @@ WHERE position_id = $1;
 | cooldown_until | TIMESTAMPTZ | NULL | 재진입 쿨다운 (Exit 후) |
 | last_eval_ts | TIMESTAMPTZ | NULL | 마지막 평가 시각 |
 | last_avg_price | NUMERIC | NULL | 마지막 평단가 (추가매수 감지용) |
-| breach_ticks | INTEGER | NOT NULL DEFAULT 0 | **DEPRECATED** - 사용 안 함 |
 | stop_floor_breach_ticks | INTEGER | NOT NULL DEFAULT 0 | StopFloor 연속 breach 카운터 |
 | trailing_breach_ticks | INTEGER | NOT NULL DEFAULT 0 | Trailing 연속 breach 카운터 |
 | updated_ts | TIMESTAMPTZ | NOT NULL | 마지막 갱신 |
-
-**⚠️ breach_ticks 분리 이유:**
-- 기존 단일 `breach_ticks`는 StopFloor와 Trailing이 공유하여 오염 가능
-- 각각 독립 카운터로 분리하여 연속 조건 정확히 평가
-- 예: StopFloor 2틱 + Trailing 1틱 = 3틱 오작동 방지
 
 **FSM 상태:**
 
@@ -333,47 +327,56 @@ flowchart TD
 | **보수** | stale이면 청산도 보류 | 초기 운영 |
 | **리스크** | stale 지속(60s+) 시 강제 청산 | 안정화 후 |
 
-### 2. 트리거 우선순위
+### 2. 트리거 평가 우선순위 (Phase 기반)
 
-**우선순위 (높음 → 낮음):**
+**핵심 원칙**: 모든 Phase에서 안전장치(HARD_STOP, SL2)가 최우선으로 평가됩니다.
 
-```
-0. HARDSTOP (비상 손절) - 🚨 Control Mode 우회, 항상 최우선 평가
-1. SL2 (전량 손절) - 가장 위험
-2. SL1 (부분 손절)
-3. TP3 (익절 3단계)
-4. TP2 (익절 2단계)
-5. TP1 (익절 1단계)
-6. TRAIL (트레일링, TRAILING_ACTIVE 상태에서만)
-7. TIME EXIT (최대 보유기간)
-```
+#### Phase별 트리거 평가 순서
 
-**⚠️ HARDSTOP 특수 처리:**
-- HARDSTOP은 `PAUSE_ALL` 제어 모드를 우회합니다
-- 모든 다른 트리거보다 먼저 평가됩니다
-- 시스템 전체가 일시정지 상태여도 비상 손절은 작동합니다
+**OPEN (초기 포지션):**
+1. HARD_STOP (-3.0% 비상 손절) - 🚨 PAUSE_ALL 우회
+2. SL2 (-10.0% 전량 손절)
+3. SL1 (-5.0% 부분 손절)
+4. CUSTOM_RULES (사용자 정의 조건)
+5. TP1 (+5.0% 첫 익절)
+6. TIME_EXIT (최대 보유 기간)
 
-**트리거 체크 순서:**
+**TP1_DONE (첫 익절 완료):**
+1. HARD_STOP
+2. SL2
+3. STOP_FLOOR (본전 방어선 돌파)
+4. SL1
+5. CUSTOM_RULES
+6. TP2 (+10.0% 2단계 익절)
+7. TIME_EXIT
 
-```mermaid
-flowchart TD
-    A[Start] --> B{SL2 hit?}
-    B -->|yes| Z[Create SL2 intent]
-    B -->|no| C{SL1 hit?}
-    C -->|yes| Z
-    C -->|no| D{TP3 hit?}
-    D -->|yes| Z
-    D -->|no| E{TP2 hit?}
-    E -->|yes| Z
-    E -->|no| F{TP1 hit?}
-    F -->|yes| Z
-    F -->|no| G{phase=TRAILING?}
-    G -->|yes| H{TRAIL hit?}
-    H -->|yes| Z
-    G -->|no| I{TIME hit?}
-    I -->|yes| Z
-    I -->|no| J[No trigger]
-```
+**TP2_DONE (2단계 익절 완료):**
+1. HARD_STOP
+2. SL2
+3. STOP_FLOOR
+4. SL1
+5. CUSTOM_RULES
+6. TP3 (+15.0% 3단계 익절)
+7. TIME_EXIT
+
+**TP3_DONE (3단계 익절 완료):**
+1. HARD_STOP
+2. SL2
+3. STOP_FLOOR
+4. TRAILING 조건 충족 시 → TRAILING_ACTIVE 전이
+5. TIME_EXIT
+
+**TRAILING_ACTIVE (트레일링 중):**
+1. HARD_STOP
+2. SL2
+3. TRAILING (HWM - ATR×K 돌파)
+4. STOP_FLOOR (필요 시)
+5. TIME_EXIT
+
+**중요 사항:**
+- 한 평가 사이클당 하나의 트리거만 실행
+- Phase 전이 시 action_key 리셋으로 동일 트리거 재발동 가능
+- HARD_STOP은 모든 Control Mode를 우회하여 항상 작동
 
 ### 3. 멱등성 구현 (Idempotency)
 
@@ -440,60 +443,6 @@ WHERE p.position_id = ?
 GROUP BY p.qty;
 ```
 
-### 5. Intent Reconciliation (조정)
-
-**목적**: Intent 상태와 실제 체결 내역 불일치 방지
-
-**문제 상황 예시:**
-- 같은 포지션에 SL1, SL2가 각각 500주씩 Intent 생성됨
-- 실제로는 SL1만 체결되고 SL2는 미체결
-- UI에 중복 Intent 표시로 혼란 발생
-
-**Reconciliation Loop (30초 주기):**
-
-```mermaid
-flowchart TD
-    START[Start Reconciliation] --> LOAD[Load recent 500 intents]
-    LOAD --> GROUP[Group by position_id + reason_code]
-    GROUP --> CHECK{Duplicate found?}
-    CHECK -->|no| END[End]
-    CHECK -->|yes| CANCEL[Cancel older intents<br/>Keep most recent]
-    CANCEL --> LOG[Log: Cancelled duplicate intent]
-    LOG --> END
-```
-
-**구현 로직:**
-
-1. **중복 Intent 탐지:**
-   ```go
-   // position_id + reason_code로 그룹화
-   type intentKey struct {
-       positionID uuid.UUID
-       reasonCode string
-   }
-   ```
-
-2. **중복 제거 규칙:**
-   - 같은 position + reason으로 여러 Intent 발견 시
-   - created_ts 기준으로 정렬
-   - 가장 최근 것만 유지
-   - 나머지는 `status=CANCELLED`로 변경
-
-3. **실행 주기:**
-   - 30초마다 백그라운드 실행
-   - 첫 실행 전 10초 대기 (다른 서비스 초기화)
-   - 최근 500개 Intent만 검사 (성능 최적화)
-
-**효과:**
-- 중복 Intent 자동 정리
-- UI 혼란 방지
-- 데이터 일관성 유지
-
-**파일:**
-- `backend/internal/service/exit/reconciliation.go`
-- `backend/internal/service/exit/evaluator.go` (reconciliationLoop)
-
----
 
 ## 🎲 청산 룰 상세 설정
 
@@ -508,9 +457,12 @@ type ExitRulesConfig struct {
     GapDownPercent     float64  // -3.0% (장 시작 시 갭 기준)
     GapDownCheckWindow int      // 30초 (장 시작 후 체크 시간)
 
-    // 3. SCALE_OUT (단계적 익절)
-    ScaleOutLevels     []ScaleOutLevel
-    // 예: [{+10%, 50%}, {+18%, 20%}]
+    // 3. FIXED TP/SL (고정 익절/손절 - TP1/2/3, SL1/2)
+    TP1Percent         float64  // +5.0% (1차 익절)
+    TP2Percent         float64  // +10.0% (2차 익절)
+    TP3Percent         float64  // +15.0% (3차 익절)
+    SL1Percent         float64  // -5.0% (1차 손절)
+    SL2Percent         float64  // -10.0% (2차 손절)
 
     // 4. ATR_TRAILING (ATR 기반 트레일링)
     ATRPeriod          int      // 14일 (ATR 계산 기간)
@@ -530,11 +482,6 @@ type ExitRulesConfig struct {
 
     // 7. MANUAL (수동 청산)
     ManualEnabled      bool     // true (수동 청산 허용 여부)
-}
-
-type ScaleOutLevel struct {
-    ProfitPercent float64  // 수익률 조건
-    ExitPercent   float64  // 청산 비율
 }
 ```
 
@@ -579,35 +526,7 @@ if is_market_open() && time_since_open() <= config.GapDownCheckWindow {
 **주문 타입:** 시장가
 **체크 시점:** 장 시작 후 30초 이내
 
-### 3. SCALE_OUT (단계적 익절)
-
-**목적**: 수익 실현 + 추가 상승 기회 유지
-
-| 파라미터 | 기본값 | 설명 |
-|----------|--------|------|
-| ScaleOutLevels | [{+10%, 50%}, {+18%, 20%}] | 익절 단계 |
-
-**조건:**
-```go
-for level in config.ScaleOutLevels {
-    if current_pnl_pct >= level.ProfitPercent {
-        exit_qty := original_qty * level.ExitPercent
-        create_intent(f"SCALE_OUT_{level.ProfitPercent}",
-                     qty=exit_qty,
-                     order_type="LMT",
-                     limit_price=current_price * 0.998)  // 0.2% 슬리피지
-    }
-}
-```
-
-**수량 예시:**
-- Level 1 (+10%): 원본 수량의 50%
-- Level 2 (+18%): 원본 수량의 20%
-- 잔량 30%는 트레일링으로 전환
-
-**주문 타입:** 지정가 (0.2% 슬리피지 허용)
-
-### 4. ATR_TRAILING (ATR 기반 트레일링)
+### 3. ATR_TRAILING (ATR 기반 트레일링)
 
 **목적**: 추세 유지하며 수익 최대화
 
@@ -907,31 +826,6 @@ Tick 2: 수익률 -4.0%
 
 ---
 
-### Exit Rules 우선순위 (최종 정리)
-
-**평가 순서 (높음 → 낮음):**
-
-| 순위 | Rule | 조건 | 수량 | 타입 |
-|------|------|------|------|------|
-| 0 | HARD_STOP | <= -3.0% | 100% | MKT |
-| 1 | SL2 | <= -10.0% | 100% | MKT |
-| 2 | STOP_FLOOR | 보호가 하락 돌파 | 100% | MKT |
-| 3 | SL1 | <= -5.0% | 50% | MKT |
-| **3.5** | **CUSTOM_RULES** | **사용자 정의 조건** | **가변** | **MKT** |
-| 4 | TP1 | >= +5.0% | 보호가 설정 | - |
-| 5 | TP2 | >= +10.0% | 50% | LMT |
-| 6 | TP3 | >= +15.0% | 나머지 | LMT |
-| 7 | TRAILING | HWM - ATR×K | 100% | MKT |
-| 8 | TIME_EXIT | 보유 기간/수익률 조건 | 100% | MKT |
-| 9 | MANUAL | 사용자 요청 | 가변 | 가변 |
-
-**중요:**
-- 한 평가 사이클에 하나의 rule만 실행
-- 높은 우선순위 rule이 먼저 체크됨
-- Intent 생성 후 다음 사이클까지 대기
-
----
-
 ### A. Exit Evaluator Loop (1~5초) - 핵심 평가
 
 **목적**: **청산 트리거 판단 및 order_intents 생성 (최우선)**
@@ -1008,7 +902,7 @@ func EvaluateExitTriggers(ctx context.Context) {
 
 **데이터베이스 테이블**: `trade.exit_signals`
 
-Exit 트리거 평가 기록을 저장합니다. 각 룰(HARD_STOP, GAP_DOWN, SCALE_OUT 등)의 평가 결과와 트리거 여부를 기록하여 디버깅 및 백테스트에 활용합니다.
+Exit 트리거 평가 기록을 저장합니다. 각 룰(HARD_STOP, SL1/2, TP1/2/3, TRAILING 등)의 평가 결과와 트리거 여부를 기록하여 디버깅 및 백테스트에 활용합니다.
 
 **상세 스키마**: [schema.md](../database/schema.md#tradeexit_signals) 참고
 
@@ -2261,9 +2155,9 @@ stateDiagram-v2
     OPEN --> EXITED: SL1/SL2/TIME
     TP1_DONE --> TP2_DONE: TP2 hit
     TP1_DONE --> EXITED: Stop Floor hit
-    TP2_DONE --> TRAIL_ACTIVE: TP3 hit or conditions
+    TP2_DONE --> TRAILING_ACTIVE: TP3 hit or conditions
     TP2_DONE --> EXITED: Stop Floor hit
-    TRAIL_ACTIVE --> EXITED: Trailing stop hit
+    TRAILING_ACTIVE --> EXITED: Trailing stop hit
     EXITED --> [*]
 ```
 
@@ -2301,7 +2195,7 @@ if price <= stop_floor_price:
 
 ### 5. Trailing Stop (수익 극대화)
 
-**TRAIL_ACTIVE 상태에서만 평가**:
+**TRAILING_ACTIVE 상태에서만 평가**:
 
 ```python
 # HWM(최고가) 갱신
@@ -2616,51 +2510,7 @@ symbol_overrides:
   "207940": custom_conservative_v1  # 삼성바이오로직스
 ```
 
-### 11. 트리거 우선순위 (재확인)
-
-Control Gate 통과 후, 다음 우선순위로 트리거 평가:
-
-1. **HardStop** (최우선, PAUSE_ALL에서도 작동)
-2. **SL2** (전량 손절)
-3. **Stop Floor** (TP1 이후 본전 방어)
-4. **SL1** (부분 손절)
-5. **Trailing Stop** (TRAIL_ACTIVE 상태에서만)
-6. **TP3** (고수익 구간)
-7. **TP2**
-8. **TP1**
-9. **Time Stop** (최후 방어선)
-
-### 12. 멱등성 (action_key 규약)
-
-**형식**: `{position_id}:{phase}:{reason_code}`
-
-각 트리거는 포지션의 Phase당 1회만 발화:
-
-```
-{position_id}:OPEN:SL1
-{position_id}:OPEN:SL2
-{position_id}:OPEN:TP1
-{position_id}:TP1_DONE:TP2
-{position_id}:TP2_DONE:TP3
-{position_id}:TP2_DONE:TRAIL_PARTIAL
-{position_id}:TP3_DONE:TRAIL
-{position_id}:TP1_DONE:STOP_FLOOR
-{position_id}:OPEN:TIME
-{position_id}:OPEN:HARDSTOP
-```
-
-**Phase 포함 이유**:
-- 평단가 리셋 시 Phase가 OPEN으로 돌아가면 같은 reason_code도 재발동 가능
-- 예: TP1 체결 → 추가매수 → Phase=OPEN → `...:OPEN:TP1` (새 키 생성)
-
-DB UNIQUE constraint로 강제:
-```sql
-CREATE UNIQUE INDEX uq_order_intents_action_key ON trade.order_intents (action_key);
-```
-
----
-
-### 4. 실시간 갱신 (LISTEN/NOTIFY)
+### 11. 실시간 갱신 (LISTEN/NOTIFY)
 
 프로파일/오버라이드 변경 시 Exit Engine에 즉시 반영:
 
