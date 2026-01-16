@@ -473,6 +473,17 @@ export default function RuntimeDashboard() {
                 </TableHead>
                 <TableHead
                   className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('pnl_pct')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    전일대비
+                    {sortField === 'pnl_pct' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
                   onClick={() => handleSort('eval_amount')}
                 >
                   <div className="flex items-center justify-end gap-1">
@@ -509,7 +520,7 @@ export default function RuntimeDashboard() {
             <TableBody>
               {holdings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     보유종목이 없습니다
                   </TableCell>
                 </TableRow>
@@ -548,6 +559,7 @@ export default function RuntimeDashboard() {
                         <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(avgPrice, 0)}</TableCell>
                         <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{weight.toFixed(1)}%</TableCell>
@@ -561,6 +573,7 @@ export default function RuntimeDashboard() {
                     <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(totals.qty)}</TableCell>
                     <TableCell className="text-right font-mono">{formatPnL(totals.pnl)}</TableCell>
                     <TableCell className="text-right font-mono">{formatPercent(totalPnlPct)}</TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
