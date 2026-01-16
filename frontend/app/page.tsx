@@ -1189,7 +1189,93 @@ export default function RuntimeDashboard() {
               <div className="font-semibold text-sm text-muted-foreground">운영 원칙</div>
               <div className="ml-4 space-y-1 text-sm text-muted-foreground">
                 <div>• 3초마다 OPEN 포지션 평가 (10초 초과 가격 데이터 사용 금지)</div>
-                <div>• 우선순위: SL2 → Stop Floor → SL1 → TP3 → TP2 → TP1 → Trailing</div>
+                <div>• 우선순위: <span className="font-semibold text-red-600 dark:text-red-400">HARDSTOP (0번)</span> → SL2 → Stop Floor → SL1 → TP3 → TP2 → TP1 → Trailing</div>
+              </div>
+            </div>
+
+            {/* v14 개선사항 */}
+            <div className="space-y-3 pt-4 border-t border-border">
+              <div className="font-semibold text-base flex items-center gap-2">
+                <span className="text-blue-600 dark:text-blue-400">🚀 v14 핵심 개선사항</span>
+              </div>
+
+              {/* HARDSTOP */}
+              <div className="space-y-2 border-l-4 border-red-500 pl-4 bg-red-50 dark:bg-red-950/20 p-3 rounded-r">
+                <div className="font-semibold text-sm flex items-center gap-2">
+                  <span className="text-red-600 dark:text-red-400">🚨 HARDSTOP (비상 손절)</span>
+                </div>
+                <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                  <div>• <span className="font-semibold text-foreground">우선순위 0번</span> - 모든 트리거보다 먼저 평가</div>
+                  <div>• <span className="font-semibold text-red-600 dark:text-red-400">PAUSE_ALL 모드에서도 작동</span> (제어 모드 우회)</div>
+                  <div>• 기본값: -10% (설정 가능)</div>
+                  <div className="text-xs mt-2 p-2 bg-muted rounded">
+                    ※ 시스템 전체가 일시정지 상태여도 비상 손절은 계속 작동하여 큰 손실 방지
+                  </div>
+                </div>
+              </div>
+
+              {/* action_key Phase 포함 */}
+              <div className="space-y-2">
+                <div className="font-semibold text-sm">📋 action_key Phase 포함</div>
+                <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                  <div>• 형식: <code className="bg-muted px-1 rounded text-xs">{'{'}position_id{'}'}:{'{'}phase{'}'}:{'{'}reason_code{'}'}</code></div>
+                  <div>• 예시: <code className="bg-muted px-1 rounded text-xs">abc-123:OPEN:TP1</code></div>
+                  <div>• <span className="font-semibold text-foreground">평단가 리셋 후 재발동 가능</span></div>
+                  <div className="text-xs mt-2 p-2 bg-muted rounded">
+                    ※ 추가매수로 Phase=OPEN 리셋 시 동일 트리거 재평가 가능 (TP1 → 추가매수 → TP1 재발동)
+                  </div>
+                </div>
+              </div>
+
+              {/* breach_ticks 분리 */}
+              <div className="space-y-2">
+                <div className="font-semibold text-sm">🎯 breach_ticks 독립화</div>
+                <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                  <div>• StopFloor 전용 카운터: <code className="bg-muted px-1 rounded text-xs">stop_floor_breach_ticks</code></div>
+                  <div>• Trailing 전용 카운터: <code className="bg-muted px-1 rounded text-xs">trailing_breach_ticks</code></div>
+                  <div>• <span className="font-semibold text-foreground">연속 조건 오염 방지</span></div>
+                  <div className="text-xs mt-2 p-2 bg-muted rounded">
+                    ※ 각 트리거가 독립 카운트하여 오작동 방지 (StopFloor 2틱 + Trailing 1틱 = 3틱 X)
+                  </div>
+                </div>
+              </div>
+
+              {/* 평단가 리셋 로직 */}
+              <div className="space-y-2">
+                <div className="font-semibold text-sm">💰 평단가 리셋 로직 개선</div>
+                <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                  <div>• <span className="font-semibold text-foreground">추가매수 (≥2%)</span>: Phase=OPEN 리셋, 모든 트리거 재평가</div>
+                  <div>• <span className="font-semibold text-foreground">부분체결 (0.5~2%)</span>: Phase 유지, State 보호</div>
+                  <div>• &lt;0.5%: 무시</div>
+                  <div className="text-xs mt-2 p-2 bg-muted rounded">
+                    ※ TP1 체결 후 일부 매도 시 StopFloor 유지 (기존: 손실 → v14: 유지 ✅)
+                  </div>
+                </div>
+              </div>
+
+              {/* ProfileResolver */}
+              <div className="space-y-2">
+                <div className="font-semibold text-sm">⚙️ ProfileResolver 3단계 우선순위</div>
+                <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                  <div>• <span className="font-semibold text-foreground">1순위: Position 설정</span> (positions.exit_profile_id)</div>
+                  <div>• <span className="font-semibold text-foreground">2순위: Symbol 설정</span> (symbol_exit_overrides)</div>
+                  <div>• <span className="font-semibold text-foreground">3순위: Default Profile</span></div>
+                  <div className="text-xs mt-2 p-2 bg-muted rounded">
+                    ※ 각 포지션/종목별 맞춤 Exit 규칙 적용 가능
+                  </div>
+                </div>
+              </div>
+
+              {/* Intent 상태 통일 */}
+              <div className="space-y-2">
+                <div className="font-semibold text-sm">🔄 Intent 상태 정의 통일</div>
+                <div className="ml-4 space-y-1 text-sm text-muted-foreground">
+                  <div>• 활성 상태: <code className="bg-muted px-1 rounded text-xs">NEW</code>, <code className="bg-muted px-1 rounded text-xs">PENDING_APPROVAL</code>, <code className="bg-muted px-1 rounded text-xs">ACK</code></div>
+                  <div>• <span className="font-semibold text-foreground">중복 검사 일관성</span> (Evaluator ↔ Reconciliation)</div>
+                  <div className="text-xs mt-2 p-2 bg-muted rounded">
+                    ※ 두 모듈에서 동일한 ActiveIntentStatuses 사용
+                  </div>
+                </div>
               </div>
             </div>
           </div>
