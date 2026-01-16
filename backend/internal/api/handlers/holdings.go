@@ -117,7 +117,7 @@ func (h *HoldingsHandler) UpdateExitMode(w http.ResponseWriter, r *http.Request)
 	// Update exit mode
 	if err := h.positionRepo.UpdateExitModeBySymbol(ctx, accountID, symbol, req.ExitMode); err != nil {
 		log.Error().Err(err).Str("account_id", accountID).Str("symbol", symbol).Msg("Failed to update exit mode")
-		http.Error(w, "Failed to update exit mode", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
