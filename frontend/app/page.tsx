@@ -10,8 +10,7 @@ import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/stock-detail-sheet'
 import { ChangeIndicator } from '@/components/ui/change-indicator'
 import { approveIntent, rejectIntent, updateExitMode, cancelKISOrder, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
-import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders, useExitProfiles, useSymbolOverride } from '@/hooks/useRuntimeData'
-import { SymbolOverrideDialog } from '@/components/SymbolOverrideDialog'
+import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders } from '@/hooks/useRuntimeData'
 import { toast } from 'sonner'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
@@ -34,17 +33,6 @@ export default function RuntimeDashboard() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc') // 내림차순 (높은 순)
   const [intentSortField, setIntentSortField] = useState<IntentSortField | null>(null)
   const [intentSortOrder, setIntentSortOrder] = useState<SortOrder>('desc')
-
-  // Symbol Override Dialog 상태
-  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false)
-  const [selectedSymbol, setSelectedSymbol] = useState<string>('')
-  const [selectedSymbolName, setSelectedSymbolName] = useState<string>('')
-
-  // Exit Profiles 조회
-  const { data: exitProfiles = [] } = useExitProfiles(true)
-
-  // 선택된 Symbol의 Override 조회
-  const { data: symbolOverride } = useSymbolOverride(selectedSymbol)
 
   // StockDetailSheet 훅
   const { selectedStock, isOpen: isStockDetailOpen, openStockDetail, handleOpenChange: handleStockDetailOpenChange } = useStockDetail()
@@ -553,13 +541,12 @@ export default function RuntimeDashboard() {
                     )}
                   </div>
                 </TableHead>
-                <TableHead className="text-center">설정</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {holdings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     보유종목이 없습니다
                   </TableCell>
                 </TableRow>
@@ -606,20 +593,6 @@ export default function RuntimeDashboard() {
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{weight.toFixed(1)}%</TableCell>
-                        <TableCell className="text-center">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedSymbol(holding.symbol)
-                              setSelectedSymbolName(symbolName)
-                              setOverrideDialogOpen(true)
-                            }}
-                            className="h-7 w-7 p-0"
-                          >
-                            ⚙️
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     )
                   })}
@@ -636,7 +609,6 @@ export default function RuntimeDashboard() {
                     <TableCell className="text-right font-mono">{formatNumber(totals.purchaseAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">100.0%</TableCell>
-                    <TableCell></TableCell>
                   </TableRow>
                 </>
               )}
@@ -1541,18 +1513,6 @@ export default function RuntimeDashboard() {
         unfilledOrders={kisUnfilledOrders}
         executedOrders={kisFilledOrders}
         totalEvaluation={totalEvaluation}
-        onExitModeToggle={handleExitModeToggle}
-      />
-
-      {/* Symbol Override Dialog - 종목별 Exit 전략 설정 */}
-      <SymbolOverrideDialog
-        open={overrideDialogOpen}
-        onOpenChange={setOverrideDialogOpen}
-        symbol={selectedSymbol}
-        symbolName={selectedSymbolName}
-        currentProfileId={symbolOverride?.profile_id}
-        profiles={exitProfiles}
-        holding={holdings.find(h => h.symbol === selectedSymbol)}
         onExitModeToggle={handleExitModeToggle}
       />
     </div>

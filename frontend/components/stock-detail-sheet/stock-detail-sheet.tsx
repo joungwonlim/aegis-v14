@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, TrendingUp, TrendingDown, ShoppingCart, DollarSign, Target, Brain, Package, Settings, Star, Bell, BarChart3, ExternalLink } from 'lucide-react'
+import { X, TrendingUp, TrendingDown, ShoppingCart, DollarSign, Target, Brain, Package, Settings, Star, Bell, BarChart3, ExternalLink, LogOut } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -25,6 +25,7 @@ import { useStockPrice } from './hooks/use-stock-price'
 import { HoldingTab } from './tabs/holding-tab'
 import { PriceTab } from './tabs/price-tab'
 import { OrderTab } from './tabs/order-tab'
+import { ExitTab } from './tabs/exit-tab'
 
 interface StockDetailSheetProps {
   stock: StockInfo | null
@@ -68,6 +69,7 @@ export function StockDetailSheet({
     { key: 'holding', label: '보유', icon: Package },
     { key: 'price', label: '시세', icon: TrendingUp },
     { key: 'order', label: '주문', icon: ShoppingCart },
+    { key: 'exit', label: 'Exit', icon: LogOut },
     // Phase 2에서 활성화
     // { key: 'investment', label: '투자지표', icon: DollarSign },
     // { key: 'consensus', label: '컨센서스', icon: Target },
@@ -191,7 +193,7 @@ export function StockDetailSheet({
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
                 <tab.icon className="h-4 w-4" />
@@ -226,6 +228,15 @@ export function StockDetailSheet({
               holding={holding}
               unfilledOrders={unfilledOrders}
               executedOrders={executedOrders}
+            />
+          </TabsContent>
+
+          <TabsContent value="exit" className="mt-4">
+            <ExitTab
+              symbol={stock.symbol}
+              symbolName={stock.symbolName}
+              holding={holding}
+              onExitModeToggle={(enabled) => holding && onExitModeToggle(holding, enabled)}
             />
           </TabsContent>
 
