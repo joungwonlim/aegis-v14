@@ -78,6 +78,12 @@ type HoldingRepository interface {
 
 	// GetAllHoldings retrieves all holdings (for monitoring)
 	GetAllHoldings(ctx context.Context) ([]*Holding, error)
+
+	// GetAllHoldingsIncludingZero retrieves all holdings including those with qty=0 (for sync comparison)
+	GetAllHoldingsIncludingZero(ctx context.Context, accountID string) ([]*Holding, error)
+
+	// SetHoldingQtyZero sets a holding's qty to 0 (for syncing with KIS)
+	SetHoldingQtyZero(ctx context.Context, accountID, symbol string) error
 }
 
 // ExitEventRepository manages exit event persistence

@@ -169,3 +169,71 @@ func (r *HoldingRepository) DeleteHolding(ctx context.Context, accountID, symbol
 
 	return nil
 }
+
+// GetAllHoldingsIncludingZero retrieves all holdings including those with qty=0 (for sync comparison)
+func (r *HoldingRepository) GetAllHoldingsIncludingZero(ctx context.Context, accountID string) ([]*execution.Holding, error) {
+	query := `
+		SELECT account_id, symbol, qty, avg_price, current_price, pnl, pnl_pct, updated_ts, raw
+		FROM trade.holdings
+		WHERE account_id = $1
+		ORDER BY symbol ASC
+	`
+
+	rows, err := r.db.Query(ctx, query, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("query all holdings (including zero): %w", err)
+	}
+	defer rows.Close()
+
+	var holdings []*execution.Holding
+	for rows.Next() {
+		var holding execution.Holding
+		var rawJSON []byte
+
+		err := rows.Scan(
+			&holding.AccountID,
+			&holding.Symbol,
+			&holding.Qty,
+			&holding.AvgPrice,
+			&holding.CurrentPrice,
+			&holding.Pnl,
+			&holding.PnlPct,
+			&holding.UpdatedTS,
+			&rawJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan holding: %w", err)
+		}
+
+		if len(rawJSON) > 0 {
+			if err := json.Unmarshal(rawJSON, &holding.Raw); err != nil {
+				return nil, fmt.Errorf("unmarshal raw: %w", err)
+			}
+		}
+
+		holdings = append(holdings, &holding)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return holdings, nil
+}
+
+// SetHoldingQtyZero sets a holding's qty to 0 (for syncing with KIS)
+func (r *HoldingRepository) SetHoldingQtyZero(ctx context.Context, accountID, symbol string) error {
+	query := `
+		UPDATE trade.holdings
+		SET qty = 0,
+			updated_ts = NOW()
+		WHERE account_id = $1 AND symbol = $2
+	`
+
+	_, err := r.db.Exec(ctx, query, accountID, symbol)
+	if err != nil {
+		return fmt.Errorf("set holding qty zero: %w", err)
+	}
+
+	return nil
+}
