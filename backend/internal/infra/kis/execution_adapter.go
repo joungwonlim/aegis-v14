@@ -80,11 +80,13 @@ func (a *ExecutionAdapter) GetHoldings(ctx context.Context, accountID string) ([
 			continue // Skip zero holdings
 		}
 
-		// Parse avg price
-		avgPrice, err := decimal.NewFromString(h.AvgPurchasePrice)
+		// Calculate actual avg price (including fees) = purchase_amount / qty
+		// This matches HTS display (pchs_amt / hldg_qty)
+		purchaseAmount, err := decimal.NewFromString(h.PurchaseAmount)
 		if err != nil {
 			continue
 		}
+		avgPrice := purchaseAmount.Div(decimal.NewFromInt(qty))
 
 		// Parse current price
 		currentPrice, err := decimal.NewFromString(h.CurrentPrice)
