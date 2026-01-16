@@ -417,6 +417,28 @@ export default function RuntimeDashboard() {
                 </TableHead>
                 <TableHead
                   className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('current_price')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    현재가
+                    {sortField === 'current_price' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('pnl_pct')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    전일대비
+                    {sortField === 'pnl_pct' && (
+                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-muted/50"
                   onClick={() => handleSort('qty')}
                 >
                   <div className="flex items-center justify-end gap-1">
@@ -456,28 +478,6 @@ export default function RuntimeDashboard() {
                   <div className="flex items-center justify-end gap-1">
                     매입단가
                     {sortField === 'avg_price' && (
-                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('current_price')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    현재가
-                    {sortField === 'current_price' && (
-                      <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('pnl_pct')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    전일대비
-                    {sortField === 'pnl_pct' && (
                       <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
@@ -553,13 +553,13 @@ export default function RuntimeDashboard() {
                             market={holding.raw?.market}
                           />
                         </TableCell>
+                        <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(holding.qty)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPnL(pnl)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(avgPrice, 0)}</TableCell>
-                        <TableCell className="text-right font-mono" style={{ color: priceColor }}>{formatNumber(currentPrice, 0)}</TableCell>
-                        <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{weight.toFixed(1)}%</TableCell>
@@ -569,12 +569,12 @@ export default function RuntimeDashboard() {
                   {/* 합계 행 */}
                   <TableRow className="font-semibold bg-muted/30">
                     <TableCell className="font-bold">합계</TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right font-mono">{formatPercent(totalPnlPct)}</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.qty)}</TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">{formatNumber(totals.qty)}</TableCell>
                     <TableCell className="text-right font-mono">{formatPnL(totals.pnl)}</TableCell>
                     <TableCell className="text-right font-mono">{formatPercent(totalPnlPct)}</TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.purchaseAmount, 0)}</TableCell>
