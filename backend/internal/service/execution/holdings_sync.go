@@ -2,7 +2,9 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,6 +56,34 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 			log.Error().Err(err).Str("symbol", kh.Symbol).Msg("Failed to upsert holding")
 			continue
 		}
+
+		// Auto-create Position if it doesn't exist (for new holdings)
+		// This ensures all holdings have corresponding positions for Exit Engine evaluation
+		_, err = s.positionRepo.GetPositionBySymbol(ctx, kh.AccountID, kh.Symbol, "OPEN")
+		if err != nil {
+			// Check if it's a "position not found" error (wrapped or direct)
+			if errors.Is(err, execution.ErrPositionNotFound) || strings.Contains(err.Error(), "position not found") {
+				// Position doesn't exist → create it with default exit_mode=ENABLED
+				if err := s.exitPositionRepo.UpdateExitModeBySymbol(ctx, kh.AccountID, kh.Symbol, "ENABLED"); err != nil {
+					log.Warn().
+						Err(err).
+						Str("symbol", kh.Symbol).
+						Msg("Failed to auto-create position for new holding")
+					// Don't fail sync, just log warning
+				} else {
+					log.Info().
+						Str("symbol", kh.Symbol).
+						Msg("Auto-created position for new holding")
+				}
+			} else {
+				// Other error (DB issue, etc.)
+				log.Warn().
+					Err(err).
+					Str("symbol", kh.Symbol).
+					Msg("Failed to check position existence")
+			}
+		}
+		// If position exists, do nothing (preserve user's exit_mode setting)
 
 		kisSymbolSet[kh.Symbol] = true
 		currHoldings = append(currHoldings, holding)

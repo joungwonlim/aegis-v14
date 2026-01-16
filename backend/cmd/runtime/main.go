@@ -98,6 +98,30 @@ func main() {
 	log.Info().Msg("✅ PriceSync Manager started")
 
 	// ========================================
+	// 1.1. Subscribe to KIS Execution Notifications
+	// ========================================
+	// When execution notification is received, trigger immediate price-sync
+	kisClient.WS.SetExecutionHandler(func(exec kis.ExecutionNotification) {
+		log.Info().
+			Str("symbol", exec.Symbol).
+			Str("order_no", exec.OrderNo).
+			Str("side", exec.Side).
+			Int64("filled_qty", exec.FilledQty).
+			Int64("filled_price", exec.FilledPrice).
+			Msg("📣 Execution notification received - triggering price sync")
+
+		// Trigger immediate price sync for this symbol
+		priceSyncManager.TriggerRefresh(exec.Symbol)
+	})
+
+	// Subscribe to execution notifications for the account
+	if err := kisClient.WS.SubscribeExecution(accountID); err != nil {
+		log.Warn().Err(err).Msg("Failed to subscribe to execution notifications - will use polling instead")
+	} else {
+		log.Info().Str("account_id", accountID).Msg("✅ Subscribed to KIS execution notifications")
+	}
+
+	// ========================================
 	// 1.5. Initialize Holdings Sync Service
 	// ========================================
 	holdingsSync := NewHoldingsSyncService(
@@ -128,6 +152,7 @@ func main() {
 		exitEventRepo,
 		orderIntentRepo,
 		positionRepo,
+		positionRepo, // exitPositionRepo - for auto-creating positions from holdings
 		kisAdapter,
 		accountID,
 	)
@@ -245,8 +270,8 @@ func main() {
 	// 4. Initialize PriorityManager and Subscriptions
 	// ========================================
 	// Now that all repositories are ready, create PriorityManager
-	positionAdapter := NewPositionRepoAdapter(positionRepo, accountID)
-	orderAdapter := NewOrderRepoAdapter()
+	positionAdapter := NewPositionRepoAdapter(positionRepo, holdingRepo, accountID)
+	orderAdapter := NewOrderRepoAdapter(kisAdapter, accountID)
 	watchlistAdapter := NewWatchlistRepoAdapter()
 	systemAdapter := NewSystemRepoAdapter()
 

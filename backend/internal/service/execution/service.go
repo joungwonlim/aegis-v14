@@ -6,6 +6,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
+	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
 
 const (
@@ -21,12 +22,13 @@ type Service struct {
 	ctx context.Context
 
 	// Repositories
-	orderRepo     execution.OrderRepository
-	fillRepo      execution.FillRepository
-	holdingRepo   execution.HoldingRepository
-	exitEventRepo execution.ExitEventRepository
-	intentRepo    execution.IntentReader
-	positionRepo  execution.PositionReader
+	orderRepo         execution.OrderRepository
+	fillRepo          execution.FillRepository
+	holdingRepo       execution.HoldingRepository
+	exitEventRepo     execution.ExitEventRepository
+	intentRepo        execution.IntentReader
+	positionRepo      execution.PositionReader
+	exitPositionRepo  exit.PositionRepository // For auto-creating positions
 
 	// External adapters
 	kisAdapter execution.KISAdapter
@@ -47,20 +49,22 @@ func NewService(
 	exitEventRepo execution.ExitEventRepository,
 	intentRepo execution.IntentReader,
 	positionRepo execution.PositionReader,
+	exitPositionRepo exit.PositionRepository,
 	kisAdapter execution.KISAdapter,
 	accountID string,
 ) *Service {
 	return &Service{
-		ctx:           ctx,
-		orderRepo:     orderRepo,
-		fillRepo:      fillRepo,
-		holdingRepo:   holdingRepo,
-		exitEventRepo: exitEventRepo,
-		intentRepo:    intentRepo,
-		positionRepo:  positionRepo,
-		kisAdapter:    kisAdapter,
-		accountID:     accountID,
-		prevHoldings:  []*execution.Holding{},
+		ctx:              ctx,
+		orderRepo:        orderRepo,
+		fillRepo:         fillRepo,
+		holdingRepo:      holdingRepo,
+		exitEventRepo:    exitEventRepo,
+		intentRepo:       intentRepo,
+		positionRepo:     positionRepo,
+		exitPositionRepo: exitPositionRepo,
+		kisAdapter:       kisAdapter,
+		accountID:        accountID,
+		prevHoldings:     []*execution.Holding{},
 	}
 }
 
