@@ -357,6 +357,112 @@ export function ExitTab({
             <CustomRulesEditor onSave={handleCustomRulesSave} />
           </TabsContent>
         </Tabs>
+
+        {/* Exit 전략 요약 */}
+        <div className="mt-8 space-y-6 border-t pt-6">
+          <div className="text-lg font-semibold">Exit 전략 요약</div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* Strategy For Fall */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                <h3 className="font-semibold text-blue-600 dark:text-blue-400">Strategy For Fall</h3>
+              </div>
+              <div className="rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="px-3 py-2 text-left font-medium">트리거</th>
+                      <th className="px-3 py-2 text-left font-medium">조건</th>
+                      <th className="px-3 py-2 text-left font-medium">액션</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">HARDSTOP</td>
+                      <td className="px-3 py-2 text-muted-foreground">-10%</td>
+                      <td className="px-3 py-2 text-blue-600 dark:text-blue-400">전량 청산</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">SL2</td>
+                      <td className="px-3 py-2 text-muted-foreground">-5%</td>
+                      <td className="px-3 py-2 text-blue-600 dark:text-blue-400">잔량 100%</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">SL1</td>
+                      <td className="px-3 py-2 text-muted-foreground">-3%</td>
+                      <td className="px-3 py-2 text-blue-600 dark:text-blue-400">잔량 50%</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">Stop Floor</td>
+                      <td className="px-3 py-2 text-muted-foreground">본전+0.6%</td>
+                      <td className="px-3 py-2 text-blue-600 dark:text-blue-400">잔량 전량</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted-foreground px-1">
+                💡 Stop Floor는 TP1 체결 후 활성화
+              </p>
+            </div>
+
+            {/* Strategy For Rise */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-red-500"></div>
+                <h3 className="font-semibold text-red-600 dark:text-red-400">Strategy For Rise</h3>
+              </div>
+              <div className="rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="px-3 py-2 text-left font-medium">트리거</th>
+                      <th className="px-3 py-2 text-left font-medium">조건</th>
+                      <th className="px-3 py-2 text-left font-medium">액션</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">TP1</td>
+                      <td className="px-3 py-2 text-muted-foreground">+7%</td>
+                      <td className="px-3 py-2 text-red-600 dark:text-red-400">원본 10%</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">TP2</td>
+                      <td className="px-3 py-2 text-muted-foreground">+10%</td>
+                      <td className="px-3 py-2 text-red-600 dark:text-red-400">원본 20%</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">TP3</td>
+                      <td className="px-3 py-2 text-muted-foreground">+15%</td>
+                      <td className="px-3 py-2 text-red-600 dark:text-red-400">원본 30%</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">Trailing</td>
+                      <td className="px-3 py-2 text-muted-foreground">HWM -3%</td>
+                      <td className="px-3 py-2 text-red-600 dark:text-red-400">잔량 40%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted-foreground px-1">
+                💡 Trailing은 TP3 체결 후 잔량에 적용
+              </p>
+            </div>
+          </div>
+
+          {/* 추가 설명 */}
+          <div className="rounded-lg bg-muted/30 p-4 text-sm space-y-2">
+            <div className="font-medium">🎯 v14 핵심 특징</div>
+            <ul className="space-y-1 text-muted-foreground ml-4">
+              <li>• <span className="font-semibold text-foreground">원본 기준 익절</span>: TP1/2/3는 원본 수량 기준으로 계산 (합계 60%)</li>
+              <li>• <span className="font-semibold text-foreground">Stop Floor</span>: TP1 체결 즉시 본전+0.6% 보호 활성화</li>
+              <li>• <span className="font-semibold text-foreground">Trailing</span>: TP3 이후 잔량 40%는 HWM 대비 -3% 트레일링</li>
+              <li>• <span className="font-semibold text-foreground">HARDSTOP</span>: -10% 비상 손절 (PAUSE_ALL 우회)</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   )
