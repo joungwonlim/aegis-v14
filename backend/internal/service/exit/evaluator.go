@@ -137,6 +137,7 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 		AvgPrice:    pos.AvgPrice,
 		EntryTS:     pos.EntryTS,
 		Version:     pos.Version,
+		Phase:       "", // Will be set after state retrieval
 	}
 
 	// 2. Get position state (FSM)
@@ -144,6 +145,9 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 	if err != nil {
 		return fmt.Errorf("get state: %w", err)
 	}
+
+	// Set snapshot phase after state retrieval
+	snapshot.Phase = state.Phase
 
 	// 2.5. Check for 평단가 변경 (추가 매수 vs 부분체결/정정 구분)
 	if state.LastAvgPrice != nil {
@@ -173,6 +177,8 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 				if err != nil {
 					return fmt.Errorf("get state after reset: %w", err)
 				}
+				// Update snapshot phase after reset
+				snapshot.Phase = state.Phase
 			} else {
 				// 0.5~2% → 부분체결/정정 → State 유지, LastAvgPrice만 업데이트
 				log.Debug().
@@ -364,6 +370,7 @@ type PositionSnapshot struct {
 	AvgPrice    decimal.Decimal
 	EntryTS     time.Time
 	Version     int
+	Phase       string // FSM Phase (for action_key generation)
 }
 
 // createIntentWithVersionCheck creates an intent with version check (v10 방어)
@@ -419,7 +426,7 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 
 	// 6. Create intent (멱등) - PENDING_APPROVAL 상태로 생성 (사용자 승인 대기)
 	// action_key에 Phase 포함 → 평단가 리셋 후 재발동 가능
-	actionKey := fmt.Sprintf("%s:%s:%s", snapshot.PositionID.String(), state.Phase, trigger.ReasonCode)
+	actionKey := fmt.Sprintf("%s:%s:%s", snapshot.PositionID.String(), snapshot.Phase, trigger.ReasonCode)
 	intent := &exit.OrderIntent{
 		IntentID:   uuid.New(),
 		PositionID: snapshot.PositionID,
