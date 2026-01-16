@@ -396,8 +396,13 @@ func (c *WebSocketClient) handleMessages() {
 			log.Error().Err(err).Msg("[WS] Connection error, attempting reconnect...")
 
 			if reconnectErr := c.reconnect(); reconnectErr != nil {
-				log.Error().Err(reconnectErr).Msg("[WS] Reconnect failed, stopping message handler")
-				return
+				// ✅ Don't stop message handler - keep retrying in background
+				log.Error().
+					Err(reconnectErr).
+					Msg("[WS] Reconnect failed, will retry on next message attempt")
+
+				// Sleep before next attempt to avoid tight loop
+				time.Sleep(5 * time.Second)
 			}
 			continue
 		}
@@ -478,9 +483,10 @@ func (c *WebSocketClient) reconnect() error {
 	execAccountNo := c.execAccountNo
 	c.subMu.RUnlock()
 
-	backoff := 1 * time.Second
-	maxBackoff := 30 * time.Second
-	maxAttempts := 10
+	// ✅ More aggressive backoff strategy for better stability
+	backoff := 2 * time.Second       // Start with 2s (increased from 1s)
+	maxBackoff := 60 * time.Second   // Max 1 minute (increased from 30s)
+	maxAttempts := 20                // More attempts (increased from 10)
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		select {
@@ -522,8 +528,9 @@ func (c *WebSocketClient) reconnect() error {
 		c.isActive = true
 		c.connMu.Unlock()
 
-		// Wait for connection to stabilize before subscribing
-		time.Sleep(500 * time.Millisecond)
+		// ✅ Increased stabilization time (500ms → 2s) to prevent immediate disconnect
+		log.Debug().Msg("[WS] Waiting for connection to stabilize...")
+		time.Sleep(2 * time.Second)
 
 		// Restore subscriptions
 		restoredCount := 0
@@ -550,8 +557,8 @@ func (c *WebSocketClient) reconnect() error {
 				restoredCount++
 			}
 
-			// Small delay between subscriptions
-			time.Sleep(50 * time.Millisecond)
+			// ✅ Increased delay between subscriptions (50ms → 200ms) to reduce server load
+			time.Sleep(200 * time.Millisecond)
 		}
 
 		// Restore execution subscription if it was active
@@ -589,8 +596,17 @@ func (c *WebSocketClient) reconnect() error {
 			Bool("exec_subscribed", execSubscribed).
 			Msg("[WS] ✅ Reconnected and subscriptions restored")
 
+		// ✅ Additional stabilization period after full reconnection
+		log.Debug().Msg("[WS] Final stabilization period...")
+		time.Sleep(1 * time.Second)
+
 		return nil
 	}
+
+	// ⚠️ Max attempts reached - log error but don't kill the app
+	log.Error().
+		Int("max_attempts", maxAttempts).
+		Msg("[WS] Failed to reconnect after max attempts - connection remains closed")
 
 	return fmt.Errorf("failed to reconnect after %d attempts", maxAttempts)
 }

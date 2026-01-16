@@ -113,6 +113,16 @@ func (s *Service) reconcileFilledOrCancelledOrder(ctx context.Context, order *ex
 			Msg("Found fills for reconciled order")
 
 		for _, kf := range fills {
+			// ✅ Ensure order exists (should exist, but double-check)
+			if err := s.ensureOrderExists(ctx, kf.OrderID); err != nil {
+				log.Error().
+					Err(err).
+					Str("order_id", kf.OrderID).
+					Str("kis_exec_id", kf.ExecID).
+					Msg("Failed to ensure order exists during reconciliation")
+				continue
+			}
+
 			fill := &execution.Fill{
 				FillID:    kf.ExecID, // Use exec_id as fill_id for deduplication
 				OrderID:   kf.OrderID,

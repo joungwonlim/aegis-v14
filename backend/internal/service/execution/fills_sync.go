@@ -41,6 +41,16 @@ func (s *Service) syncFills(ctx context.Context) error {
 	// 3. Process fills
 	newCursor := *cursor
 	for _, kf := range kisFills {
+		// ✅ Ensure order exists before upserting fill (prevents FK constraint violation)
+		if err := s.ensureOrderExists(ctx, kf.OrderID); err != nil {
+			log.Error().
+				Err(err).
+				Str("order_id", kf.OrderID).
+				Str("kis_exec_id", kf.ExecID).
+				Msg("Failed to ensure order exists, skipping fill")
+			continue
+		}
+
 		// Upsert fill (idempotent by fill_id = kis_exec_id)
 		fill := &execution.Fill{
 			FillID:    uuid.New().String(), // Generate new UUID
@@ -162,4 +172,86 @@ func (s *Service) deriveOrderStatus(order *execution.Order) string {
 
 	// 5. Unknown state
 	return execution.OrderStatusUnknown
+}
+
+// ensureOrderExists checks if order exists in DB, if not fetches from KIS and creates it
+// This prevents FK constraint violations when fills arrive before order is synced
+func (s *Service) ensureOrderExists(ctx context.Context, orderID string) error {
+	// 1. Check if order already exists
+	_, err := s.orderRepo.GetOrder(ctx, orderID)
+	if err == nil {
+		return nil // Order exists
+	}
+
+	// 2. If not found, need to create it (fetch from KIS or create placeholder)
+	if err != execution.ErrOrderNotFound {
+		// Unexpected error
+		return fmt.Errorf("check order existence: %w", err)
+	}
+
+	// 3. Order not found - try to fetch from KIS unfilled orders
+	log.Info().
+		Str("order_id", orderID).
+		Msg("Order not in DB, attempting to fetch from KIS unfilled orders")
+
+	unfilledOrders, err := s.kisAdapter.GetUnfilledOrders(ctx, s.accountID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to fetch unfilled orders from KIS")
+		// Fall through to create placeholder
+	} else {
+		// Search for this order in unfilled list
+		for _, uo := range unfilledOrders {
+			if uo.OrderID == orderID {
+				// Found - create order
+				order := &execution.Order{
+					OrderID:      uo.OrderID,
+					IntentID:     uuid.UUID{}, // Unknown intent
+					SubmittedTS:  time.Now(),  // Approximate
+					Status:       execution.OrderStatusSubmitted,
+					BrokerStatus: uo.Status,
+					Qty:          uo.Qty,
+					OpenQty:      uo.OpenQty,
+					FilledQty:    uo.FilledQty,
+					Raw:          uo.Raw,
+					UpdatedTS:    time.Now(),
+				}
+
+				if err := s.orderRepo.UpsertOrder(ctx, order); err != nil {
+					return fmt.Errorf("upsert order from KIS: %w", err)
+				}
+
+				log.Info().
+					Str("order_id", orderID).
+					Msg("✅ Order synced from KIS unfilled orders")
+				return nil
+			}
+		}
+	}
+
+	// 4. Order not in unfilled list - create placeholder (likely already filled)
+	log.Info().
+		Str("order_id", orderID).
+		Msg("Order not in KIS unfilled list, creating placeholder (likely filled)")
+
+	placeholderOrder := &execution.Order{
+		OrderID:      orderID,
+		IntentID:     uuid.UUID{}, // Unknown
+		SubmittedTS:  time.Now().Add(-1 * time.Hour), // Approximate (past)
+		Status:       execution.OrderStatusUnknown,
+		BrokerStatus: "UNKNOWN",
+		Qty:          0, // Will be updated by fills
+		OpenQty:      0,
+		FilledQty:    0,
+		Raw:          map[string]interface{}{},
+		UpdatedTS:    time.Now(),
+	}
+
+	if err := s.orderRepo.UpsertOrder(ctx, placeholderOrder); err != nil {
+		return fmt.Errorf("create placeholder order: %w", err)
+	}
+
+	log.Info().
+		Str("order_id", orderID).
+		Msg("✅ Placeholder order created")
+	return nil
 }
