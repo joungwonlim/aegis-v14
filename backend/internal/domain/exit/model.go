@@ -128,6 +128,9 @@ type ExitProfileConfig struct {
 
 	// HardStop
 	HardStop HardStopConfig `json:"hardstop"`
+
+	// Custom Rules
+	CustomRules []CustomExitRule `json:"custom_rules,omitempty"`
 }
 
 type ATRConfig struct {
@@ -159,6 +162,17 @@ type TimeStopConfig struct {
 type HardStopConfig struct {
 	Enabled bool    `json:"enabled"` // Always on (even in PAUSE_ALL)
 	Pct     float64 `json:"pct"`     // HardStop % (e.g., -0.10 = -10%)
+}
+
+// CustomExitRule represents a user-defined exit condition
+type CustomExitRule struct {
+	ID          string  `json:"id"`           // UUID for frontend tracking
+	Enabled     bool    `json:"enabled"`      // On/Off toggle
+	Condition   string  `json:"condition"`    // "profit_above" | "profit_below"
+	Threshold   float64 `json:"threshold"`    // % threshold (e.g., 7.0 for +7%)
+	ExitPercent float64 `json:"exit_percent"` // % of position to exit (e.g., 20.0)
+	Priority    int     `json:"priority"`     // Evaluation order (0-indexed)
+	Description string  `json:"description"`  // Optional user note
 }
 
 // ====================
@@ -206,6 +220,7 @@ const (
 	ReasonManual        = "MANUAL"
 	ReasonHardStop      = "HARDSTOP"
 	ReasonStopFloor     = "STOP_FLOOR"
+	ReasonCustom        = "CUSTOM"         // Custom exit rules
 )
 
 // Intent Status

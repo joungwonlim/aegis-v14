@@ -161,6 +161,12 @@ func (s *Service) evaluateTriggers(
 		return trigger
 	}
 
+	// Priority 3.5: Custom Rules (user-defined exit conditions)
+	// Evaluated after SL (stop losses) but before TP (take profits)
+	if trigger := s.evaluateCustomRules(ctx, snapshot, pnlPct, profile); trigger != nil {
+		return trigger
+	}
+
 	// If PAUSE_PROFIT mode, block TP/TRAIL
 	if controlMode == exit.ControlModePauseProfit {
 		log.Debug().Str("symbol", snapshot.Symbol).Msg("PAUSE_PROFIT mode, blocking TP/TRAIL")
@@ -703,4 +709,116 @@ func (s *Service) evaluateHardStop(
 	}
 
 	return nil
+}
+
+// evaluateCustomRules evaluates custom exit rules defined by the user
+// Rules are evaluated in priority order (ascending)
+// Each rule can only be triggered once per position (via action_key)
+func (s *Service) evaluateCustomRules(
+	ctx context.Context,
+	snapshot PositionSnapshot,
+	pnlPct decimal.Decimal,
+	profile *exit.ExitProfile,
+) *exit.ExitTrigger {
+	// Check if custom rules exist
+	if len(profile.Config.CustomRules) == 0 {
+		return nil
+	}
+
+	// Sort by priority (ascending)
+	rules := sortCustomRulesByPriority(profile.Config.CustomRules)
+
+	for _, rule := range rules {
+		// Skip disabled rules
+		if !rule.Enabled {
+			continue
+		}
+
+		// Check if already executed (via action_key)
+		// action_key format: {position_id}:CUSTOM:{rule_id}
+		actionKey := snapshot.PositionID.String() + ":CUSTOM:" + rule.ID
+
+		// Check if active intent already exists for this rule
+		activeIntents, err := s.getActiveIntents(ctx, snapshot.PositionID)
+		if err != nil {
+			log.Error().Err(err).Str("symbol", snapshot.Symbol).Msg("Failed to get active intents")
+			continue
+		}
+
+		// Check if this rule already fired
+		alreadyFired := false
+		for _, intent := range activeIntents {
+			if intent.ActionKey == actionKey {
+				alreadyFired = true
+				break
+			}
+		}
+
+		if alreadyFired {
+			log.Debug().
+				Str("symbol", snapshot.Symbol).
+				Str("rule_id", rule.ID).
+				Msg("Custom rule already fired, skipping")
+			continue
+		}
+
+		// Evaluate condition
+		triggered := false
+		pnlPctFloat, _ := pnlPct.Float64()
+
+		switch rule.Condition {
+		case "profit_above":
+			triggered = pnlPctFloat >= rule.Threshold
+		case "profit_below":
+			triggered = pnlPctFloat <= rule.Threshold
+		}
+
+		if triggered {
+			// Calculate exit quantity
+			qty := int64(float64(snapshot.Qty) * rule.ExitPercent / 100.0)
+			if qty < 1 {
+				qty = 1
+			}
+			if qty > snapshot.Qty {
+				qty = snapshot.Qty
+			}
+
+			log.Info().
+				Str("symbol", snapshot.Symbol).
+				Str("rule_id", rule.ID).
+				Str("condition", rule.Condition).
+				Float64("threshold", rule.Threshold).
+				Float64("exit_percent", rule.ExitPercent).
+				Str("pnl_pct", pnlPct.StringFixed(2)).
+				Int64("qty", qty).
+				Str("description", rule.Description).
+				Msg("Custom rule triggered")
+
+			return &exit.ExitTrigger{
+				ReasonCode: exit.ReasonCustom,
+				Qty:        qty,
+				OrderType:  exit.OrderTypeMKT,
+			}
+		}
+	}
+
+	return nil
+}
+
+// sortCustomRulesByPriority sorts custom rules by priority (ascending)
+func sortCustomRulesByPriority(rules []exit.CustomExitRule) []exit.CustomExitRule {
+	// Make a copy to avoid modifying the original slice
+	sorted := make([]exit.CustomExitRule, len(rules))
+	copy(sorted, rules)
+
+	// Simple bubble sort (rules list is typically small)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := 0; j < len(sorted)-i-1; j++ {
+			if sorted[j].Priority > sorted[j+1].Priority {
+				sorted[j], sorted[j+1] = sorted[j+1], sorted[j]
+			}
+		}
+	}
+
+	return sorted
 }

@@ -311,3 +311,292 @@ export async function cancelKISOrder(orderNo: string): Promise<CancelOrderRespon
   const data: CancelOrderResponse = await response.json()
   return data
 }
+
+// =====================================
+// Exit Engine API
+// =====================================
+
+/**
+ * Exit Control
+ */
+export interface ExitControl {
+  mode: string // RUNNING, PAUSE_ALL, PAUSE_PROFIT, EMERGENCY_FLATTEN
+  reason?: string
+  updated_by: string
+  updated_ts: string
+}
+
+export async function getExitControl(): Promise<ExitControl> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/control`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get exit control: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export async function updateExitControl(mode: string, reason?: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/control`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      mode,
+      reason,
+      updated_by: 'web-ui',
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || response.statusText)
+  }
+}
+
+/**
+ * Exit Profiles
+ */
+export interface CustomExitRule {
+  id: string
+  enabled: boolean
+  condition: 'profit_above' | 'profit_below'
+  threshold: number
+  exit_percent: number
+  priority: number
+  description?: string
+}
+
+export interface ExitProfileConfig {
+  atr?: {
+    ref: number
+    factor_min: number
+    factor_max: number
+  }
+  sl1?: {
+    base_pct: number
+    min_pct: number
+    max_pct: number
+    qty_pct: number
+  }
+  sl2?: {
+    base_pct: number
+    min_pct: number
+    max_pct: number
+    qty_pct: number
+  }
+  tp1?: {
+    base_pct: number
+    min_pct: number
+    max_pct: number
+    qty_pct: number
+    stop_floor_profit: number
+  }
+  tp2?: {
+    base_pct: number
+    min_pct: number
+    max_pct: number
+    qty_pct: number
+  }
+  tp3?: {
+    base_pct: number
+    min_pct: number
+    max_pct: number
+    qty_pct: number
+    start_trailing: boolean
+  }
+  trailing?: {
+    pct_trail: number
+    atr_k: number
+  }
+  time_stop?: {
+    max_hold_days: number
+    no_momentum_days: number
+    no_momentum_profit: number
+  }
+  hardstop?: {
+    enabled: boolean
+    pct: number
+  }
+  custom_rules?: CustomExitRule[]
+}
+
+export interface ExitProfile {
+  profile_id: string
+  name: string
+  description: string
+  config: ExitProfileConfig
+  is_active: boolean
+  created_by: string
+  created_ts: string
+}
+
+export async function getExitProfiles(activeOnly: boolean = true): Promise<ExitProfile[]> {
+  const url = activeOnly
+    ? `${API_BASE_URL}/v1/exit/profiles?active_only=true`
+    : `${API_BASE_URL}/v1/exit/profiles`
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get exit profiles: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.profiles || []
+}
+
+export async function createExitProfile(profile: {
+  profile_id: string
+  name: string
+  description: string
+  config: ExitProfileConfig
+}): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/profiles`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ...profile,
+      created_by: 'web-ui',
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || response.statusText)
+  }
+}
+
+/**
+ * Symbol Exit Override
+ */
+export interface SymbolExitOverride {
+  symbol: string
+  profile_id: string
+  enabled: boolean
+  effective_from?: string
+  reason: string
+}
+
+export async function getSymbolOverride(symbol: string): Promise<SymbolExitOverride | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/overrides/${symbol}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (response.status === 404) {
+    return null // Override 없음
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to get symbol override: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export async function setSymbolOverride(
+  symbol: string,
+  profileId: string,
+  reason: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/overrides/${symbol}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      profile_id: profileId,
+      reason,
+      created_by: 'web-ui',
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || response.statusText)
+  }
+}
+
+export async function deleteSymbolOverride(symbol: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/overrides/${symbol}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok && response.status !== 404) {
+    const errorText = await response.text()
+    throw new Error(errorText || response.statusText)
+  }
+}
+
+/**
+ * Manual Exit
+ */
+export async function createManualExit(
+  positionId: string,
+  qty: number,
+  orderType: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/positions/${positionId}/manual`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      qty,
+      order_type: orderType,
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || response.statusText)
+  }
+}
+
+/**
+ * Position State
+ */
+export interface PositionState {
+  position_id: string
+  phase: string
+  hwm_price?: string
+  stop_floor_price?: string
+  atr?: string
+  cooldown_until?: string
+  last_eval_ts?: string
+  updated_ts: string
+}
+
+export async function getPositionState(positionId: string): Promise<PositionState> {
+  const response = await fetch(`${API_BASE_URL}/v1/exit/positions/${positionId}/state`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get position state: ${response.statusText}`)
+  }
+
+  return response.json()
+}
