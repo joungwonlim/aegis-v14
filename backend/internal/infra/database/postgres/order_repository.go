@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
@@ -39,9 +41,17 @@ func (r *OrderRepository) CreateOrder(ctx context.Context, order *execution.Orde
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
+	// ✅ Convert zero UUID to NULL to avoid FK constraint violation
+	var intentID interface{}
+	if order.IntentID == (uuid.UUID{}) {
+		intentID = nil // NULL
+	} else {
+		intentID = order.IntentID
+	}
+
 	_, err := r.pool.Exec(ctx, query,
 		order.OrderID,
-		order.IntentID,
+		intentID, // Use converted value
 		order.SubmittedTS,
 		order.Status,
 		order.BrokerStatus,
@@ -131,6 +141,9 @@ func (r *OrderRepository) GetOrderByIntentID(ctx context.Context, intentID uuid.
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, execution.ErrOrderNotFound
+		}
 		return nil, fmt.Errorf("get order by intent id: %w", err)
 	}
 
@@ -303,9 +316,17 @@ func (r *OrderRepository) UpsertOrder(ctx context.Context, order *execution.Orde
 			updated_ts = EXCLUDED.updated_ts
 	`
 
+	// ✅ Convert zero UUID to NULL to avoid FK constraint violation
+	var intentID interface{}
+	if order.IntentID == (uuid.UUID{}) {
+		intentID = nil // NULL
+	} else {
+		intentID = order.IntentID
+	}
+
 	_, err := r.pool.Exec(ctx, query,
 		order.OrderID,
-		order.IntentID,
+		intentID, // Use converted value
 		order.SubmittedTS,
 		order.Status,
 		order.BrokerStatus,
