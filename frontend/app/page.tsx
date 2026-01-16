@@ -17,7 +17,7 @@ type IntentSortField = 'symbol' | 'current_price' | 'order_price' | 'deviation' 
 type SortOrder = 'asc' | 'desc'
 
 export default function RuntimeDashboard() {
-  // React Query 훅으로 데이터 조회 (3초마다 자동 갱신)
+  // React Query 훅으로 데이터 조회 (1초마다 자동 갱신)
   const { data: holdings = [], isLoading: holdingsLoading, error: holdingsError, refetch: refetchHoldings } = useHoldings()
   const { data: intents = [], isLoading: intentsLoading, refetch: refetchIntents } = useOrderIntents()
   const { data: orders = [], isLoading: ordersLoading } = useOrders()
@@ -329,7 +329,7 @@ export default function RuntimeDashboard() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Aegis v14 Runtime Monitor</h1>
-          <p className="text-muted-foreground">실시간 트레이딩 엔진 모니터링 (3초 자동 갱신)</p>
+          <p className="text-muted-foreground">실시간 트레이딩 엔진 모니터링 (1초 자동 갱신)</p>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-muted-foreground">
@@ -450,22 +450,22 @@ export default function RuntimeDashboard() {
                 </TableHead>
                 <TableHead
                   className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('eval_amount')}
+                  onClick={() => handleSort('purchase_amount')}
                 >
                   <div className="flex items-center justify-end gap-1">
-                    평가금액
-                    {sortField === 'eval_amount' && (
+                    매입금액
+                    {sortField === 'purchase_amount' && (
                       <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
                 </TableHead>
                 <TableHead
                   className="text-right cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleSort('purchase_amount')}
+                  onClick={() => handleSort('eval_amount')}
                 >
                   <div className="flex items-center justify-end gap-1">
-                    매입금액
-                    {sortField === 'purchase_amount' && (
+                    평가금액
+                    {sortField === 'eval_amount' && (
                       <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
@@ -530,8 +530,8 @@ export default function RuntimeDashboard() {
                         <TableCell className="text-right font-mono">{formatPnL(pnl)}</TableCell>
                         <TableCell className="text-right font-mono">{formatPercent(holding.pnl_pct)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(avgPrice, 0)}</TableCell>
-                        <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(parseInt(purchaseAmount), 0)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatNumber(parseInt(evaluateAmount), 0)}</TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">{weight.toFixed(1)}%</TableCell>
                       </TableRow>
                     )
@@ -546,8 +546,8 @@ export default function RuntimeDashboard() {
                     <TableCell className="text-right font-mono">{formatPnL(totals.pnl)}</TableCell>
                     <TableCell className="text-right font-mono">{formatPercent(totalPnlPct)}</TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">-</TableCell>
-                    <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">{formatNumber(totals.purchaseAmount, 0)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatNumber(totals.evalAmount, 0)}</TableCell>
                     <TableCell className="text-right font-mono">100.0%</TableCell>
                   </TableRow>
                 </>
@@ -564,7 +564,7 @@ export default function RuntimeDashboard() {
             <div className="space-y-1.5">
               <CardTitle>🎯 Exit Engine - 청산 대상 종목 모니터링</CardTitle>
               <CardDescription>
-                Exit 규칙 평가 및 청산 주문 의도 ({intents.length}개)
+                Exit 규칙 평가 및 청산 주문 의도 ({intents.filter(i => holdings.some(h => h.symbol === i.symbol && h.qty > 0)).length}개)
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={() => setRulesDialogOpen(true)}>
@@ -651,14 +651,24 @@ export default function RuntimeDashboard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedIntents.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
-                    Order Intent가 없습니다
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sortedIntents.map((intent) => {
+              {(() => {
+                // 보유종목이 있는 intent만 표시 (매도 완료된 종목 제외)
+                const activeIntents = sortedIntents.filter(intent => {
+                  const holding = holdings.find(h => h.symbol === intent.symbol)
+                  return holding && holding.qty > 0
+                })
+
+                if (activeIntents.length === 0) {
+                  return (
+                    <TableRow>
+                      <TableCell colSpan={11} className="text-center text-muted-foreground">
+                        Order Intent가 없습니다
+                      </TableCell>
+                    </TableRow>
+                  )
+                }
+
+                return activeIntents.map((intent) => {
                   // holdings에서 현재가 정보 가져오기
                   const holding = holdings.find(h => h.symbol === intent.symbol)
                   const currentPrice = typeof holding?.current_price === 'string'
@@ -688,7 +698,12 @@ export default function RuntimeDashboard() {
                         />
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
-                      <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        <ChangeIndicator
+                          changePrice={holding?.change_price}
+                          changeRate={holding?.change_rate}
+                        />
+                      </TableCell>
                       <TableCell className="text-right font-mono text-muted-foreground">
                         {holding ? formatNumber(avgPrice, 0) : '-'}
                       </TableCell>
@@ -705,7 +720,7 @@ export default function RuntimeDashboard() {
                     </TableRow>
                   )
                 })
-              )}
+              })()}
             </TableBody>
           </Table>
         </CardContent>
@@ -716,7 +731,7 @@ export default function RuntimeDashboard() {
         <CardHeader>
           <CardTitle>📤 KIS Orders Execution</CardTitle>
           <CardDescription>
-            승인 대기 중인 Exit Intent ({sortedIntents.filter(i => i.status === 'PENDING_APPROVAL').length}개)
+            승인 대기 중인 Exit Intent ({sortedIntents.filter(i => (i.status === 'PENDING_APPROVAL') && holdings.some(h => h.symbol === i.symbol && h.qty > 0)).length}개)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -799,16 +814,24 @@ export default function RuntimeDashboard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedIntents.filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED').length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={12} className="text-center text-muted-foreground">
-                    승인 대기 중인 Intent가 없습니다
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sortedIntents
-                  .filter(i => i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED')
-                  .map((intent) => {
+              {(() => {
+                // 보유종목이 있고 승인 대기/진행 중인 intent만 표시
+                const pendingIntents = sortedIntents.filter(i =>
+                  (i.status === 'PENDING_APPROVAL' || i.status === 'NEW' || i.status === 'SUBMITTED') &&
+                  holdings.some(h => h.symbol === i.symbol && h.qty > 0)
+                )
+
+                if (pendingIntents.length === 0) {
+                  return (
+                    <TableRow>
+                      <TableCell colSpan={12} className="text-center text-muted-foreground">
+                        승인 대기 중인 Intent가 없습니다
+                      </TableCell>
+                    </TableRow>
+                  )
+                }
+
+                return pendingIntents.map((intent) => {
                     // holdings에서 현재가 정보 가져오기
                     const holding = holdings.find(h => h.symbol === intent.symbol)
                     const currentPrice = typeof holding?.current_price === 'string'
@@ -838,7 +861,12 @@ export default function RuntimeDashboard() {
                           />
                         </TableCell>
                         <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
-                        <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          <ChangeIndicator
+                            changePrice={holding?.change_price}
+                            changeRate={holding?.change_rate}
+                          />
+                        </TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">
                           {holding ? formatNumber(avgPrice, 0) : '-'}
                         </TableCell>
@@ -877,7 +905,7 @@ export default function RuntimeDashboard() {
                       </TableRow>
                     )
                   })
-              )}
+              })()}
             </TableBody>
           </Table>
         </CardContent>
@@ -961,7 +989,12 @@ export default function RuntimeDashboard() {
                         />
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
-                      <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        <ChangeIndicator
+                          changePrice={holding?.change_price}
+                          changeRate={holding?.change_rate}
+                        />
+                      </TableCell>
                       <TableCell className="text-center">
                         <Badge variant={isBuy ? 'default' : 'destructive'}>
                           {isBuy ? '매수' : '매도'}
@@ -1063,7 +1096,12 @@ export default function RuntimeDashboard() {
                         />
                       </TableCell>
                       <TableCell className="text-right font-mono">{formatNumber(currentPrice, 0)}</TableCell>
-                      <TableCell className="text-right font-mono">{formatPercent(pnlPct)}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        <ChangeIndicator
+                          changePrice={holding?.change_price}
+                          changeRate={holding?.change_rate}
+                        />
+                      </TableCell>
                       <TableCell className="text-center">
                         <Badge variant={isBuy ? 'default' : 'destructive'}>
                           {isBuy ? '매수' : '매도'}

@@ -28,7 +28,7 @@ const RUNTIME_KEYS = {
 }
 
 /**
- * Holdings 조회 (3초마다 자동 갱신)
+ * Holdings 조회 (1초마다 자동 갱신)
  */
 export function useHoldings() {
   return useQuery({
@@ -37,14 +37,14 @@ export function useHoldings() {
       const result = await getHoldings()
       return result || []
     },
-    staleTime: 1000, // 1초
-    refetchInterval: 3000, // 3초마다 갱신
+    staleTime: 500, // 0.5초
+    refetchInterval: 1000, // 1초마다 갱신
     placeholderData: (previousData) => previousData, // 이전 데이터 유지 (깜빡임 방지)
   })
 }
 
 /**
- * Order Intents 조회 (3초마다 자동 갱신)
+ * Order Intents 조회 (1초마다 자동 갱신)
  */
 export function useOrderIntents() {
   return useQuery({
@@ -53,14 +53,14 @@ export function useOrderIntents() {
       const result = await getOrderIntents()
       return result || []
     },
-    staleTime: 1000,
-    refetchInterval: 3000,
+    staleTime: 500,
+    refetchInterval: 1000,
     placeholderData: (previousData) => previousData,
   })
 }
 
 /**
- * Orders 조회 (3초마다 자동 갱신)
+ * Orders 조회 (1초마다 자동 갱신)
  */
 export function useOrders() {
   return useQuery({
@@ -69,14 +69,14 @@ export function useOrders() {
       const result = await getOrders()
       return result || []
     },
-    staleTime: 1000,
-    refetchInterval: 3000,
+    staleTime: 500,
+    refetchInterval: 1000,
     placeholderData: (previousData) => previousData,
   })
 }
 
 /**
- * Fills 조회 (3초마다 자동 갱신)
+ * Fills 조회 (1초마다 자동 갱신)
  */
 export function useFills() {
   return useQuery({
@@ -85,14 +85,14 @@ export function useFills() {
       const result = await getFills()
       return result || []
     },
-    staleTime: 1000,
-    refetchInterval: 3000,
+    staleTime: 500,
+    refetchInterval: 1000,
     placeholderData: (previousData) => previousData,
   })
 }
 
 /**
- * KIS 미체결 주문 조회 (3초마다 자동 갱신)
+ * KIS 미체결 주문 조회 (1초마다 자동 갱신)
  */
 export function useKISUnfilledOrders() {
   return useQuery({
@@ -101,14 +101,14 @@ export function useKISUnfilledOrders() {
       const result = await getKISUnfilledOrders()
       return result || []
     },
-    staleTime: 1000,
-    refetchInterval: 3000,
+    staleTime: 500,
+    refetchInterval: 1000,
     placeholderData: (previousData) => previousData,
   })
 }
 
 /**
- * KIS 체결 주문 조회 (3초마다 자동 갱신)
+ * KIS 체결 주문 조회 (1초마다 자동 갱신)
  */
 export function useKISFilledOrders() {
   return useQuery({
@@ -117,8 +117,8 @@ export function useKISFilledOrders() {
       const result = await getKISFilledOrders()
       return result || []
     },
-    staleTime: 1000,
-    refetchInterval: 3000,
+    staleTime: 500,
+    refetchInterval: 1000,
     placeholderData: (previousData) => previousData,
   })
 }
