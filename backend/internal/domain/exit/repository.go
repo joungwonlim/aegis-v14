@@ -28,6 +28,9 @@ type PositionRepository interface {
 	// UpdateExitModeBySymbol updates exit mode by account_id and symbol
 	UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string) error
 
+	// SyncQtyAndAvgPrice syncs position qty and avg_price from holdings (KIS source of truth)
+	SyncQtyAndAvgPrice(ctx context.Context, accountID string, symbol string, qty int64, avgPrice decimal.Decimal) error
+
 	// GetAvailableQty calculates available qty (position qty - locked qty from pending orders)
 	GetAvailableQty(ctx context.Context, positionID uuid.UUID) (int64, error)
 }

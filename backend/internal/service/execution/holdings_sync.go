@@ -57,33 +57,39 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 			continue
 		}
 
-		// Auto-create Position if it doesn't exist (for new holdings)
-		// This ensures all holdings have corresponding positions for Exit Engine evaluation
+		// Sync Position with KIS holding (source of truth)
+		// 1. Sync qty/avg_price for existing positions (OPEN or CLOSING)
+		// 2. Auto-create if position doesn't exist
+
+		// First, try to sync qty/avg_price (works for OPEN and CLOSING positions)
+		if err := s.exitPositionRepo.SyncQtyAndAvgPrice(ctx, kh.AccountID, kh.Symbol, kh.Qty, kh.AvgPrice); err != nil {
+			log.Warn().
+				Err(err).
+				Str("symbol", kh.Symbol).
+				Msg("Failed to sync position qty/avg_price")
+		}
+
+		// Then, check if position exists. If not, create it.
 		_, err = s.positionRepo.GetPositionBySymbol(ctx, kh.AccountID, kh.Symbol, "OPEN")
 		if err != nil {
-			// Check if it's a "position not found" error (wrapped or direct)
-			if errors.Is(err, execution.ErrPositionNotFound) || strings.Contains(err.Error(), "position not found") {
-				// Position doesn't exist → create it with default exit_mode=ENABLED
-				if err := s.exitPositionRepo.UpdateExitModeBySymbol(ctx, kh.AccountID, kh.Symbol, "ENABLED"); err != nil {
-					log.Warn().
-						Err(err).
-						Str("symbol", kh.Symbol).
-						Msg("Failed to auto-create position for new holding")
-					// Don't fail sync, just log warning
-				} else {
-					log.Info().
-						Str("symbol", kh.Symbol).
-						Msg("Auto-created position for new holding")
+			// Also check CLOSING status
+			_, err2 := s.positionRepo.GetPositionBySymbol(ctx, kh.AccountID, kh.Symbol, "CLOSING")
+			if err2 != nil {
+				// Neither OPEN nor CLOSING position exists → create new one
+				if errors.Is(err, execution.ErrPositionNotFound) || strings.Contains(err.Error(), "position not found") {
+					if err := s.exitPositionRepo.UpdateExitModeBySymbol(ctx, kh.AccountID, kh.Symbol, "ENABLED"); err != nil {
+						log.Warn().
+							Err(err).
+							Str("symbol", kh.Symbol).
+							Msg("Failed to auto-create position for new holding")
+					} else {
+						log.Info().
+							Str("symbol", kh.Symbol).
+							Msg("Auto-created position for new holding")
+					}
 				}
-			} else {
-				// Other error (DB issue, etc.)
-				log.Warn().
-					Err(err).
-					Str("symbol", kh.Symbol).
-					Msg("Failed to check position existence")
 			}
 		}
-		// If position exists, do nothing (preserve user's exit_mode setting)
 
 		kisSymbolSet[kh.Symbol] = true
 		currHoldings = append(currHoldings, holding)
@@ -97,21 +103,32 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 		log.Error().Err(err).Msg("Failed to load DB holdings for comparison")
 	} else {
 		for _, dbHolding := range dbHoldings {
-			if dbHolding.Qty > 0 && !kisSymbolSet[dbHolding.Symbol] {
-				// KIS에 없음 → 매도 완료 → qty=0 설정
-				err := s.holdingRepo.SetHoldingQtyZero(ctx, dbHolding.AccountID, dbHolding.Symbol)
-				if err != nil {
-					log.Error().
-						Err(err).
+			if !kisSymbolSet[dbHolding.Symbol] {
+				// KIS에 없음 → 매도 완료된 종목
+				if dbHolding.Qty > 0 {
+					// Holding qty를 0으로 설정
+					err := s.holdingRepo.SetHoldingQtyZero(ctx, dbHolding.AccountID, dbHolding.Symbol)
+					if err != nil {
+						log.Error().
+							Err(err).
+							Str("symbol", dbHolding.Symbol).
+							Msg("Failed to set holding qty to zero")
+						continue
+					}
+
+					log.Info().
 						Str("symbol", dbHolding.Symbol).
-						Msg("Failed to set holding qty to zero")
-					continue
+						Int64("prev_qty", dbHolding.Qty).
+						Msg("Holding cleared (not in KIS response)")
 				}
 
-				log.Info().
-					Str("symbol", dbHolding.Symbol).
-					Int64("prev_qty", dbHolding.Qty).
-					Msg("Holding cleared (not in KIS response)")
+				// Position qty도 0으로 동기화 (이미 0인 holding도 처리)
+				if err := s.exitPositionRepo.SyncQtyAndAvgPrice(ctx, dbHolding.AccountID, dbHolding.Symbol, 0, dbHolding.AvgPrice); err != nil {
+					log.Warn().
+						Err(err).
+						Str("symbol", dbHolding.Symbol).
+						Msg("Failed to sync position qty to zero")
+				}
 
 				// Add to currHoldings with qty=0 for ExitEvent detection
 				clearedHolding := &execution.Holding{

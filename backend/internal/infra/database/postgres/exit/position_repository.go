@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
 
@@ -284,6 +285,33 @@ func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, account
 
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("holding not found for account_id=%s symbol=%s", accountID, symbol)
+	}
+
+	return nil
+}
+
+// SyncQtyAndAvgPrice syncs position qty and avg_price from holdings (KIS source of truth)
+// Only updates OPEN or CLOSING positions (not CLOSED)
+func (r *PositionRepository) SyncQtyAndAvgPrice(ctx context.Context, accountID string, symbol string, qty int64, avgPrice decimal.Decimal) error {
+	query := `
+		UPDATE trade.positions
+		SET
+			qty = $1,
+			avg_price = $2,
+			updated_ts = NOW()
+		WHERE account_id = $3
+		  AND symbol = $4
+		  AND status IN ('OPEN', 'CLOSING')
+	`
+
+	result, err := r.pool.Exec(ctx, query, qty, avgPrice, accountID, symbol)
+	if err != nil {
+		return fmt.Errorf("sync qty and avg_price: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		// Position doesn't exist or is CLOSED - no action needed
+		return nil
 	}
 
 	return nil
