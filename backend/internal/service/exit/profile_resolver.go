@@ -7,6 +7,11 @@ import (
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
 
+const (
+	// dummyProfileID는 기존 포지션의 더미 값으로, 무시해야 함
+	dummyProfileID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+)
+
 // resolveExitProfile resolves exit profile using priority:
 // 1. Position override (position.exit_profile_id)
 // 2. Symbol override (symbol_exit_overrides.profile_id)
@@ -14,7 +19,8 @@ import (
 // 4. Default profile
 func (s *Service) resolveExitProfile(ctx context.Context, pos *exit.Position) *exit.ExitProfile {
 	// 1. Position override (최우선)
-	if pos.ExitProfileID != nil && *pos.ExitProfileID != "" {
+	// 더미 UUID는 무시 (기존 포지션의 placeholder 값)
+	if pos.ExitProfileID != nil && *pos.ExitProfileID != "" && *pos.ExitProfileID != dummyProfileID {
 		profile, err := s.profileRepo.GetProfile(ctx, *pos.ExitProfileID)
 		if err == nil && profile != nil && profile.IsActive {
 			log.Debug().
