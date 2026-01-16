@@ -2,6 +2,7 @@ package exit
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
@@ -143,6 +144,15 @@ func (s *Service) CreateManualIntent(ctx context.Context, positionID uuid.UUID, 
 		qty = availableQty
 	}
 
+	// Get state for Phase (action_key에 Phase 포함)
+	state, err := s.stateRepo.GetState(ctx, positionID)
+	if err != nil {
+		return err
+	}
+
+	// action_key에 Phase 포함 (형식: {position_id}:{phase}:{reason_code})
+	actionKey := fmt.Sprintf("%s:%s:%s", positionID.String(), state.Phase, exit.ReasonManual)
+
 	// Create intent
 	intent := &exit.OrderIntent{
 		IntentID:   uuid.New(),
@@ -152,7 +162,7 @@ func (s *Service) CreateManualIntent(ctx context.Context, positionID uuid.UUID, 
 		Qty:        qty,
 		OrderType:  orderType,
 		ReasonCode: exit.ReasonManual,
-		ActionKey:  positionID.String() + ":MANUAL",
+		ActionKey:  actionKey,
 		Status:     exit.IntentStatusNew,
 	}
 

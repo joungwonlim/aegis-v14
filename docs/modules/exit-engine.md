@@ -2458,19 +2458,26 @@ Control Gate 통과 후, 다음 우선순위로 트리거 평가:
 
 ### 12. 멱등성 (action_key 규약)
 
-각 트리거는 포지션당 1회만 발화:
+**형식**: `{position_id}:{phase}:{reason_code}`
+
+각 트리거는 포지션의 Phase당 1회만 발화:
 
 ```
-{position_id}:SL1
-{position_id}:SL2
-{position_id}:TP1
-{position_id}:TP2
-{position_id}:TP3
-{position_id}:TRAIL
-{position_id}:STOP_FLOOR
-{position_id}:TIME
-{position_id}:HARDSTOP
+{position_id}:OPEN:SL1
+{position_id}:OPEN:SL2
+{position_id}:OPEN:TP1
+{position_id}:TP1_DONE:TP2
+{position_id}:TP2_DONE:TP3
+{position_id}:TP2_DONE:TRAIL_PARTIAL
+{position_id}:TP3_DONE:TRAIL
+{position_id}:TP1_DONE:STOP_FLOOR
+{position_id}:OPEN:TIME
+{position_id}:OPEN:HARDSTOP
 ```
+
+**Phase 포함 이유**:
+- 평단가 리셋 시 Phase가 OPEN으로 돌아가면 같은 reason_code도 재발동 가능
+- 예: TP1 체결 → 추가매수 → Phase=OPEN → `...:OPEN:TP1` (새 키 생성)
 
 DB UNIQUE constraint로 강제:
 ```sql
