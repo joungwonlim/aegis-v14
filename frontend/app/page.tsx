@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail, type StockInfo } from '@/components/stock-detail-sheet'
 import { ChangeIndicator } from '@/components/ui/change-indicator'
-import { approveIntent, rejectIntent, updateExitMode, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
+import { approveIntent, rejectIntent, updateExitMode, cancelKISOrder, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
 import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders } from '@/hooks/useRuntimeData'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
@@ -22,7 +22,7 @@ export default function RuntimeDashboard() {
   const { data: intents = [], isLoading: intentsLoading, refetch: refetchIntents } = useOrderIntents()
   const { data: orders = [], isLoading: ordersLoading } = useOrders()
   const { data: fills = [], isLoading: fillsLoading } = useFills()
-  const { data: kisUnfilledOrders = [], isLoading: kisUnfilledLoading } = useKISUnfilledOrders()
+  const { data: kisUnfilledOrders = [], isLoading: kisUnfilledLoading, refetch: refetchKISUnfilledOrders } = useKISUnfilledOrders()
   const { data: kisFilledOrders = [], isLoading: kisFilledLoading } = useKISFilledOrders()
 
   const loading = holdingsLoading || intentsLoading || ordersLoading || fillsLoading || kisUnfilledLoading || kisFilledLoading
@@ -210,6 +210,27 @@ export default function RuntimeDashboard() {
       await refetchIntents() // Refresh intents after rejection
     } catch (err) {
       console.error('Failed to reject intent:', err)
+    }
+  }
+
+  const handleCancelOrder = async (orderNo: string, stockName?: string) => {
+    const displayName = stockName || orderNo
+    if (!confirm(`${displayName} 주문을 취소하시겠습니까?`)) {
+      return
+    }
+
+    try {
+      const result = await cancelKISOrder(orderNo)
+      if (result.success) {
+        console.log(`Order ${orderNo} cancelled successfully. Cancel No: ${result.cancel_no}`)
+        await refetchKISUnfilledOrders() // Refresh unfilled orders after cancellation
+      } else {
+        console.error(`Failed to cancel order ${orderNo}:`, result.error)
+        alert(`주문 취소 실패: ${result.error}`)
+      }
+    } catch (err) {
+      console.error('Failed to cancel order:', err)
+      alert(`주문 취소 중 오류 발생: ${err instanceof Error ? err.message : '알 수 없는 오류'}`)
     }
   }
 
@@ -952,7 +973,12 @@ export default function RuntimeDashboard() {
                       <TableCell className="text-right font-mono">{formatNumber(order.OpenQty)}</TableCell>
                       <TableCell className="text-sm font-mono">{order.Raw?.order_time || '-'}</TableCell>
                       <TableCell className="text-center">
-                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleCancelOrder(order.OrderID, order.Raw?.stock_name)}
+                        >
                           삭제
                         </Button>
                       </TableCell>

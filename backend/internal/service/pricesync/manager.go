@@ -245,6 +245,24 @@ func (m *Manager) GetWSSubscriptionCount() int {
 	return m.kisClient.WS.GetSubscriptionCount()
 }
 
+// TriggerRefresh immediately fetches price for a symbol (used for execution notifications)
+func (m *Manager) TriggerRefresh(symbol string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.isRunning || m.restPoller == nil {
+		log.Warn().Str("symbol", symbol).Msg("TriggerRefresh: PriceSync not running")
+		return
+	}
+
+	// Fetch price in background to avoid blocking
+	go func() {
+		if err := m.restPoller.FetchSymbolPrice(symbol); err != nil {
+			log.Warn().Err(err).Str("symbol", symbol).Msg("TriggerRefresh failed")
+		}
+	}()
+}
+
 // IsRunning returns whether PriceSync is running
 func (m *Manager) IsRunning() bool {
 	m.mu.RLock()
@@ -354,8 +372,15 @@ func (m *Manager) RefreshSubscriptions(ctx context.Context) error {
 	}
 
 	// 5. Update REST tiers
+	// IMPORTANT: WS symbols are also added to Tier0 as fallback
+	// This ensures price updates when WebSocket is unstable
 	if m.restPoller != nil {
-		if err := m.restPoller.SetTierSymbols(Tier0, tier0Symbols); err != nil {
+		// Combine WS symbols with Tier0 symbols for redundancy
+		allTier0Symbols := make([]string, 0, len(wsSymbols)+len(tier0Symbols))
+		allTier0Symbols = append(allTier0Symbols, wsSymbols...)
+		allTier0Symbols = append(allTier0Symbols, tier0Symbols...)
+
+		if err := m.restPoller.SetTierSymbols(Tier0, allTier0Symbols); err != nil {
 			log.Error().Err(err).Msg("Failed to set Tier0 symbols")
 		}
 
@@ -368,10 +393,11 @@ func (m *Manager) RefreshSubscriptions(ctx context.Context) error {
 		}
 
 		log.Info().
-			Int("tier0", len(tier0Symbols)).
+			Int("tier0", len(allTier0Symbols)).
+			Int("tier0_ws_backup", len(wsSymbols)).
 			Int("tier1", len(tier1Symbols)).
 			Int("tier2", len(tier2Symbols)).
-			Msg("REST tiers updated")
+			Msg("REST tiers updated (WS symbols included in Tier0 as fallback)")
 	}
 
 	log.Info().Msg("✅ Subscriptions refreshed successfully")

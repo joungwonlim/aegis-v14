@@ -12,6 +12,9 @@ type KISAdapter interface {
 	// SubmitOrder submits an order to KIS
 	SubmitOrder(ctx context.Context, req KISOrderRequest) (*KISOrderResponse, error)
 
+	// CancelOrder cancels an order in KIS
+	CancelOrder(ctx context.Context, accountID string, orderNo string) (*KISCancelResponse, error)
+
 	// GetUnfilledOrders retrieves unfilled orders from KIS
 	GetUnfilledOrders(ctx context.Context, accountID string) ([]*KISUnfilledOrder, error)
 
@@ -39,6 +42,14 @@ type KISOrderRequest struct {
 type KISOrderResponse struct {
 	OrderID   string         // KIS 주문번호
 	Timestamp time.Time      // 주문 시각
+	Raw       map[string]any // 원본 응답
+}
+
+// KISCancelResponse represents KIS order cancellation response
+type KISCancelResponse struct {
+	OrderNo   string         // 원주문번호
+	CancelNo  string         // 취소주문번호
+	Timestamp time.Time      // 취소 시각
 	Raw       map[string]any // 원본 응답
 }
 

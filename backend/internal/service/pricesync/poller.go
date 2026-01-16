@@ -28,7 +28,7 @@ type TierConfig struct {
 // DefaultTierConfigs returns default tier configurations
 func DefaultTierConfigs() map[Tier]TierConfig {
 	return map[Tier]TierConfig{
-		Tier0: {Interval: 2 * time.Second, MaxSize: 40},
+		Tier0: {Interval: 2 * time.Second, MaxSize: 80}, // Increased to include WS backup
 		Tier1: {Interval: 10 * time.Second, MaxSize: 100},
 		Tier2: {Interval: 60 * time.Second, MaxSize: 1000},
 	}
@@ -122,6 +122,11 @@ func (p *RESTPoller) fetchTierPrices(tier Tier) {
 		return
 	}
 
+	log.Info().
+		Int("tier", int(tier)).
+		Int("symbol_count", len(symbols)).
+		Msg("REST Poller fetching prices...")
+
 	// Try KIS first
 	ticks, err := p.kisClient.GetCurrentPrices(p.ctx, symbols)
 	if err != nil {
@@ -185,11 +190,61 @@ func (p *RESTPoller) fetchTierPrices(tier Tier) {
 		successCount++
 	}
 
-	log.Debug().
+	log.Info().
 		Int("tier", int(tier)).
 		Int("total", len(ticks)).
 		Int("success", successCount).
-		Msg("Tier prices processed")
+		Msg("✅ REST Tier prices processed")
+}
+
+// FetchSymbolPrice immediately fetches price for a single symbol
+func (p *RESTPoller) FetchSymbolPrice(symbol string) error {
+	if symbol == "" {
+		return nil
+	}
+
+	symbols := []string{symbol}
+
+	// Try KIS first
+	ticks, err := p.kisClient.GetCurrentPrices(p.ctx, symbols)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("symbol", symbol).
+			Msg("KIS immediate price fetch failed, trying Naver fallback")
+
+		// Fallback to Naver if available
+		if p.naverClient != nil {
+			naverTicks, naverErr := p.naverClient.GetCurrentPrices(p.ctx, symbols)
+			if naverErr != nil {
+				log.Error().
+					Err(naverErr).
+					Str("symbol", symbol).
+					Msg("Naver fallback also failed for immediate fetch")
+				return naverErr
+			}
+			ticks = naverTicks
+		} else {
+			return err
+		}
+	}
+
+	// Process ticks
+	for _, tick := range ticks {
+		if err := p.service.ProcessTick(p.ctx, *tick); err != nil {
+			log.Debug().
+				Err(err).
+				Str("symbol", tick.Symbol).
+				Msg("Failed to process immediate tick")
+			continue
+		}
+		log.Info().
+			Str("symbol", tick.Symbol).
+			Int64("price", tick.LastPrice).
+			Msg("⚡ Immediate price fetch processed")
+	}
+
+	return nil
 }
 
 // SetTierSymbols sets symbols for a specific tier

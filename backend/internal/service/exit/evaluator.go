@@ -59,7 +59,7 @@ func (s *Service) reconciliationLoop() {
 	}
 }
 
-// evaluateAllPositions evaluates all OPEN positions for exit triggers
+// evaluateAllPositions evaluates all OPEN and CLOSING positions for exit triggers
 func (s *Service) evaluateAllPositions(ctx context.Context) error {
 	// 1. Check Control Gate
 	control, err := s.controlRepo.GetControl(ctx)
@@ -69,8 +69,8 @@ func (s *Service) evaluateAllPositions(ctx context.Context) error {
 
 	log.Debug().Str("mode", control.Mode).Msg("Exit control mode")
 
-	// 2. Load OPEN positions (모든 계정)
-	// NOTE: 모든 OPEN positions를 조회 (account 필터링 없음)
+	// 2. Load OPEN and CLOSING positions (모든 계정)
+	// NOTE: CLOSING 포지션도 포함하여 부분 청산 후 남은 수량도 계속 평가
 	positions, err := s.posRepo.GetAllOpenPositions(ctx)
 	if err != nil {
 		return fmt.Errorf("get open positions: %w", err)

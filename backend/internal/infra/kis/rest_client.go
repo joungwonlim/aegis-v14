@@ -1,6 +1,7 @@
 package kis
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -266,6 +267,365 @@ func (h *HoldingOutput) GetMarket() string {
 	default:
 		return "UNKNOWN"
 	}
+}
+
+// ============================================================================
+// 주문 조회 API (TTTC8001R)
+// ============================================================================
+
+// OrdersResponse represents KIS orders API response
+type OrdersResponse struct {
+	RetCode      string        `json:"rt_cd"`
+	MsgCode      string        `json:"msg_cd"`
+	Msg1         string        `json:"msg1"`
+	CtxAreaFK100 string        `json:"ctx_area_fk100"`
+	CtxAreaNK100 string        `json:"ctx_area_nk100"`
+	Output1      []OrderOutput `json:"output1"`
+}
+
+// OrderOutput represents order data from KIS
+type OrderOutput struct {
+	OrderDate       string `json:"ord_dt"`               // 주문일자
+	OrderNo         string `json:"odno"`                 // 주문번호
+	OrigOrderNo     string `json:"orgn_odno"`            // 원주문번호
+	OrderSide       string `json:"sll_buy_dvsn_cd"`      // 매도매수구분 (01:매도, 02:매수)
+	OrderSideName   string `json:"sll_buy_dvsn_cd_name"` // 매도매수구분명
+	StockCode       string `json:"pdno"`                 // 종목코드
+	StockName       string `json:"prdt_name"`            // 종목명
+	OrderQty        string `json:"ord_qty"`              // 주문수량
+	OrderPrice      string `json:"ord_unpr"`             // 주문단가
+	OrderTime       string `json:"ord_tmd"`              // 주문시간 (HHMMSS)
+	TotalExecQty    string `json:"tot_ccld_qty"`         // 총체결수량
+	AvgExecPrice    string `json:"avg_prvs"`             // 체결평균가
+	TotalExecAmount string `json:"tot_ccld_amt"`         // 총체결금액
+	RemainingQty    string `json:"rmn_qty"`              // 잔여수량
+	OrderTypeName   string `json:"ord_dvsn_name"`        // 주문구분명
+	CancelYN        string `json:"cncl_yn"`              // 취소여부
+}
+
+// GetUnfilledOrders fetches unfilled orders (미체결 주문 조회)
+func (c *RESTClient) GetUnfilledOrders(ctx context.Context, accountNo string, accountProductCode string) ([]OrderOutput, error) {
+	return c.getOrders(ctx, accountNo, accountProductCode, "02") // 02: 미체결
+}
+
+// GetFilledOrders fetches filled orders (체결 주문 조회)
+func (c *RESTClient) GetFilledOrders(ctx context.Context, accountNo string, accountProductCode string) ([]OrderOutput, error) {
+	return c.getOrders(ctx, accountNo, accountProductCode, "01") // 01: 체결
+}
+
+// getOrders fetches orders with filter (ccldDvsn: 00-전체, 01-체결, 02-미체결)
+func (c *RESTClient) getOrders(ctx context.Context, accountNo string, accountProductCode string, ccldDvsn string) ([]OrderOutput, error) {
+	// Get access token
+	token, err := c.auth.GetAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get access token: %w", err)
+	}
+
+	// 오늘 날짜
+	today := time.Now().Format("20060102")
+
+	// Build request URL (주문체결내역 조회)
+	url := fmt.Sprintf("%s/uapi/domestic-stock/v1/trading/inquire-daily-ccld", c.baseURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	// Add query parameters
+	q := req.URL.Query()
+	q.Add("CANO", accountNo)
+	q.Add("ACNT_PRDT_CD", accountProductCode)
+	q.Add("INQR_STRT_DT", today)
+	q.Add("INQR_END_DT", today)
+	q.Add("SLL_BUY_DVSN_CD", "00")  // 00: 전체
+	q.Add("INQR_DVSN", "00")        // 00: 역순
+	q.Add("PDNO", "")               // 종목코드 (빈값: 전체)
+	q.Add("CCLD_DVSN", ccldDvsn)    // 체결구분
+	q.Add("ORD_GNO_BRNO", "")
+	q.Add("ODNO", "")
+	q.Add("INQR_DVSN_3", "00")
+	q.Add("INQR_DVSN_1", "")
+	q.Add("CTX_AREA_FK100", "")
+	q.Add("CTX_AREA_NK100", "")
+	req.URL.RawQuery = q.Encode()
+
+	// TR_ID (실전투자만 지원)
+	trID := "TTTC8001R"
+	if c.isPaper {
+		return nil, fmt.Errorf("order inquiry not supported in paper trading mode")
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("appkey", c.auth.appKey)
+	req.Header.Set("appsecret", c.auth.appSecret)
+	req.Header.Set("tr_id", trID)
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("KIS API error: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse response
+	var ordersResp OrdersResponse
+	if err := json.Unmarshal(respBody, &ordersResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if ordersResp.RetCode != "0" {
+		return nil, fmt.Errorf("KIS API error: code=%s msg=%s", ordersResp.MsgCode, ordersResp.Msg1)
+	}
+
+	return ordersResp.Output1, nil
+}
+
+// ============================================================================
+// 주문 취소 API (TTTC0803U)
+// ============================================================================
+
+// CancelOrderResponse represents cancel order response
+type CancelOrderResponse struct {
+	RetCode string `json:"rt_cd"`
+	MsgCode string `json:"msg_cd"`
+	Msg1    string `json:"msg1"`
+	Output  struct {
+		OrderNo   string `json:"ODNO"`     // 주문번호
+		OrderTime string `json:"ORD_TMD"`  // 주문시간
+	} `json:"output"`
+}
+
+// CancelOrderResult represents cancel order result
+type CancelOrderResult struct {
+	Success   bool
+	OrderNo   string
+	OrderTime string
+	Message   string
+}
+
+// CancelOrder cancels an order (주문 취소)
+func (c *RESTClient) CancelOrder(ctx context.Context, accountNo string, accountProductCode string, orderNo string) (*CancelOrderResult, error) {
+	// Get access token
+	token, err := c.auth.GetAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get access token: %w", err)
+	}
+
+	// 모의투자는 지원하지 않음
+	if c.isPaper {
+		return nil, fmt.Errorf("order cancel not supported in paper trading mode")
+	}
+
+	// Build request URL (주문정정취소)
+	url := fmt.Sprintf("%s/uapi/domestic-stock/v1/trading/order-rvsecncl", c.baseURL)
+
+	// Request body
+	body := map[string]string{
+		"CANO":           accountNo,
+		"ACNT_PRDT_CD":   accountProductCode,
+		"KRX_FWDG_ORD_ORGNO": "",       // 공백
+		"ORGN_ODNO":      orderNo,       // 원주문번호
+		"ORD_DVSN":       "00",          // 주문구분 (00: 지정가)
+		"RVSE_CNCL_DVSN_CD": "02",       // 02: 취소
+		"ORD_QTY":        "0",           // 취소시 0
+		"ORD_UNPR":       "0",           // 취소시 0
+		"QTY_ALL_ORD_YN": "Y",           // Y: 전량취소
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	// TR_ID
+	trID := "TTTC0803U"
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("appkey", c.auth.appKey)
+	req.Header.Set("appsecret", c.auth.appSecret)
+	req.Header.Set("tr_id", trID)
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return &CancelOrderResult{
+			Success: false,
+			Message: fmt.Sprintf("cancel failed: status=%d body=%s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
+	// Parse response
+	var cancelResp CancelOrderResponse
+	if err := json.Unmarshal(respBody, &cancelResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if cancelResp.RetCode != "0" {
+		return &CancelOrderResult{
+			Success: false,
+			Message: fmt.Sprintf("KIS API error: code=%s msg=%s", cancelResp.MsgCode, cancelResp.Msg1),
+		}, nil
+	}
+
+	return &CancelOrderResult{
+		Success:   true,
+		OrderNo:   cancelResp.Output.OrderNo,
+		OrderTime: cancelResp.Output.OrderTime,
+		Message:   cancelResp.Msg1,
+	}, nil
+}
+
+// PlaceOrderResult represents place order result
+type PlaceOrderResult struct {
+	Success   bool
+	OrderNo   string
+	OrderTime string
+	Message   string
+}
+
+// PlaceOrderResponse represents KIS place order API response
+type PlaceOrderResponse struct {
+	RetCode string `json:"rt_cd"`
+	MsgCode string `json:"msg_cd"`
+	Msg1    string `json:"msg1"`
+	Output  struct {
+		OrderNo   string `json:"ODNO"`
+		OrderTime string `json:"ORD_TMD"`
+	} `json:"output"`
+}
+
+// PlaceOrder submits an order to KIS (현금 매수/매도)
+// side: "buy" or "sell"
+// orderType: "limit" or "market"
+func (c *RESTClient) PlaceOrder(ctx context.Context, accountNo string, accountProductCode string, symbol string, side string, orderType string, qty int64, price int64) (*PlaceOrderResult, error) {
+	// Get access token
+	token, err := c.auth.GetAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get access token: %w", err)
+	}
+
+	// 모의투자는 지원하지 않음
+	if c.isPaper {
+		return nil, fmt.Errorf("order placement not supported in paper trading mode")
+	}
+
+	// Build request URL
+	url := fmt.Sprintf("%s/uapi/domestic-stock/v1/trading/order-cash", c.baseURL)
+
+	// TR_ID: TTTC0802U (매수), TTTC0801U (매도)
+	var trID string
+	if side == "buy" {
+		trID = "TTTC0802U"
+	} else {
+		trID = "TTTC0801U"
+	}
+
+	// 주문구분: 00(지정가), 01(시장가)
+	var ordDvsn string
+	if orderType == "market" {
+		ordDvsn = "01"
+		price = 0 // 시장가는 가격 0
+	} else {
+		ordDvsn = "00"
+	}
+
+	// Request body
+	body := map[string]string{
+		"CANO":         accountNo,
+		"ACNT_PRDT_CD": accountProductCode,
+		"PDNO":         symbol,
+		"ORD_DVSN":     ordDvsn,
+		"ORD_QTY":      fmt.Sprintf("%d", qty),
+		"ORD_UNPR":     fmt.Sprintf("%d", price),
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("appkey", c.auth.appKey)
+	req.Header.Set("appsecret", c.auth.appSecret)
+	req.Header.Set("tr_id", trID)
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return &PlaceOrderResult{
+			Success: false,
+			Message: fmt.Sprintf("order failed: status=%d body=%s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
+	// Parse response
+	var orderResp PlaceOrderResponse
+	if err := json.Unmarshal(respBody, &orderResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if orderResp.RetCode != "0" {
+		return &PlaceOrderResult{
+			Success: false,
+			Message: fmt.Sprintf("KIS API error: code=%s msg=%s", orderResp.MsgCode, orderResp.Msg1),
+		}, nil
+	}
+
+	return &PlaceOrderResult{
+		Success:   true,
+		OrderNo:   orderResp.Output.OrderNo,
+		OrderTime: orderResp.Output.OrderTime,
+		Message:   orderResp.Msg1,
+	}, nil
 }
 
 // GetHoldings fetches current holdings (보유종목 조회)

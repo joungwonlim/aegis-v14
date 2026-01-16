@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
@@ -224,6 +225,65 @@ func (h *KISOrdersHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		Int("price", req.Price).
 		Str("order_id", resp.OrderID).
 		Msg("Order placed successfully")
+}
+
+// CancelOrderRequest is the request body for cancelling an order
+type CancelOrderRequest struct {
+	OrderNo string `json:"order_no"` // 주문번호
+}
+
+// CancelOrderResponse is the response for cancelling an order
+type CancelOrderResponse struct {
+	Success  bool   `json:"success"`
+	CancelNo string `json:"cancel_no,omitempty"` // 취소주문번호
+	Error    string `json:"error,omitempty"`
+}
+
+// CancelOrder cancels an order in KIS
+// DELETE /api/kis/orders/{order_no}
+func (h *KISOrdersHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get order_no from URL path
+	orderNo := chi.URLParam(r, "order_no")
+	if orderNo == "" {
+		log.Warn().Msg("Order number is required for cancel")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CancelOrderResponse{
+			Success: false,
+			Error:   "Order number is required",
+		})
+		return
+	}
+
+	// Cancel order in KIS
+	resp, err := h.kisAdapter.CancelOrder(ctx, h.accountID, orderNo)
+	if err != nil {
+		log.Error().Err(err).Str("order_no", orderNo).Msg("Failed to cancel order in KIS")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CancelOrderResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	// Invalidate unfilled orders cache
+	h.cacheMu.Lock()
+	h.unfilledCache = nil
+	h.cacheMu.Unlock()
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(CancelOrderResponse{
+		Success:  true,
+		CancelNo: resp.CancelNo,
+	})
+
+	log.Info().
+		Str("order_no", orderNo).
+		Str("cancel_no", resp.CancelNo).
+		Msg("Order cancelled successfully")
 }
 
 // KISAdapterProvider interface for getting KIS adapter

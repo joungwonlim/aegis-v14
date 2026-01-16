@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wonny/aegis/v14/internal/domain/price"
@@ -21,23 +22,35 @@ type Client struct {
 // NewClient creates a new Naver client
 func NewClient() *Client {
 	return &Client{
-		baseURL:    "https://api.stock.naver.com/stock",
+		baseURL:    "https://polling.finance.naver.com/api/realtime/domestic/stock",
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// NaverPriceResponse represents Naver API response
-type NaverPriceResponse struct {
-	ClosePrice         string `json:"closePrice"`         // 현재가
-	CompareToPreviousPrice string `json:"compareToPreviousPrice"` // 전일대비
-	FluctuationsRatio  string `json:"fluctuationsRatio"`  // 등락률
-	AccumulatedTradingVolume string `json:"accumulatedTradingVolume"` // 누적거래량
+// NaverRealtimeResponse represents Naver realtime API response
+type NaverRealtimeResponse struct {
+	Datas []NaverPriceData `json:"datas"`
+}
+
+// NaverPriceData represents individual stock data
+type NaverPriceData struct {
+	ClosePrice               string `json:"closePrice"`               // 종가 (전일)
+	CompareToPreviousClosePrice string `json:"compareToPreviousClosePrice"` // 전일대비
+	FluctuationsRatio        string `json:"fluctuationsRatio"`        // 등락률
+	AccumulatedTradingVolume string `json:"accumulatedTradingVolume"` // 거래량
+	MarketStatus             string `json:"marketStatus"`             // 시장상태
+	OverMarketPriceInfo      *struct {
+		OverPrice                    string `json:"overPrice"`                    // 시간외 현재가
+		CompareToPreviousClosePrice  string `json:"compareToPreviousClosePrice"`  // 전일대비
+		FluctuationsRatio            string `json:"fluctuationsRatio"`            // 등락률
+		AccumulatedTradingVolume     string `json:"accumulatedTradingVolume"`     // 거래량
+	} `json:"overMarketPriceInfo"` // 시간외 정보
 }
 
 // GetCurrentPrice fetches current price from Naver Finance
 func (c *Client) GetCurrentPrice(ctx context.Context, symbol string) (*price.Tick, error) {
 	// Naver API URL
-	url := fmt.Sprintf("%s/%s/basic", c.baseURL, symbol)
+	url := fmt.Sprintf("%s/%s", c.baseURL, symbol)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -66,13 +79,18 @@ func (c *Client) GetCurrentPrice(ctx context.Context, symbol string) (*price.Tic
 	}
 
 	// Parse response
-	var priceResp NaverPriceResponse
-	if err := json.Unmarshal(respBody, &priceResp); err != nil {
+	var realtimeResp NaverRealtimeResponse
+	if err := json.Unmarshal(respBody, &realtimeResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
+	// Check if data exists
+	if len(realtimeResp.Datas) == 0 {
+		return nil, fmt.Errorf("no data for symbol %s", symbol)
+	}
+
 	// Convert to Tick
-	tick, err := convertToTick(symbol, priceResp)
+	tick, err := convertToTick(symbol, realtimeResp.Datas[0])
 	if err != nil {
 		return nil, fmt.Errorf("convert to tick: %w", err)
 	}
@@ -104,11 +122,33 @@ func (c *Client) GetCurrentPrices(ctx context.Context, symbols []string) ([]*pri
 }
 
 // convertToTick converts Naver API response to price.Tick
-func convertToTick(symbol string, resp NaverPriceResponse) (*price.Tick, error) {
-	// Parse current price (required)
-	lastPrice, err := strconv.ParseInt(resp.ClosePrice, 10, 64)
+func convertToTick(symbol string, data NaverPriceData) (*price.Tick, error) {
+	// Determine which price to use (prioritize over-market if available)
+	var priceStr, changeStr, ratioStr, volumeStr string
+
+	if data.OverMarketPriceInfo != nil && data.OverMarketPriceInfo.OverPrice != "" && data.OverMarketPriceInfo.OverPrice != "-" {
+		// Use over-market (pre-market or after-hours) price
+		priceStr = data.OverMarketPriceInfo.OverPrice
+		changeStr = data.OverMarketPriceInfo.CompareToPreviousClosePrice
+		ratioStr = data.OverMarketPriceInfo.FluctuationsRatio
+		volumeStr = data.OverMarketPriceInfo.AccumulatedTradingVolume
+	} else {
+		// Use regular market price
+		priceStr = data.ClosePrice
+		changeStr = data.CompareToPreviousClosePrice
+		ratioStr = data.FluctuationsRatio
+		volumeStr = data.AccumulatedTradingVolume
+	}
+
+	// Remove commas and parse price
+	priceStr = removeCommas(priceStr)
+	if priceStr == "" || priceStr == "-" {
+		return nil, fmt.Errorf("no valid price for symbol %s", symbol)
+	}
+
+	lastPrice, err := strconv.ParseInt(priceStr, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("parse close price: %w", err)
+		return nil, fmt.Errorf("parse price %s: %w", priceStr, err)
 	}
 
 	tick := &price.Tick{
@@ -120,23 +160,30 @@ func convertToTick(symbol string, resp NaverPriceResponse) (*price.Tick, error) 
 	}
 
 	// Parse optional fields
-	if resp.CompareToPreviousPrice != "" {
-		if vrss, err := strconv.ParseInt(resp.CompareToPreviousPrice, 10, 64); err == nil {
-			tick.ChangePrice = &vrss
+	if changeStr != "" && changeStr != "-" {
+		changeStr = removeCommas(changeStr)
+		if change, err := strconv.ParseInt(changeStr, 10, 64); err == nil {
+			tick.ChangePrice = &change
 		}
 	}
 
-	if resp.FluctuationsRatio != "" {
-		if rate, err := strconv.ParseFloat(resp.FluctuationsRatio, 64); err == nil {
+	if ratioStr != "" && ratioStr != "-" {
+		if rate, err := strconv.ParseFloat(ratioStr, 64); err == nil {
 			tick.ChangeRate = &rate
 		}
 	}
 
-	if resp.AccumulatedTradingVolume != "" {
-		if vol, err := strconv.ParseInt(resp.AccumulatedTradingVolume, 10, 64); err == nil {
+	if volumeStr != "" && volumeStr != "-" {
+		volumeStr = removeCommas(volumeStr)
+		if vol, err := strconv.ParseInt(volumeStr, 10, 64); err == nil {
 			tick.Volume = &vol
 		}
 	}
 
 	return tick, nil
+}
+
+// removeCommas removes commas from number strings
+func removeCommas(s string) string {
+	return strings.ReplaceAll(s, ",", "")
 }

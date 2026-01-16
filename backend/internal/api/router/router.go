@@ -66,7 +66,10 @@ func NewRouter(cfg *Config) http.Handler {
 		// KIS Orders (직접 KIS API에서 가져옴)
 		r.Get("/kis/unfilled-orders", cfg.KISOrdersHandler.GetUnfilledOrders)
 		r.Get("/kis/filled-orders", cfg.KISOrdersHandler.GetFilledOrders)
-		r.Post("/kis/orders", cfg.KISOrdersHandler.PlaceOrder)
+		r.Route("/kis/orders", func(r chi.Router) {
+			r.Post("/", cfg.KISOrdersHandler.PlaceOrder)
+			r.Delete("/{order_no}", cfg.KISOrdersHandler.CancelOrder)
+		})
 	})
 
 	return r

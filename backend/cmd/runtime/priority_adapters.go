@@ -3,34 +3,46 @@ package main
 import (
 	"context"
 
+	"github.com/wonny/aegis/v14/internal/domain/execution"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
-// PositionRepoAdapter adapts exit.PositionRepository to pricesync.PositionRepository
+// PositionRepoAdapter adapts exit.PositionRepository + HoldingRepository to pricesync.PositionRepository
 type PositionRepoAdapter struct {
-	exitRepo  exit.PositionRepository
+	exitRepo    exit.PositionRepository
+	holdingRepo interface {
+		GetAllHoldings(ctx context.Context) ([]*execution.Holding, error)
+	}
 	accountID string
 }
 
-func NewPositionRepoAdapter(exitRepo exit.PositionRepository, accountID string) *PositionRepoAdapter {
+func NewPositionRepoAdapter(
+	exitRepo exit.PositionRepository,
+	holdingRepo interface {
+		GetAllHoldings(ctx context.Context) ([]*execution.Holding, error)
+	},
+	accountID string,
+) *PositionRepoAdapter {
 	return &PositionRepoAdapter{
-		exitRepo:  exitRepo,
-		accountID: accountID,
+		exitRepo:    exitRepo,
+		holdingRepo: holdingRepo,
+		accountID:   accountID,
 	}
 }
 
 func (a *PositionRepoAdapter) GetOpenPositions(ctx context.Context) ([]pricesync.PositionSummary, error) {
-	positions, err := a.exitRepo.GetOpenPositions(ctx, a.accountID)
+	// Use holdings instead of positions to get all holdings
+	holdings, err := a.holdingRepo.GetAllHoldings(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	summaries := make([]pricesync.PositionSummary, 0, len(positions))
-	for _, p := range positions {
-		if p.Status == "OPEN" {
+	summaries := make([]pricesync.PositionSummary, 0, len(holdings))
+	for _, h := range holdings {
+		if h.Qty > 0 {
 			summaries = append(summaries, pricesync.PositionSummary{
-				Symbol: p.Symbol,
+				Symbol: h.Symbol,
 				Status: "OPEN",
 			})
 		}
@@ -60,17 +72,42 @@ func (a *PositionRepoAdapter) GetClosingPositions(ctx context.Context) ([]prices
 
 // OrderRepoAdapter adapts order repository to pricesync.OrderRepository
 type OrderRepoAdapter struct {
-	// TODO: Add real order repository when available
+	kisAdapter interface {
+		GetUnfilledOrders(ctx context.Context, accountID string) ([]*execution.KISUnfilledOrder, error)
+	}
+	accountID string
 }
 
-func NewOrderRepoAdapter() *OrderRepoAdapter {
-	return &OrderRepoAdapter{}
+func NewOrderRepoAdapter(kisAdapter interface {
+	GetUnfilledOrders(ctx context.Context, accountID string) ([]*execution.KISUnfilledOrder, error)
+}, accountID string) *OrderRepoAdapter {
+	return &OrderRepoAdapter{
+		kisAdapter: kisAdapter,
+		accountID:  accountID,
+	}
 }
 
 func (a *OrderRepoAdapter) GetActiveOrderSymbols(ctx context.Context) ([]string, error) {
-	// TODO: Query active orders from database
-	// For now, return empty list
-	return []string{}, nil
+	// Get unfilled orders from KIS
+	orders, err := a.kisAdapter.GetUnfilledOrders(ctx, a.accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract unique symbols
+	symbolSet := make(map[string]bool)
+	for _, o := range orders {
+		if o.Symbol != "" && o.OpenQty > 0 {
+			symbolSet[o.Symbol] = true
+		}
+	}
+
+	symbols := make([]string, 0, len(symbolSet))
+	for symbol := range symbolSet {
+		symbols = append(symbols, symbol)
+	}
+
+	return symbols, nil
 }
 
 // WatchlistRepoAdapter provides watchlist symbols
@@ -86,6 +123,35 @@ func (a *WatchlistRepoAdapter) GetWatchlistSymbols(ctx context.Context) ([]strin
 	// TODO: Query watchlist from database
 	// For now, return empty list
 	return []string{}, nil
+}
+
+// HoldingRepoAdapter provides all holdings symbols
+type HoldingRepoAdapter struct {
+	holdingRepo interface {
+		GetAllHoldings(ctx context.Context) ([]*execution.Holding, error)
+	}
+}
+
+func NewHoldingRepoAdapter(holdingRepo interface {
+	GetAllHoldings(ctx context.Context) ([]*execution.Holding, error)
+}) *HoldingRepoAdapter {
+	return &HoldingRepoAdapter{
+		holdingRepo: holdingRepo,
+	}
+}
+
+func (a *HoldingRepoAdapter) GetHoldingSymbols(ctx context.Context) ([]string, error) {
+	holdings, err := a.holdingRepo.GetAllHoldings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	symbols := make([]string, 0, len(holdings))
+	for _, h := range holdings {
+		symbols = append(symbols, h.Symbol)
+	}
+
+	return symbols, nil
 }
 
 // SystemRepoAdapter provides system-critical symbols (indices, etc.)

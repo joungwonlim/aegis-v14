@@ -63,6 +63,14 @@ export function OrderTab({
 
   const formatTime = (ts: string | null | undefined) => {
     if (!ts) return '-'
+
+    // KIS API order_time is HHMMSS format (e.g., "093512")
+    if (/^\d{6}$/.test(ts)) {
+      const hh = ts.substring(0, 2)
+      const mm = ts.substring(2, 4)
+      return `${hh}:${mm}`
+    }
+
     // DB timestamp는 KST이지만 timezone 정보가 없어서 UTC로 해석됨
     // +09:00을 추가하여 KST로 명시
     const kstTimestamp = ts.includes('+') || ts.includes('Z') ? ts : `${ts}+09:00`
@@ -192,7 +200,8 @@ export function OrderTab({
               </TableHeader>
               <TableBody>
                 {symbolUnfilled.map((order, idx) => {
-                  const isBuy = order.Raw?.order_side !== '01'
+                  // order_side: KIS sll_buy_dvsn_cd_name (매수/매도)
+                  const isBuy = order.Raw?.order_side === '매수'
                   return (
                     <TableRow key={idx}>
                       <TableCell>
@@ -204,13 +213,13 @@ export function OrderTab({
                         {formatNumber(parseFloat(order.Raw?.order_price || '0'))}
                       </TableCell>
                       <TableCell className="text-right">
-                        {formatNumber(order.OrderQty)}
+                        {formatNumber(order.Qty)}
                       </TableCell>
                       <TableCell className="text-right font-medium text-orange-500">
                         {formatNumber(order.OpenQty)}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {formatTime(order.OrderedTS)}
+                        {formatTime(order.Raw?.order_time)}
                       </TableCell>
                     </TableRow>
                   )
@@ -249,9 +258,10 @@ export function OrderTab({
               </TableHeader>
               <TableBody>
                 {symbolExecuted.slice(0, 10).map((order, idx) => {
-                  const isBuy = order.Raw?.order_side !== '01'
-                  const fillPrice = parseFloat(order.Raw?.fill_price || '0')
-                  const fillQty = order.FilledQty || 0
+                  // order_side: KIS sll_buy_dvsn_cd_name (매수/매도)
+                  const isBuy = order.Raw?.order_side === '매수'
+                  const fillPrice = parseFloat(order.Price || '0')
+                  const fillQty = order.Qty || 0
                   const fillAmount = fillPrice * fillQty
 
                   return (
@@ -271,7 +281,7 @@ export function OrderTab({
                         {formatNumber(fillAmount)}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {formatTime(order.FilledTS)}
+                        {formatTime(order.Timestamp)}
                       </TableCell>
                     </TableRow>
                   )

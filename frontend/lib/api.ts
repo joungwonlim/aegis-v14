@@ -286,3 +286,27 @@ export async function placeKISOrder(req: PlaceOrderRequest): Promise<PlaceOrderR
   const data: PlaceOrderResponse = await response.json()
   return data
 }
+
+export interface CancelOrderResponse {
+  success: boolean
+  cancel_no?: string
+  error?: string
+}
+
+export async function cancelKISOrder(orderNo: string): Promise<CancelOrderResponse> {
+  const response = await fetch(`${API_BASE_URL}/kis/orders/${orderNo}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('KIS Cancel Order API Error:', response.status, errorText)
+    throw new Error(`Failed to cancel order: ${response.statusText}`)
+  }
+
+  const data: CancelOrderResponse = await response.json()
+  return data
+}

@@ -12,20 +12,22 @@ import type { PriceInfo } from '../types'
 export function useStockPrice(symbol: string, holdings: any[]) {
   const priceInfo = useMemo<PriceInfo | null>(() => {
     // Holdings 데이터에서 해당 종목 찾기
-    const holding = holdings.find((h) => h.Symbol === symbol)
+    const holding = holdings.find((h) => h.symbol === symbol)
     if (!holding) return null
 
-    const currentPrice = holding.CurrentPrice || 0
-    const prevClose = holding.Raw?.prpr || currentPrice // 전일종가 (Raw 데이터)
-    const changePrice = currentPrice - prevClose
-    const changeRate = prevClose > 0 ? (changePrice / prevClose) * 100 : 0
+    const currentPrice = typeof holding.current_price === 'string'
+      ? parseFloat(holding.current_price)
+      : (holding.current_price || 0)
+
+    // Holdings API에서 전일대비 정보 사용
+    const changePrice = holding.change_price || 0
+    const changeRate = holding.change_rate || 0
 
     return {
       currentPrice,
       changePrice,
       changeRate,
-      prevClose,
-      // TODO: Holdings에서 제공하는 추가 필드가 있으면 매핑
+      prevClose: currentPrice - changePrice,
     }
   }, [symbol, holdings])
 

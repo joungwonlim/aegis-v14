@@ -78,25 +78,29 @@ export function StockDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader className="sticky top-0 z-10 border-b pb-4 bg-background">
+          <SheetTitle className="sr-only">{stock.symbolName || stock.symbol} 종목 상세</SheetTitle>
           <div className="flex items-start gap-3 justify-between">
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               {/* Stock Logo */}
-              <StockSymbol
-                symbol={stock.symbol}
-                symbolName={stock.symbolName}
-                size="lg"
-              />
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-lg font-bold text-primary">
+                  {(stock.symbolName || stock.symbol).charAt(0)}
+                </span>
+              </div>
 
-              {/* 가격정보 */}
+              {/* 종목정보 + 가격 */}
               <div>
+                <div className="font-semibold text-lg">{stock.symbolName || stock.symbol}</div>
+                <div className="text-sm text-muted-foreground">{stock.symbol}</div>
+                {/* 현재가 + 전일대비 */}
                 {priceInfo ? (
-                  <>
-                    <div className="text-2xl font-bold">
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-xl font-bold">
                       {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}원
-                    </div>
-                    <div
-                      className="text-sm"
+                    </span>
+                    <span
+                      className="text-sm font-medium"
                       style={{
                         color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
                       }}
@@ -105,10 +109,10 @@ export function StockDetailSheet({
                       {Math.floor(Math.abs(priceInfo.changePrice || 0)).toLocaleString()}
                       {' '}
                       ({(priceInfo.changeRate || 0) >= 0 ? '+' : ''}{(priceInfo.changeRate || 0).toFixed(2)}%)
-                    </div>
-                  </>
+                    </span>
+                  </div>
                 ) : (
-                  <div className="text-sm text-muted-foreground">가격 정보 로딩 중...</div>
+                  <div className="text-sm text-muted-foreground mt-1">가격 정보 로딩 중...</div>
                 )}
               </div>
             </div>
@@ -132,6 +136,58 @@ export function StockDetailSheet({
               </div>
             )}
           </div>
+
+          {/* 보유 정보 요약 */}
+          {holding && (() => {
+            const evalAmount = parseInt(holding.raw?.evaluate_amount || '0')
+            const purchaseAmount = parseInt(holding.raw?.purchase_amount || '0')
+            const pnl = holding.pnl || 0
+            const pnlPct = holding.pnl_pct || 0
+            const avgPrice = Math.floor(holding.avg_price || 0)
+            const qty = holding.qty || 0
+            const weight = totalEvaluation > 0 ? (evalAmount / totalEvaluation) * 100 : 0
+
+            return (
+              <div className="mt-4 grid grid-cols-4 gap-x-4 gap-y-2 text-sm border-t pt-4">
+                <div>
+                  <div className="text-muted-foreground text-xs">보유수량</div>
+                  <div className="font-medium">{qty.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">매도가능</div>
+                  <div className="font-medium">{qty.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">평가손익</div>
+                  <div className={`font-medium ${pnl >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                    {pnl >= 0 ? '+' : ''}{Math.floor(pnl).toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">수익률</div>
+                  <div className={`font-medium ${pnlPct >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                    {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">매입단가</div>
+                  <div className="font-medium font-mono">{avgPrice.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">평가금액</div>
+                  <div className="font-medium font-mono">{evalAmount.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">매입금액</div>
+                  <div className="font-medium font-mono">{purchaseAmount.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">비중</div>
+                  <div className="font-medium">{weight.toFixed(1)}%</div>
+                </div>
+              </div>
+            )
+          })()}
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">

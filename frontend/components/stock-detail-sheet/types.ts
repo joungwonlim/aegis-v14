@@ -44,4 +44,4 @@ export interface DailyPrice {
 /**
  * StockDetailSheet 탭 종류
  */
-export type StockDetailTab = 'price' | 'order' | 'investment' | 'consensus' | 'ai'
+export type StockDetailTab = 'holding' | 'price' | 'order' | 'investment' | 'consensus' | 'ai'

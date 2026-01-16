@@ -250,7 +250,11 @@ func (pm *PriorityManager) GetTier2Symbols() []string {
 	defer pm.mu.RUnlock()
 
 	sorted := pm.getSortedPriorities()
-	tier2 := make([]string, 0, len(sorted)-180)
+	cap := len(sorted) - 180
+	if cap < 0 {
+		cap = 0
+	}
+	tier2 := make([]string, 0, cap)
 
 	for i := 180; i < len(sorted); i++ {
 		tier2 = append(tier2, sorted[i].Symbol)

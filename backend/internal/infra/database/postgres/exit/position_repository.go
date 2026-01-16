@@ -72,7 +72,8 @@ func (r *PositionRepository) GetPosition(ctx context.Context, positionID uuid.UU
 	return &pos, nil
 }
 
-// GetAllOpenPositions retrieves all OPEN positions (across all accounts)
+// GetAllOpenPositions retrieves all OPEN and CLOSING positions (across all accounts)
+// NOTE: CLOSING positions are included to continue evaluating remaining qty after partial exits
 func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.Position, error) {
 	query := `
 		SELECT
@@ -90,7 +91,7 @@ func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.P
 			updated_ts,
 			version
 		FROM trade.positions
-		WHERE status = 'OPEN'
+		WHERE status IN ('OPEN', 'CLOSING')
 		ORDER BY entry_ts ASC
 	`
 
@@ -133,7 +134,8 @@ func (r *PositionRepository) GetAllOpenPositions(ctx context.Context) ([]*exit.P
 	return positions, nil
 }
 
-// GetOpenPositions retrieves all OPEN positions for an account
+// GetOpenPositions retrieves all OPEN and CLOSING positions for an account
+// NOTE: CLOSING positions are included to continue evaluating remaining qty after partial exits
 func (r *PositionRepository) GetOpenPositions(ctx context.Context, accountID string) ([]*exit.Position, error) {
 	query := `
 		SELECT
@@ -152,7 +154,7 @@ func (r *PositionRepository) GetOpenPositions(ctx context.Context, accountID str
 			version
 		FROM trade.positions
 		WHERE account_id = $1
-		  AND status = 'OPEN'
+		  AND status IN ('OPEN', 'CLOSING')
 		ORDER BY entry_ts ASC
 	`
 
