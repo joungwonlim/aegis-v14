@@ -734,6 +734,177 @@ if user_requests_manual_exit(position_id, qty, reason) {
 **주문 타입:** 사용자 선택 (MKT/LMT)
 **우선순위:** 자동 룰보다 낮음 (HARD_STOP, GAP_DOWN 우선)
 
+### 8. CUSTOM_RULES (맞춤형 청산)
+
+**목적**: 종목별/전략별 맞춤 수익률 기반 자동 청산
+
+**개요:**
+- 사용자가 수익률 조건과 청산 비율을 직접 정의
+- 복수 규칙 설정 가능 (우선순위 순서대로 평가)
+- 종목별 Exit Profile에 포함되어 관리
+- 중복 실행 방지 (action_key 기반)
+
+**데이터 구조:**
+```go
+type CustomExitRule struct {
+    ID          string  `json:"id"`           // UUID (중복 실행 방지용)
+    Enabled     bool    `json:"enabled"`      // On/Off 토글
+    Condition   string  `json:"condition"`    // "profit_above" | "profit_below"
+    Threshold   float64 `json:"threshold"`    // % 기준 (예: 7.0 = +7%)
+    ExitPercent float64 `json:"exit_percent"` // 청산 비율 (예: 20.0 = 20%)
+    Priority    int     `json:"priority"`     // 평가 순서 (0-indexed)
+    Description string  `json:"description"`  // 선택적 메모
+}
+
+// ExitProfileConfig에 포함
+type ExitProfileConfig struct {
+    // ... 기존 필드들 (ATR, SL1-2, TP1-3, Trailing, TimeStop, HardStop)
+    CustomRules []CustomExitRule `json:"custom_rules,omitempty"`
+}
+```
+
+**평가 조건:**
+```go
+// Priority 3.5: Custom Rules (SL1과 TP1 사이에서 평가)
+func evaluateCustomRules(profile *ExitProfile, pnlPct decimal.Decimal) *ExitTrigger {
+    if len(profile.Config.CustomRules) == 0 {
+        return nil
+    }
+
+    // 우선순위 오름차순 정렬
+    rules := sortByPriority(profile.Config.CustomRules)
+
+    for _, rule := range rules {
+        if !rule.Enabled {
+            continue
+        }
+
+        // 중복 실행 방지 체크 (action_key)
+        actionKey := fmt.Sprintf("%s:CUSTOM:%s", positionID, rule.ID)
+        if hasActiveIntent(positionID, actionKey) {
+            continue  // 이미 실행된 규칙은 스킵
+        }
+
+        // 조건 평가
+        triggered := false
+        switch rule.Condition {
+        case "profit_above":
+            triggered = pnlPct >= rule.Threshold  // 예: 수익률 >= +7%
+        case "profit_below":
+            triggered = pnlPct <= rule.Threshold  // 예: 수익률 <= -3.4%
+        }
+
+        if triggered {
+            // 청산 수량 계산
+            qty := int64(float64(remainingQty) * rule.ExitPercent / 100.0)
+            if qty < 1 { qty = 1 }
+            if qty > remainingQty { qty = remainingQty }
+
+            return &ExitTrigger{
+                ReasonCode: "CUSTOM",
+                Qty:        qty,
+                OrderType:  "MKT",
+            }
+        }
+    }
+    return nil
+}
+```
+
+**사용 예시:**
+```json
+{
+  "custom_rules": [
+    {
+      "id": "rule-001",
+      "enabled": true,
+      "condition": "profit_above",
+      "threshold": 7.0,
+      "exit_percent": 20.0,
+      "priority": 0,
+      "description": "+7% 도달 시 20% 익절"
+    },
+    {
+      "id": "rule-002",
+      "enabled": true,
+      "condition": "profit_above",
+      "threshold": 13.0,
+      "exit_percent": 50.0,
+      "priority": 1,
+      "description": "+13% 도달 시 50% 익절"
+    },
+    {
+      "id": "rule-003",
+      "enabled": true,
+      "condition": "profit_below",
+      "threshold": -3.4,
+      "exit_percent": 70.0,
+      "priority": 2,
+      "description": "-3.4% 하락 시 70% 손절"
+    }
+  ]
+}
+```
+
+**실행 시나리오:**
+
+**시나리오 1: 상승장 (연속 익절)**
+```
+초기 포지션: 100주
+
+Tick 1: 수익률 +8.0%
+→ rule-001 트리거 (+7% 이상)
+→ Intent 생성: 20주 매도 (20%)
+→ 잔량: 80주
+
+Tick 2: 수익률 +14.0%
+→ rule-002 트리거 (+13% 이상)
+→ Intent 생성: 50주 매도 (원본 100주의 50%)
+→ 잔량: 30주
+
+Tick 3: 수익률 +15.0%
+→ rule-001, rule-002 이미 실행됨 (action_key 중복 방지)
+→ 트리거 없음
+```
+
+**시나리오 2: 하락장 (손절)**
+```
+초기 포지션: 100주
+
+Tick 1: 수익률 -3.5%
+→ rule-003 트리거 (-3.4% 이하)
+→ Intent 생성: 70주 매도 (70%)
+→ 잔량: 30주
+
+Tick 2: 수익률 -4.0%
+→ rule-003 이미 실행됨 (중복 방지)
+→ 다른 규칙 또는 HardStop 평가
+```
+
+**중복 실행 방지:**
+- `action_key` 패턴: `{position_id}:CUSTOM:{rule_id}`
+- 예: `"pos-123:CUSTOM:rule-001"`
+- `trade.order_intents` 테이블에 이미 해당 action_key가 존재하면 스킵
+- 한 번 트리거된 규칙은 포지션이 닫힐 때까지 재실행 안 됨
+
+**평가 우선순위:**
+- Priority 3.5 (SL1과 TP1 사이)
+- SL1-2 (손절) 이후 평가 → 손절이 우선
+- TP1-3 (익절) 이전 평가 → 사용자 규칙이 TP보다 우선
+
+**장점:**
+1. **유연성**: 종목 특성에 맞춘 맞춤형 전략
+2. **간편함**: UI에서 드래그 앤 드롭으로 우선순위 조정
+3. **재사용성**: Profile로 저장하여 여러 종목에 적용
+4. **안전성**: 기본 안전장치(HardStop, SL)는 항상 우선
+
+**UI 통합:**
+- `SymbolOverrideDialog` 컴포넌트
+- Tab 1: 기존 프로필 선택
+- Tab 2: 맞춤 규칙 생성 (CustomRulesEditor)
+- 규칙 추가/삭제/재정렬 (DnD)
+- Exit Engine 토글 (종목별 활성화/비활성화)
+
 ---
 
 ### Exit Rules 우선순위 (최종 정리)
@@ -742,14 +913,17 @@ if user_requests_manual_exit(position_id, qty, reason) {
 
 | 순위 | Rule | 조건 | 수량 | 타입 |
 |------|------|------|------|------|
-| 1 | HARD_STOP | <= -3.0% | 100% | MKT |
-| 2 | GAP_DOWN | 장 시작 갭 <= -3.0% | 100% | MKT |
-| 3 | SCALE_OUT (L2) | >= +18.0% | 20% | LMT |
-| 4 | SCALE_OUT (L1) | >= +10.0% | 50% | LMT |
-| 5 | ATR_TRAILING | HWM - ATR×2.0 | 100% | MKT |
-| 6 | BREAK_EVEN | HWM +3% 도달 후 +1% 하락 | 100% | MKT |
-| 7 | TIME_EXIT | 8일 + <3% 또는 15일 + HWM정체 | 100% | MKT |
-| 8 | MANUAL | 사용자 요청 | 가변 | 가변 |
+| 0 | HARD_STOP | <= -3.0% | 100% | MKT |
+| 1 | SL2 | <= -10.0% | 100% | MKT |
+| 2 | STOP_FLOOR | 보호가 하락 돌파 | 100% | MKT |
+| 3 | SL1 | <= -5.0% | 50% | MKT |
+| **3.5** | **CUSTOM_RULES** | **사용자 정의 조건** | **가변** | **MKT** |
+| 4 | TP1 | >= +5.0% | 보호가 설정 | - |
+| 5 | TP2 | >= +10.0% | 50% | LMT |
+| 6 | TP3 | >= +15.0% | 나머지 | LMT |
+| 7 | TRAILING | HWM - ATR×K | 100% | MKT |
+| 8 | TIME_EXIT | 보유 기간/수익률 조건 | 100% | MKT |
+| 9 | MANUAL | 사용자 요청 | 가변 | 가변 |
 
 **중요:**
 - 한 평가 사이클에 하나의 rule만 실행
