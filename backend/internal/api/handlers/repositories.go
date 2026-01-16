@@ -5,11 +5,17 @@ import (
 
 	"github.com/wonny/aegis/v14/internal/domain/execution"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
+	"github.com/wonny/aegis/v14/internal/domain/price"
 )
 
 // HoldingReader is a read-only interface for holdings (monitoring)
 type HoldingReader interface {
 	GetAllHoldings(ctx context.Context) ([]*execution.Holding, error)
+}
+
+// PriceReader is a read-only interface for prices (monitoring)
+type PriceReader interface {
+	GetBestPrice(ctx context.Context, symbol string) (*price.BestPrice, error)
 }
 
 // OrderReader is a read-only interface for orders (monitoring)

@@ -68,6 +68,7 @@ func main() {
 	orderIntentRepo := exitrepo.NewOrderIntentRepository(dbPool.Pool)
 	orderRepo := postgres.NewOrderRepository(dbPool.Pool)
 	fillRepo := postgres.NewFillRepository(dbPool.Pool)
+	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
 
 	// Initialize KIS client and adapter
 	kisClient, err := kis.NewClientFromEnv()
@@ -88,7 +89,7 @@ func main() {
 	log.Info().Str("account_id", accountID).Msg("✅ KIS client initialized")
 
 	// Initialize handlers
-	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo, positionRepo)
+	holdingsHandler := handlers.NewHoldingsHandler(holdingRepo, positionRepo, priceRepo)
 	intentsHandler := handlers.NewIntentsHandler(orderIntentRepo, orderIntentRepo) // Reader and Writer
 	ordersHandler := handlers.NewOrdersHandler(orderRepo)
 	fillsHandler := handlers.NewFillsHandler(fillRepo)
