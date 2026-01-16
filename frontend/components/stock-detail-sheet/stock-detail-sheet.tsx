@@ -78,7 +78,7 @@ export function StockDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+      <SheetContent side="right" className="w-full sm:max-w-4xl overflow-y-auto">
         <SheetHeader className="sticky top-0 z-10 border-b pb-4 bg-background">
           <SheetTitle className="sr-only">{stock.symbolName || stock.symbol} 종목 상세</SheetTitle>
           <div className="flex items-start gap-3 justify-between">
