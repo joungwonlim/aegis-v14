@@ -325,19 +325,33 @@ EXECUTE FUNCTION increment_position_version();
 
 **목적**: Exit FSM 상태 (Exit 소유)
 
-**중요**: `cooldown_until`은 제거됨 (Reentry가 reentry_candidates.cooldown_until 사용)
+**v14 스키마 (완전판)**:
 
 ```sql
 CREATE TABLE trade.position_state (
-    position_id        UUID PRIMARY KEY REFERENCES trade.positions(position_id),
-    phase              TEXT NOT NULL,
-    hwm_price          NUMERIC,
-    stop_floor_price   NUMERIC,
-    atr                NUMERIC,
-    last_eval_ts       TIMESTAMPTZ,
-    updated_ts         TIMESTAMPTZ NOT NULL DEFAULT now()
+    position_id               UUID PRIMARY KEY REFERENCES trade.positions(position_id),
+    phase                     TEXT NOT NULL DEFAULT 'OPEN',
+    hwm_price                 NUMERIC(20,4),
+    stop_floor_price          NUMERIC(20,4),
+    atr                       NUMERIC(20,4),
+    cooldown_until            TIMESTAMP,
+    last_eval_ts              TIMESTAMP,
+    last_avg_price            NUMERIC(20,4),          -- 추가매수 감지용
+    breach_ticks              INTEGER NOT NULL DEFAULT 0,  -- DEPRECATED
+    stop_floor_breach_ticks   INTEGER NOT NULL DEFAULT 0,  -- v14 추가
+    trailing_breach_ticks     INTEGER NOT NULL DEFAULT 0,  -- v14 추가
+    updated_ts                TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_position_state_phase ON trade.position_state(phase);
 ```
+
+**v14 변경사항:**
+- `last_avg_price`: 추가매수 vs 부분체결 구분 로직에 사용
+- `breach_ticks`: DEPRECATED (v13 호환용, 사용 안 함)
+- `stop_floor_breach_ticks`: StopFloor 연속 breach 카운터 (독립)
+- `trailing_breach_ticks`: Trailing 연속 breach 카운터 (독립)
+- **breach_ticks 분리 이유**: 기존 단일 카운터는 StopFloor와 Trailing이 공유하여 오염 가능
 
 ### trade.reentry_candidates
 
@@ -623,8 +637,10 @@ CREATE INDEX idx_exit_control_mode ON trade.exit_control (mode);
 **모드 설명**:
 - `RUNNING`: 정상 동작 (기본)
 - `PAUSE_PROFIT`: 익절/트레일만 멈춤, 손절(SL)은 계속 (가장 안전한 일시정지)
-- `PAUSE_ALL`: 모든 자동청산 멈춤 (단기 사용 권장)
+- `PAUSE_ALL`: 모든 자동청산 멈춤 (단기 사용 권장) **⚠️ HARDSTOP은 예외로 계속 작동**
 - `EMERGENCY_FLATTEN`: 비상 전량 청산 (선택적 구현)
+
+**⚠️ 중요**: `HARDSTOP` 트리거는 우선순위 0번으로 모든 제어 모드를 우회합니다. `PAUSE_ALL` 상태에서도 HARDSTOP은 정상 작동하여 비상 손절을 실행합니다.
 
 ### trade.exit_profiles
 

@@ -84,7 +84,7 @@ INSERT INTO trade.order_intents (
     order_type,     -- MKT | LMT
     limit_price,
     reason_code,    -- SL1 | SL2 | TP1 | TP2 | TP3 | TRAIL
-    action_key,     -- {position_id}:SL1 (UNIQUE)
+    action_key,     -- {position_id}:{phase}:{reason_code} (UNIQUE)
     status          -- NEW
 ) VALUES (...);
 ```
@@ -251,7 +251,16 @@ WHERE position_id = $1;
 | atr | NUMERIC | NULL | ATR (일봉 기반, 캐시) |
 | cooldown_until | TIMESTAMPTZ | NULL | 재진입 쿨다운 (Exit 후) |
 | last_eval_ts | TIMESTAMPTZ | NULL | 마지막 평가 시각 |
+| last_avg_price | NUMERIC | NULL | 마지막 평단가 (추가매수 감지용) |
+| breach_ticks | INTEGER | NOT NULL DEFAULT 0 | **DEPRECATED** - 사용 안 함 |
+| stop_floor_breach_ticks | INTEGER | NOT NULL DEFAULT 0 | StopFloor 연속 breach 카운터 |
+| trailing_breach_ticks | INTEGER | NOT NULL DEFAULT 0 | Trailing 연속 breach 카운터 |
 | updated_ts | TIMESTAMPTZ | NOT NULL | 마지막 갱신 |
+
+**⚠️ breach_ticks 분리 이유:**
+- 기존 단일 `breach_ticks`는 StopFloor와 Trailing이 공유하여 오염 가능
+- 각각 독립 카운터로 분리하여 연속 조건 정확히 평가
+- 예: StopFloor 2틱 + Trailing 1틱 = 3틱 오작동 방지
 
 **FSM 상태:**
 
@@ -329,6 +338,7 @@ flowchart TD
 **우선순위 (높음 → 낮음):**
 
 ```
+0. HARDSTOP (비상 손절) - 🚨 Control Mode 우회, 항상 최우선 평가
 1. SL2 (전량 손절) - 가장 위험
 2. SL1 (부분 손절)
 3. TP3 (익절 3단계)
@@ -337,6 +347,11 @@ flowchart TD
 6. TRAIL (트레일링, TRAILING_ACTIVE 상태에서만)
 7. TIME EXIT (최대 보유기간)
 ```
+
+**⚠️ HARDSTOP 특수 처리:**
+- HARDSTOP은 `PAUSE_ALL` 제어 모드를 우회합니다
+- 모든 다른 트리거보다 먼저 평가됩니다
+- 시스템 전체가 일시정지 상태여도 비상 손절은 작동합니다
 
 **트리거 체크 순서:**
 
@@ -364,14 +379,21 @@ flowchart TD
 
 **action_key 컨벤션:**
 
+형식: `{position_id}:{phase}:{reason_code}`
+
 | 트리거 | action_key 패턴 | 예시 |
 |--------|----------------|------|
-| SL1 | `{position_id}:SL1` | `a1b2c3-...:SL1` |
-| SL2 | `{position_id}:SL2` | `a1b2c3-...:SL2` |
-| TP1 | `{position_id}:TP1` | `a1b2c3-...:TP1` |
-| TP2 | `{position_id}:TP2` | `a1b2c3-...:TP2` |
-| TP3 | `{position_id}:TP3` | `a1b2c3-...:TP3` |
-| TRAIL | `{position_id}:TRAIL` | `a1b2c3-...:TRAIL` |
+| SL1 | `{position_id}:{phase}:SL1` | `a1b2c3-...:OPEN:SL1` |
+| SL2 | `{position_id}:{phase}:SL2` | `a1b2c3-...:OPEN:SL2` |
+| TP1 | `{position_id}:{phase}:TP1` | `a1b2c3-...:OPEN:TP1` |
+| TP2 | `{position_id}:{phase}:TP2` | `a1b2c3-...:TP1_DONE:TP2` |
+| TP3 | `{position_id}:{phase}:TP3` | `a1b2c3-...:TP2_DONE:TP3` |
+| TRAIL | `{position_id}:{phase}:TRAIL` | `a1b2c3-...:TP3_DONE:TRAIL` |
+
+**Phase 포함 이유:**
+- 평단가 리셋 후 동일 트리거 재발동 가능
+- 추가매수(2% 이상 평단가 변경) 시 Phase가 OPEN으로 리셋되어 새로운 action_key 생성
+- 예: TP1 발동 → 추가매수 → Phase=OPEN → TP1 재발동 가능 (`...:OPEN:TP1`은 새 키)
 
 **DB 강제:**
 
@@ -1454,6 +1476,51 @@ func (e *ExitEngine) alertAvgPriceChange(old, new PositionSnapshot) {
 }
 ```
 
+#### 추가매수 vs 부분체결 구분 로직
+
+**v14 개선**: 평단가 변경 시 추가매수와 부분체결/정정을 구분하여 처리
+
+**문제점:**
+- 기존: 평단가가 조금이라도 변경되면 무조건 Phase=OPEN으로 리셋
+- 부작용: TP1 체결 후 부분청산 시 StopFloor 등 보호 로직 손실
+
+**해결 방안:**
+```go
+// evaluator.go: evaluatePosition()
+const additionalBuyThreshold = 0.02  // 2%
+const partialFillThreshold = 0.005   // 0.5%
+
+if state.LastAvgPrice != nil {
+    diff := pos.AvgPrice.Sub(*state.LastAvgPrice).Abs()
+    threshold := state.LastAvgPrice.Mul(decimal.NewFromFloat(partialFillThreshold))
+
+    if diff.GreaterThan(threshold) {
+        additionalBuyThreshold := state.LastAvgPrice.Mul(decimal.NewFromFloat(additionalBuyThreshold))
+
+        if diff.GreaterThan(additionalBuyThreshold) {
+            // 2% 이상 → 추가매수 → OPEN 리셋
+            log.Warn().Msg("추가매수 감지 → Exit State OPEN 리셋")
+            err := s.stateRepo.ResetStateToOpen(ctx, pos.PositionID, pos.AvgPrice)
+        } else {
+            // 0.5~2% → 부분체결/정정 → State 유지, LastAvgPrice만 업데이트
+            log.Debug().Msg("평단가 미세 변동 → State 유지")
+            err := s.stateRepo.UpdateLastAvgPrice(ctx, pos.PositionID, pos.AvgPrice)
+        }
+    }
+}
+```
+
+**기준:**
+| 평단가 변경폭 | 판단 | 처리 |
+|--------------|------|------|
+| < 0.5% | 무시 | 변경 없음 |
+| 0.5% ~ 2% | 부분체결/정정 | LastAvgPrice만 업데이트, Phase 유지 |
+| ≥ 2% | 추가매수 | Phase=OPEN 리셋, 모든 트리거 재평가 |
+
+**효과:**
+- TP1 체결 후 일부 물량 매도 → StopFloor 유지 ✅
+- 실제 추가매수 발생 → 새로운 Exit 사이클 시작 ✅
+
 ---
 
 ### 3. Price Sync 장애 대응 (Fail-Safe)
@@ -2281,29 +2348,52 @@ time_stop:
   no_momentum_profit: 0.015
 ```
 
-### 9. 프로파일 선택 예시
+### 9. 프로파일 선택 (Profile Resolver)
 
-```python
-# Profile Resolver
-def resolve_exit_profile(position: Position) -> ExitProfile:
-    # 1. Position 강제
-    if position.exit_mode == "DISABLED":
-        return None
-    if position.exit_profile_id:
-        return load_profile(position.exit_profile_id)
+**v14 완전 구현**: 3단계 우선순위 기반 프로파일 로드
 
-    # 2. Symbol override
-    override = load_symbol_override(position.symbol)
-    if override and override.enabled:
-        return load_profile(override.profile_id)
+```go
+// backend/internal/service/exit/profile_resolver.go
+func (s *Service) resolveExitProfile(ctx context.Context, pos *exit.Position) *exit.ExitProfile {
+    // 1. Position override (최우선)
+    if pos.ExitProfileID != nil && *pos.ExitProfileID != "" {
+        profile, err := s.profileRepo.GetProfile(ctx, *pos.ExitProfileID)
+        if err == nil && profile != nil && profile.IsActive {
+            log.Debug().Str("profile_id", profile.ProfileID).Msg("Using position override profile")
+            return profile
+        }
+        log.Warn().Err(err).Str("profile_id", *pos.ExitProfileID).
+            Msg("Failed to load position profile, fallback to next priority")
+    }
 
-    # 3. Strategy (향후 확장)
-    # if strategy_profile := get_strategy_profile(position.strategy_id):
-    #     return load_profile(strategy_profile)
+    // 2. Symbol override
+    override, err := s.symbolOverrideRepo.GetOverride(ctx, pos.Symbol)
+    if err == nil && override != nil && override.Enabled {
+        profile, err := s.profileRepo.GetProfile(ctx, override.ProfileID)
+        if err == nil && profile != nil && profile.IsActive {
+            log.Debug().Str("profile_id", profile.ProfileID).Str("symbol", pos.Symbol).
+                Msg("Using symbol override profile")
+            return profile
+        }
+    }
 
-    # 4. Default
-    return load_profile("default_hybrid_v1")
+    // 3. Default
+    log.Debug().Str("symbol", pos.Symbol).Msg("Using default profile")
+    return s.defaultProfile
+}
 ```
+
+**우선순위 (높음 → 낮음):**
+```
+1. Position.exit_profile_id (포지션별 강제 설정) - 최우선
+2. symbol_exit_overrides (종목별 설정)
+3. default profile (기본값)
+```
+
+**특징:**
+- Position 레벨 설정이 Symbol 설정을 오버라이드
+- 각 단계에서 profile 로드 실패 시 다음 우선순위로 폴백
+- is_active=false인 프로파일은 자동 스킵
 
 **종목별 오버라이드 예시**:
 ```sql
