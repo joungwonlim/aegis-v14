@@ -328,7 +328,8 @@ func (r *PositionRepository) GetAvailableQty(ctx context.Context, positionID uui
 		locked_qty AS (
 			SELECT COALESCE(SUM(o.qty - o.filled_qty), 0) AS locked
 			FROM trade.orders o
-			WHERE o.position_id = $1
+			JOIN trade.order_intents oi ON o.intent_id = oi.intent_id
+			WHERE oi.position_id = $1
 			  AND o.status IN ('NEW', 'SUBMITTED', 'PARTIAL_FILLED')
 		)
 		SELECT
