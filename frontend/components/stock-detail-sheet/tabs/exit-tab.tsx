@@ -264,7 +264,10 @@ export function ExitTab({
               <Switch
                 id="exit-engine-toggle"
                 checked={holding.exit_mode === 'ENABLED'}
-                onCheckedChange={(enabled) => onExitModeToggle(enabled)}
+                onCheckedChange={(enabled) => {
+                  console.log('Exit tab switch toggled:', { symbol, enabled, current_mode: holding.exit_mode })
+                  onExitModeToggle(enabled)
+                }}
               />
               <span className="text-xs text-muted-foreground">
                 {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}

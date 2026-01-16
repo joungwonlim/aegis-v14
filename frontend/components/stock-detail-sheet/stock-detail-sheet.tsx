@@ -85,10 +85,23 @@ export function StockDetailSheet({
 
             <div className="flex items-start gap-3">
               {/* Stock Logo */}
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <span className="text-lg font-bold text-primary">
-                  {(stock.symbolName || stock.symbol).charAt(0)}
-                </span>
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                <img
+                  src={`https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock${stock.symbol}.svg`}
+                  alt={stock.symbolName || stock.symbol}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // Fallback to first letter if image fails to load
+                    e.currentTarget.style.display = 'none'
+                    const parent = e.currentTarget.parentElement
+                    if (parent) {
+                      const fallback = document.createElement('span')
+                      fallback.className = 'text-lg font-bold text-primary'
+                      fallback.textContent = (stock.symbolName || stock.symbol).charAt(0)
+                      parent.appendChild(fallback)
+                    }
+                  }}
+                />
               </div>
 
               {/* 종목정보 + 가격 */}
@@ -129,6 +142,7 @@ export function StockDetailSheet({
                   id="exit-engine-header"
                   checked={holding.exit_mode === 'ENABLED'}
                   onCheckedChange={(enabled) => {
+                    console.log('Header switch toggled:', { symbol: holding.symbol, enabled, current_mode: holding.exit_mode })
                     onExitModeToggle(holding, enabled)
                   }}
                 />
@@ -150,7 +164,7 @@ export function StockDetailSheet({
             const weight = totalEvaluation > 0 ? (evalAmount / totalEvaluation) * 100 : 0
 
             return (
-              <div className="mt-4 grid grid-cols-4 gap-x-4 gap-y-2 text-sm border-t pt-4">
+              <div className="mt-4 grid grid-cols-4 gap-x-4 gap-y-2 text-sm border rounded-lg bg-muted/30 p-4">
                 <div>
                   <div className="text-muted-foreground text-xs">보유수량</div>
                   <div className="font-medium">{qty.toLocaleString()}</div>
