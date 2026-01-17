@@ -792,7 +792,10 @@ export interface Stock {
   sector?: string
   industry?: string
   market_cap?: number
-  is_active: boolean
+  status: string            // ACTIVE, SUSPENDED, DELISTED
+  is_tradable: boolean
+  current_price?: number     // 현재가 (prices_best 조인)
+  change_rate?: number       // 전일대비 (%)
 }
 
 export interface DailyPrice {
@@ -818,10 +821,28 @@ export interface InvestorFlow {
   retail_net: number
 }
 
-export async function listStocks(params?: { market?: string; sector?: string; search?: string; limit?: number }): Promise<Stock[]> {
+export interface ListStocksResponse {
+  stocks: Stock[]
+  pagination: {
+    current_page: number
+    total_pages: number
+    total_count: number
+    limit: number
+  }
+}
+
+export async function listStocks(params?: {
+  market?: string
+  sector?: string
+  search?: string
+  page?: number
+  limit?: number
+}): Promise<ListStocksResponse> {
   let url = `${API_BASE_URL}/v1/stocks`
   const searchParams = new URLSearchParams()
   if (params?.market) searchParams.append('market', params.market)
+  if (params?.search) searchParams.append('search', params.search)
+  if (params?.page) searchParams.append('page', params.page.toString())
   if (params?.limit) searchParams.append('limit', params.limit.toString())
   if (searchParams.toString()) url += `?${searchParams.toString()}`
 
@@ -835,7 +856,32 @@ export async function listStocks(params?: { market?: string; sector?: string; se
   }
 
   const data = await response.json()
-  return data.data || []
+
+  // 응답 형식에 따라 처리
+  if (data.data && data.data.stocks) {
+    return data.data
+  } else if (Array.isArray(data.data)) {
+    // 구 API 형식 (배열만 반환)
+    return {
+      stocks: data.data,
+      pagination: {
+        current_page: 1,
+        total_pages: 1,
+        total_count: data.data.length,
+        limit: params?.limit || 50,
+      }
+    }
+  } else {
+    return {
+      stocks: [],
+      pagination: {
+        current_page: 1,
+        total_pages: 1,
+        total_count: 0,
+        limit: params?.limit || 50,
+      }
+    }
+  }
 }
 
 export async function getStock(code: string): Promise<Stock | null> {

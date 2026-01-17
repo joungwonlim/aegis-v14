@@ -24,6 +24,7 @@ import type { StockInfo, StockDetailTab } from './types'
 import { useStockPrice } from './hooks/use-stock-price'
 import { HoldingTab } from './tabs/holding-tab'
 import { PriceTab } from './tabs/price-tab'
+import { ChartTab } from './tabs/chart-tab'
 import { OrderTab } from './tabs/order-tab'
 import { ExitTab } from './tabs/exit-tab'
 import { useIsInWatchlist, useCreateWatchlistItem, useDeleteWatchlistItem } from '@/hooks/useWatchlist'
@@ -101,6 +102,7 @@ export function StockDetailSheet({
   const tabs = [
     { key: 'holding', label: '보유', icon: Package },
     { key: 'price', label: '시세', icon: TrendingUp },
+    { key: 'chart', label: '차트', icon: BarChart3 },
     { key: 'order', label: '주문', icon: ShoppingCart },
     { key: 'exit', label: 'Exit', icon: LogOut },
     // Phase 2에서 활성화
@@ -261,7 +263,7 @@ export function StockDetailSheet({
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
                 <tab.icon className="h-4 w-4" />
@@ -285,6 +287,14 @@ export function StockDetailSheet({
               symbol={stock.symbol}
               symbolName={stock.symbolName}
               priceInfo={priceInfo}
+            />
+          </TabsContent>
+
+          <TabsContent value="chart" className="mt-4">
+            <ChartTab
+              symbol={stock.symbol}
+              symbolName={stock.symbolName}
+              avgBuyPrice={holding?.avg_price}
             />
           </TabsContent>
 

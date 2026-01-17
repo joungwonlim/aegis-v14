@@ -180,7 +180,10 @@ func main() {
 	// Register Stocks routes
 	routes.RegisterStocksRoutes(httpRouter, dbPool)
 
-	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks)")
+	// Register Chart routes (simple price/flow history for charts)
+	routes.RegisterChartRoutes(httpRouter, dbPool)
+
+	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts)")
 
 	// Wrap with CORS
 	handler := gorillaHandlers.CORS(allowedOrigins, allowedMethods, allowedHeaders, allowCredentials)(httpRouter)

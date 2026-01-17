@@ -42,6 +42,20 @@ export interface DailyPrice {
 }
 
 /**
+ * 투자자별 매매동향 (수급 데이터)
+ */
+export interface InvestorFlow {
+  date: string            // YYYY-MM-DD
+  foreign_net: number     // 외국인 순매수 (주)
+  inst_net: number        // 기관 순매수 (주)
+  retail_net: number      // 개인 순매수 (주)
+  close_price: number     // 종가
+  price_change: number    // 전일대비 (원)
+  change_rate: number     // 전일대비 (%)
+  volume: number          // 거래량
+}
+
+/**
  * StockDetailSheet 탭 종류
  */
-export type StockDetailTab = 'holding' | 'price' | 'order' | 'exit' | 'investment' | 'consensus' | 'ai'
+export type StockDetailTab = 'holding' | 'price' | 'chart' | 'order' | 'exit' | 'investment' | 'consensus' | 'ai'
