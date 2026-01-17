@@ -174,7 +174,13 @@ func main() {
 	// Register Exit routes
 	routes.RegisterExitRoutes(httpRouter, exitSvc)
 
-	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS)")
+	// Register Watchlist routes
+	routes.RegisterWatchlistRoutes(httpRouter, dbPool)
+
+	// Register Stocks routes
+	routes.RegisterStocksRoutes(httpRouter, dbPool)
+
+	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks)")
 
 	// Wrap with CORS
 	handler := gorillaHandlers.CORS(allowedOrigins, allowedMethods, allowedHeaders, allowCredentials)(httpRouter)

@@ -26,6 +26,8 @@ import { HoldingTab } from './tabs/holding-tab'
 import { PriceTab } from './tabs/price-tab'
 import { OrderTab } from './tabs/order-tab'
 import { ExitTab } from './tabs/exit-tab'
+import { useIsInWatchlist, useCreateWatchlistItem, useDeleteWatchlistItem } from '@/hooks/useWatchlist'
+import { toast } from 'sonner'
 
 interface StockDetailSheetProps {
   stock: StockInfo | null
@@ -62,6 +64,37 @@ export function StockDetailSheet({
 
   // 해당 종목의 보유 정보 찾기
   const holding = holdings.find((h) => h.symbol === stock?.symbol)
+
+  // Watchlist 관련 hooks
+  const { isInWatchlist, item: watchlistItem } = useIsInWatchlist(stock?.symbol || '')
+  const createWatchlistItem = useCreateWatchlistItem()
+  const deleteWatchlistItem = useDeleteWatchlistItem()
+
+  // Watchlist 추가/삭제 핸들러
+  const handleToggleWatchlist = async () => {
+    if (!stock) return
+
+    if (isInWatchlist && watchlistItem) {
+      // 삭제
+      try {
+        await deleteWatchlistItem.mutateAsync(watchlistItem.id)
+        toast.success('관심종목에서 삭제되었습니다')
+      } catch (error) {
+        toast.error('삭제 실패: ' + (error instanceof Error ? error.message : '알 수 없는 오류'))
+      }
+    } else {
+      // 추가 (기본: 관심종목)
+      try {
+        await createWatchlistItem.mutateAsync({
+          stock_code: stock.symbol,
+          category: 'watch',
+        })
+        toast.success('관심종목에 추가되었습니다')
+      } catch (error) {
+        toast.error('추가 실패: ' + (error instanceof Error ? error.message : '알 수 없는 오류'))
+      }
+    }
+  }
 
   if (!stock) return null
 
@@ -132,24 +165,45 @@ export function StockDetailSheet({
               </div>
             </div>
 
-            {/* Exit Engine 스위치 (오른쪽 정렬) */}
-            {holding && (
-              <div className="flex items-center gap-2">
-                <Label htmlFor="exit-engine-header" className="text-sm font-medium">
-                  Exit Engine
-                </Label>
-                <Switch
-                  id="exit-engine-header"
-                  checked={holding.exit_mode === 'ENABLED'}
-                  onCheckedChange={(enabled) => {
-                    onExitModeToggle(holding, enabled)
-                  }}
+            {/* 우측 액션 버튼들 */}
+            <div className="flex items-center gap-3">
+              {/* Watchlist 추가/삭제 버튼 (별 아이콘만) */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleToggleWatchlist}
+                disabled={createWatchlistItem.isPending || deleteWatchlistItem.isPending}
+                className="h-9 w-9"
+                title={isInWatchlist ? '관심종목에서 제거' : '관심종목에 추가'}
+              >
+                <Star
+                  className={`h-5 w-5 ${
+                    isInWatchlist
+                      ? 'fill-yellow-500 text-yellow-500'
+                      : 'text-muted-foreground'
+                  }`}
                 />
-                <span className="text-xs text-muted-foreground">
-                  {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
-                </span>
-              </div>
-            )}
+              </Button>
+
+              {/* Exit Engine 스위치 */}
+              {holding && (
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="exit-engine-header" className="text-sm font-medium">
+                    Exit Engine
+                  </Label>
+                  <Switch
+                    id="exit-engine-header"
+                    checked={holding.exit_mode === 'ENABLED'}
+                    onCheckedChange={(enabled) => {
+                      onExitModeToggle(holding, enabled)
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 보유 정보 요약 */}

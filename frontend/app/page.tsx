@@ -786,7 +786,13 @@ export default function RuntimeDashboard() {
 
                   return (
                     <TableRow key={intent.intent_id}>
-                      <TableCell>
+                      <TableCell
+                        className="cursor-pointer hover:opacity-80"
+                        onClick={() => openStockDetail({
+                          symbol: intent.symbol,
+                          symbolName: intent.symbol_name || intent.symbol,
+                        })}
+                      >
                         <StockSymbol
                           symbol={intent.symbol}
                           symbolName={intent.symbol_name}
@@ -954,7 +960,13 @@ export default function RuntimeDashboard() {
 
                     return (
                       <TableRow key={intent.intent_id}>
-                        <TableCell>
+                        <TableCell
+                          className="cursor-pointer hover:opacity-80"
+                          onClick={() => openStockDetail({
+                            symbol: intent.symbol,
+                            symbolName: intent.symbol_name || intent.symbol,
+                          })}
+                        >
                           <StockSymbol
                             symbol={intent.symbol}
                             symbolName={intent.symbol_name}
@@ -993,7 +1005,10 @@ export default function RuntimeDashboard() {
                           <div className="flex gap-2 justify-center">
                             <Button
                               size="sm"
-                              onClick={() => handleApprove(intent.intent_id)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleApprove(intent.intent_id)
+                              }}
                               className="bg-green-600 hover:bg-green-700"
                             >
                               주문 실행
@@ -1001,7 +1016,10 @@ export default function RuntimeDashboard() {
                             <Button
                               size="sm"
                               variant="destructive"
-                              onClick={() => handleReject(intent.intent_id)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleReject(intent.intent_id)
+                              }}
                             >
                               삭제
                             </Button>
@@ -1140,7 +1158,13 @@ export default function RuntimeDashboard() {
 
                     return (
                       <TableRow key={intent.intent_id}>
-                        <TableCell>
+                        <TableCell
+                          className="cursor-pointer hover:opacity-80"
+                          onClick={() => openStockDetail({
+                            symbol: intent.symbol,
+                            symbolName: intent.symbol_name || intent.symbol,
+                          })}
+                        >
                           <StockSymbol
                             symbol={intent.symbol}
                             symbolName={intent.symbol_name}
@@ -1254,7 +1278,13 @@ export default function RuntimeDashboard() {
                   return (
                     <TableRow key={order.OrderID}>
                       <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
-                      <TableCell>
+                      <TableCell
+                        className="cursor-pointer hover:opacity-80"
+                        onClick={() => openStockDetail({
+                          symbol: order.Symbol,
+                          symbolName: order.Raw?.stock_name || order.Symbol,
+                        })}
+                      >
                         <StockSymbol
                           symbol={order.Symbol}
                           symbolName={order.Raw?.stock_name}
@@ -1286,7 +1316,10 @@ export default function RuntimeDashboard() {
                           variant="ghost"
                           size="sm"
                           className="text-destructive hover:text-destructive"
-                          onClick={() => handleCancelOrder(order.OrderID, order.Raw?.stock_name)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleCancelOrder(order.OrderID, order.Raw?.stock_name)
+                          }}
                         >
                           삭제
                         </Button>
@@ -1361,7 +1394,13 @@ export default function RuntimeDashboard() {
                   return (
                     <TableRow key={fill.ExecID}>
                       <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
-                      <TableCell>
+                      <TableCell
+                        className="cursor-pointer hover:opacity-80"
+                        onClick={() => openStockDetail({
+                          symbol: fill.Symbol,
+                          symbolName: fill.Raw?.stock_name || fill.Symbol,
+                        })}
+                      >
                         <StockSymbol
                           symbol={fill.Symbol}
                           symbolName={fill.Raw?.stock_name}

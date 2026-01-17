@@ -23,7 +23,9 @@ var frontendCmd = &cobra.Command{
 
 Examples:
   go run ./cmd/quant frontend start              # Dev 서버 시작 (기본: 3099)
-  go run ./cmd/quant frontend start --port=3001  # 포트 지정`,
+  go run ./cmd/quant frontend start --port=3001  # 포트 지정
+  go run ./cmd/quant frontend stop               # Dev 서버 종료 (기본: 3099)
+  go run ./cmd/quant frontend stop --port=3001   # 특정 포트 종료`,
 }
 
 // frontendStartCmd frontend 서버 시작
@@ -34,9 +36,19 @@ var frontendStartCmd = &cobra.Command{
 	RunE:  runFrontendStart,
 }
 
+// frontendStopCmd frontend 서버 종료
+var frontendStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Frontend 개발 서버 종료",
+	Long:  `실행 중인 Frontend 개발 서버를 종료합니다 (포트 기반).`,
+	RunE:  runFrontendStop,
+}
+
 func init() {
 	frontendStartCmd.Flags().StringVar(&frontendPort, "port", "3099", "Dev 서버 포트")
+	frontendStopCmd.Flags().StringVar(&frontendPort, "port", "3099", "종료할 서버 포트")
 	frontendCmd.AddCommand(frontendStartCmd)
+	frontendCmd.AddCommand(frontendStopCmd)
 }
 
 func runFrontendStart(cmd *cobra.Command, args []string) error {
@@ -92,6 +104,16 @@ func runFrontendStart(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("✅ Frontend 개발 서버 종료 완료")
+	return nil
+}
+
+func runFrontendStop(cmd *cobra.Command, args []string) error {
+	fmt.Printf("🛑 Frontend 서버 종료 중 (포트: %s)...\n", frontendPort)
+
+	// 포트 기반으로 프로세스 종료
+	killExistingFrontend(frontendPort)
+
+	fmt.Println("✅ Frontend 서버 종료 완료")
 	return nil
 }
 

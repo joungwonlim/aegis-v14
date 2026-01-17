@@ -125,55 +125,134 @@ func runBackendStop(cmd *cobra.Command, args []string) error {
 
 // killExistingBackend 기존 백엔드 프로세스 종료
 func killExistingBackend() {
-	// pgrep으로 기존 프로세스 찾기
-	patterns := []string{"cmd/runtime", "cmd/api", "quant backend start"}
+	killed := false
 
-	for _, pattern := range patterns {
-		cmd := exec.Command("pgrep", "-f", pattern)
-		var out bytes.Buffer
-		cmd.Stdout = &out
+	// 1. 포트 기반 종료 (API 서버: 8099)
+	if killProcessByPort("8099") {
+		killed = true
+	}
 
-		if err := cmd.Run(); err != nil {
-			continue // 프로세스 없음
-		}
-
-		pids := strings.TrimSpace(out.String())
-		if pids == "" {
-			continue
-		}
-
-		// 현재 프로세스 PID 제외
-		currentPID := os.Getpid()
-		for _, pidStr := range strings.Split(pids, "\n") {
-			pidStr = strings.TrimSpace(pidStr)
-			if pidStr == "" {
-				continue
-			}
-
-			pid, err := strconv.Atoi(pidStr)
-			if err != nil {
-				continue
-			}
-
-			// 현재 프로세스와 부모 프로세스 제외
-			if pid == currentPID || pid == os.Getppid() {
-				continue
-			}
-
-			// 프로세스 종료 (SIGTERM)
-			if proc, err := os.FindProcess(pid); err == nil {
-				fmt.Printf("기존 백엔드 프로세스 종료 (PID: %d)\n", pid)
-				proc.Signal(syscall.SIGTERM)
-
-				// 잠시 대기 후 강제 종료
-				go func(p *os.Process) {
-					exec.Command("sleep", "0.1").Run()
-					p.Signal(syscall.SIGKILL)
-				}(proc)
-			}
+	// 2. pkill로 강제 종료 (go run 임시 바이너리 + 서비스명)
+	pkillPatterns := []string{
+		"exe/runtime",  // go run으로 실행된 runtime
+		"exe/api",      // go run으로 실행된 api
+		"aegis-v14-runtime",
+		"aegis-v14-api",
+	}
+	for _, pattern := range pkillPatterns {
+		if pkillProcess(pattern) {
+			killed = true
 		}
 	}
 
-	// 포트가 해제될 때까지 잠시 대기
+	// 3. 프로세스 패턴 기반 종료 (go run 명령어 자체)
+	pgrepPatterns := []string{"cmd/runtime", "cmd/api"}
+	for _, pattern := range pgrepPatterns {
+		if killProcessByPattern(pattern) {
+			killed = true
+		}
+	}
+
+	if killed {
+		// 포트가 해제될 때까지 대기
+		exec.Command("sleep", "1").Run()
+	}
+}
+
+// pkillProcess pkill로 프로세스 강제 종료
+func pkillProcess(pattern string) bool {
+	// 먼저 프로세스 존재 여부 확인
+	check := exec.Command("pgrep", "-f", pattern)
+	if err := check.Run(); err != nil {
+		return false // 프로세스 없음
+	}
+
+	fmt.Printf("pkill로 프로세스 종료: %s\n", pattern)
+
+	// SIGTERM 시도
+	exec.Command("pkill", "-f", pattern).Run()
+
+	// 잠시 대기 후 SIGKILL
 	exec.Command("sleep", "0.5").Run()
+	exec.Command("pkill", "-9", "-f", pattern).Run()
+
+	return true
+}
+
+// killProcessByPort 지정된 포트를 사용하는 프로세스 종료
+func killProcessByPort(port string) bool {
+	out, err := exec.Command("lsof", "-ti", fmt.Sprintf(":%s", port)).Output()
+	if err != nil {
+		return false
+	}
+
+	pids := strings.Fields(strings.TrimSpace(string(out)))
+	if len(pids) == 0 {
+		return false
+	}
+
+	fmt.Printf("포트 %s 사용 프로세스 종료 중... (PIDs: %v)\n", port, pids)
+
+	for _, pidStr := range pids {
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+		if proc, err := os.FindProcess(pid); err == nil {
+			proc.Signal(syscall.SIGTERM)
+			// 잠시 대기 후 강제 종료
+			go func(p *os.Process) {
+				exec.Command("sleep", "0.5").Run()
+				p.Signal(syscall.SIGKILL)
+			}(proc)
+		}
+	}
+	return true
+}
+
+// killProcessByPattern 패턴과 일치하는 프로세스 종료
+func killProcessByPattern(pattern string) bool {
+	cmd := exec.Command("pgrep", "-f", pattern)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+
+	pids := strings.TrimSpace(out.String())
+	if pids == "" {
+		return false
+	}
+
+	killed := false
+	currentPID := os.Getpid()
+
+	for _, pidStr := range strings.Split(pids, "\n") {
+		pidStr = strings.TrimSpace(pidStr)
+		if pidStr == "" {
+			continue
+		}
+
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+
+		// 현재 프로세스와 부모 프로세스 제외
+		if pid == currentPID || pid == os.Getppid() {
+			continue
+		}
+
+		if proc, err := os.FindProcess(pid); err == nil {
+			fmt.Printf("프로세스 종료: %s (PID: %d)\n", pattern, pid)
+			proc.Signal(syscall.SIGTERM)
+			go func(p *os.Process) {
+				exec.Command("sleep", "0.5").Run()
+				p.Signal(syscall.SIGKILL)
+			}(proc)
+			killed = true
+		}
+	}
+	return killed
 }
