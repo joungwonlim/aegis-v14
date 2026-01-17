@@ -14,6 +14,9 @@ func RegisterStocksRoutes(router *mux.Router, dbPool *postgres.Pool) {
 	// API v1 routes
 	v1 := router.PathPrefix("/api/v1/stocks").Subrouter()
 
+	// GET /api/v1/stocks - List stocks
+	v1.HandleFunc("", stocksHandler.List).Methods("GET")
+
 	// GET /api/v1/stocks/search - Search stocks
 	v1.HandleFunc("/search", stocksHandler.Search).Methods("GET")
 }

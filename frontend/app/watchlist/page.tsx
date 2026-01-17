@@ -464,6 +464,10 @@ export default function WatchlistPage() {
         open={isStockDetailOpen}
         onOpenChange={handleOpenChange}
         holdings={holdings}
+        unfilledOrders={[]}
+        executedOrders={[]}
+        totalEvaluation={0}
+        onExitModeToggle={() => {}}
       />
     </div>
   );

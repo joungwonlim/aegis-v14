@@ -623,3 +623,399 @@ export async function getPositionState(positionId: string): Promise<PositionStat
 
   return response.json()
 }
+
+// =====================================
+// Audit API
+// =====================================
+
+export type AuditPeriod = '1M' | '3M' | '6M' | '1Y' | 'YTD'
+
+export interface PerformanceReport {
+  report_date: string
+  period_start: string
+  period_end: string
+  period_code: string
+  total_return: number
+  annual_return: number
+  benchmark_return: number
+  alpha: number
+  beta: number
+  volatility: number
+  sharpe_ratio: number
+  sortino_ratio: number
+  max_drawdown: number
+  win_rate: number
+  avg_win: number
+  avg_loss: number
+  profit_factor: number
+  total_trades: number
+}
+
+export interface DailyPnL {
+  pnl_date: string
+  realized_pnl: number
+  unrealized_pnl: number
+  total_pnl: number
+  daily_return: number
+  cumulative_return: number
+  portfolio_value: number
+  cash_balance: number
+  position_count: number
+}
+
+export interface AttributionAnalysis {
+  analysis_date: string
+  period_start: string
+  period_end: string
+  total_return: number
+  factor_contrib: Record<string, number>
+  sector_contrib: Record<string, number>
+  stock_contrib: Record<string, number>
+}
+
+export interface RiskMetrics {
+  metric_date: string
+  portfolio_var_95: number
+  portfolio_var_99: number
+  concentration: number
+  market_correlation: number
+  sector_exposure: Record<string, number>
+  avg_turnover_ratio: number
+  illiquid_weight: number
+}
+
+export interface DailySnapshot {
+  date: string
+  total_value: number
+  cash: number
+  positions: unknown[]
+  daily_return: number
+  cum_return: number
+}
+
+export async function getPerformance(period: AuditPeriod = '1M'): Promise<PerformanceReport | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/audit/performance?period=${period}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    const data = await response.json()
+    if (data.error === 'Insufficient data for analysis') return null
+    throw new Error(`Failed to get performance: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}
+
+export async function getDailyPnL(startDate?: string, endDate?: string): Promise<DailyPnL[]> {
+  let url = `${API_BASE_URL}/v1/audit/daily-pnl`
+  const params = new URLSearchParams()
+  if (startDate) params.append('start_date', startDate)
+  if (endDate) params.append('end_date', endDate)
+  if (params.toString()) url += `?${params.toString()}`
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get daily PnL: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+export async function getAttribution(period: AuditPeriod = '1M'): Promise<AttributionAnalysis | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/audit/attribution?period=${period}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    const data = await response.json()
+    if (data.error === 'Insufficient data for analysis') return null
+    throw new Error(`Failed to get attribution: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}
+
+export async function getRiskMetrics(period: AuditPeriod = '1M'): Promise<RiskMetrics | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/audit/risk?period=${period}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    const data = await response.json()
+    if (data.error === 'Insufficient data for analysis') return null
+    throw new Error(`Failed to get risk metrics: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}
+
+export async function getSnapshots(startDate?: string, endDate?: string): Promise<DailySnapshot[]> {
+  let url = `${API_BASE_URL}/v1/audit/snapshots`
+  const params = new URLSearchParams()
+  if (startDate) params.append('start_date', startDate)
+  if (endDate) params.append('end_date', endDate)
+  if (params.toString()) url += `?${params.toString()}`
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get snapshots: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+// =====================================
+// Fetcher API (Stocks Universe)
+// =====================================
+
+export interface Stock {
+  stock_code: string
+  stock_name: string
+  market: string
+  sector?: string
+  industry?: string
+  market_cap?: number
+  is_active: boolean
+}
+
+export interface DailyPrice {
+  trade_date: string
+  open_price: number
+  high_price: number
+  low_price: number
+  close_price: number
+  volume: number
+  change_rate: number
+}
+
+export interface InvestorFlow {
+  trade_date: string
+  foreign_buy: number
+  foreign_sell: number
+  foreign_net: number
+  inst_buy: number
+  inst_sell: number
+  inst_net: number
+  retail_buy: number
+  retail_sell: number
+  retail_net: number
+}
+
+export async function listStocks(params?: { market?: string; sector?: string; search?: string; limit?: number }): Promise<Stock[]> {
+  let url = `${API_BASE_URL}/v1/stocks`
+  const searchParams = new URLSearchParams()
+  if (params?.market) searchParams.append('market', params.market)
+  if (params?.limit) searchParams.append('limit', params.limit.toString())
+  if (searchParams.toString()) url += `?${searchParams.toString()}`
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to list stocks: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+export async function getStock(code: string): Promise<Stock | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/fetcher/stocks/${code}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (response.status === 404) return null
+  if (!response.ok) {
+    throw new Error(`Failed to get stock: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}
+
+export async function getStockData(code: string): Promise<{ stock: Stock; latestPrice: DailyPrice | null; latestFlow: InvestorFlow | null }> {
+  const response = await fetch(`${API_BASE_URL}/v1/fetcher/stocks/${code}/data`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get stock data: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}
+
+export async function getPriceHistory(code: string, startDate?: string, endDate?: string): Promise<DailyPrice[]> {
+  let url = `${API_BASE_URL}/v1/fetcher/prices/${code}/history`
+  const params = new URLSearchParams()
+  if (startDate) params.append('start_date', startDate)
+  if (endDate) params.append('end_date', endDate)
+  if (params.toString()) url += `?${params.toString()}`
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get price history: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+export async function getFlowHistory(code: string, startDate?: string, endDate?: string): Promise<InvestorFlow[]> {
+  let url = `${API_BASE_URL}/v1/fetcher/flows/${code}/history`
+  const params = new URLSearchParams()
+  if (startDate) params.append('start_date', startDate)
+  if (endDate) params.append('end_date', endDate)
+  if (params.toString()) url += `?${params.toString()}`
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get flow history: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+export async function searchStocks(query: string): Promise<Stock[]> {
+  const response = await fetch(`${API_BASE_URL}/v1/stocks/search?q=${encodeURIComponent(query)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to search stocks: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.results || []
+}
+
+// =====================================
+// Signals API
+// =====================================
+
+export interface SignalSnapshot {
+  id: string
+  calc_date: string
+  total_count: number
+  buy_count: number
+  sell_count: number
+  created_at: string
+}
+
+export interface FactorScore {
+  stock_code: string
+  stock_name?: string
+  calc_date: string
+  momentum: number
+  technical: number
+  value: number
+  quality: number
+  flow: number
+  event: number
+  total_score: number
+}
+
+export interface Signal {
+  stock_code: string
+  stock_name?: string
+  signal_type: 'BUY' | 'SELL'
+  total_score: number
+  momentum: number
+  technical: number
+  value: number
+  quality: number
+  flow: number
+  event: number
+  current_price?: number
+  change_rate?: number
+}
+
+export async function getLatestSignalSnapshot(): Promise<SignalSnapshot | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/signals/snapshot/latest`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (response.status === 404) return null
+  if (!response.ok) {
+    throw new Error(`Failed to get latest signal snapshot: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}
+
+export async function getBuySignals(snapshotId: string): Promise<Signal[]> {
+  const response = await fetch(`${API_BASE_URL}/v1/signals/snapshot/${snapshotId}/buy`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get buy signals: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+export async function getSellSignals(snapshotId: string): Promise<Signal[]> {
+  const response = await fetch(`${API_BASE_URL}/v1/signals/snapshot/${snapshotId}/sell`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get sell signals: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data || []
+}
+
+export async function getFactors(symbol: string): Promise<FactorScore | null> {
+  const response = await fetch(`${API_BASE_URL}/v1/signals/factors/${symbol}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (response.status === 404) return null
+  if (!response.ok) {
+    throw new Error(`Failed to get factors: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  return data.data
+}

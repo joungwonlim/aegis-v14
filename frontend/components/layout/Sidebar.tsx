@@ -8,11 +8,17 @@ import {
   Settings,
   HelpCircle,
   ChevronRight,
+  BarChart3,
+  Database,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { icon: Home, label: 'Home', href: '/' },
+  { icon: BarChart3, label: 'Performance', href: '/performance' },
+  { icon: Database, label: 'Stocks', href: '/stocks' },
+  { icon: TrendingUp, label: 'Signals', href: '/signals' },
   { icon: Star, label: 'Watchlist', href: '/watchlist' },
 ];
 

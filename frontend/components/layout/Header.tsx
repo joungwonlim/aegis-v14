@@ -354,6 +354,10 @@ export function Header() {
         open={isStockDetailOpen}
         onOpenChange={handleOpenChange}
         holdings={holdings}
+        unfilledOrders={[]}
+        executedOrders={[]}
+        totalEvaluation={0}
+        onExitModeToggle={() => {}}
       />
     </header>
   );
