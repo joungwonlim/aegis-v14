@@ -83,8 +83,8 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | 모듈 | 문서 | 상태 | 설명 |
 |------|------|------|------|
 | Fetcher | `modules/fetcher.md` | ✅ 완료 | 외부 데이터 수집 (Naver, DART) - v14 구현 완료 |
-| Signals-Factors | `modules/signals-factors.md` | 📋 설계 | 6팩터 신호 생성 (v13 → v14 마이그레이션) |
-| Audit | `modules/audit.md` | 📋 설계 | 감사 로그 시스템 (v13 → v14 마이그레이션) |
+| Signals-Factors | `modules/signals-factors.md` | ✅ 완료 | 6팩터 신호 생성 - v14 구현 완료 |
+| Audit | `modules/audit.md` | ✅ 완료 | 성과 분석 및 리스크 모니터링 - v14 구현 완료 |
 
 ### 인프라 모듈
 
