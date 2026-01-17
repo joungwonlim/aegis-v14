@@ -12,12 +12,16 @@ import { ChangeIndicator } from '@/components/ui/change-indicator'
 import { approveIntent, rejectIntent, updateExitMode, cancelKISOrder, type Holding, type OrderIntent, type Order, type Fill, type KISUnfilledOrder, type KISFill } from '@/lib/api'
 import { useHoldings, useOrderIntents, useOrders, useFills, useKISUnfilledOrders, useKISFilledOrders } from '@/hooks/useRuntimeData'
 import { toast } from 'sonner'
+import { useQueryClient } from '@tanstack/react-query'
 
 type SortField = 'symbol' | 'qty' | 'pnl' | 'pnl_pct' | 'avg_price' | 'current_price' | 'eval_amount' | 'purchase_amount' | 'weight'
 type IntentSortField = 'symbol' | 'current_price' | 'order_price' | 'deviation' | 'qty' | 'created_ts'
 type SortOrder = 'asc' | 'desc'
 
 export default function RuntimeDashboard() {
+  // React Query Client
+  const queryClient = useQueryClient()
+
   // React Query 훅으로 데이터 조회 (1초마다 자동 갱신)
   const { data: holdings = [], isLoading: holdingsLoading, error: holdingsError, refetch: refetchHoldings } = useHoldings()
   const { data: intents = [], isLoading: intentsLoading, refetch: refetchIntents } = useOrderIntents()
@@ -303,18 +307,27 @@ export default function RuntimeDashboard() {
   }
 
   const handleExitModeToggle = async (holding: Holding, enabled: boolean) => {
-    try {
-      const exitMode = enabled ? 'ENABLED' : 'DISABLED'
-      console.log('Updating exit mode:', { account_id: holding.account_id, symbol: holding.symbol, exitMode })
+    const exitMode = enabled ? 'ENABLED' : 'DISABLED'
 
-      const result = await updateExitMode(holding.account_id, holding.symbol, exitMode, {
+    try {
+      // Update API
+      await updateExitMode(holding.account_id, holding.symbol, exitMode, {
         qty: holding.qty,
         avg_price: typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price,
       })
-      console.log('Update result:', result)
 
-      // Refresh holdings after update
-      await refetchHoldings()
+      // Immediately update local cache for instant UI feedback
+      queryClient.setQueryData(['runtime', 'holdings'], (old: Holding[] | undefined) => {
+        if (!old) return old
+        return old.map(h =>
+          h.symbol === holding.symbol && h.account_id === holding.account_id
+            ? { ...h, exit_mode: exitMode }
+            : h
+        )
+      })
+
+      // Also refetch in background to ensure sync
+      refetchHoldings()
     } catch (err) {
       console.error('Failed to update exit mode:', err)
       // Revert by refetching
