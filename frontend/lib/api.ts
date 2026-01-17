@@ -1062,3 +1062,32 @@ export async function getFactors(symbol: string): Promise<FactorScore | null> {
   const data = await response.json()
   return data.data
 }
+
+// ============================================================================
+// Fetcher API
+// ============================================================================
+
+export interface TableStat {
+  name: string
+  display_name: string
+  count: number
+  last_update: string
+  status: string
+}
+
+export interface TableStatsResponse {
+  tables: TableStat[]
+}
+
+export async function getTableStats(): Promise<TableStatsResponse> {
+  const response = await fetch(`${API_BASE_URL}/v1/fetcher/tables/stats`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get table stats: ${response.statusText}`)
+  }
+
+  return await response.json()
+}

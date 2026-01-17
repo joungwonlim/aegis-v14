@@ -2,6 +2,7 @@ package routes
 
 import (
 	"github.com/gorilla/mux"
+	"github.com/wonny/aegis/v14/internal/api/handlers"
 	fetcherHandlers "github.com/wonny/aegis/v14/internal/api/handlers/fetcher"
 )
 
@@ -9,7 +10,10 @@ import (
 func RegisterFetcherRoutes(
 	router *mux.Router,
 	fetcherHandler *fetcherHandlers.Handler,
+	statusHandler *handlers.FetcherStatusHandler,
 ) {
+	// Status endpoints
+	router.HandleFunc("/api/v1/fetcher/tables/stats", statusHandler.GetTableStats).Methods("GET")
 	// Stock endpoints
 	router.HandleFunc("/api/v1/fetcher/stocks", fetcherHandler.ListStocks).Methods("GET")
 	router.HandleFunc("/api/v1/fetcher/stocks/{code}", fetcherHandler.GetStock).Methods("GET")

@@ -5,79 +5,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Activity, Database, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { getTableStats } from '@/lib/api'
 
-// API 함수 (나중에 lib/api.ts로 이동)
-async function getFetcherStatus() {
-  // Placeholder - 나중에 실제 API로 교체
-  return {
+export default function FetcherPage() {
+  // Placeholder for fetcher status (to be implemented)
+  const fetcherStatus = {
     active: true,
     lastRun: new Date().toISOString(),
     nextRun: new Date(Date.now() + 3600000).toISOString(),
   }
-}
+  const statusLoading = false
 
-async function getTableStats() {
-  // Placeholder - 나중에 실제 API로 교체
-  return {
-    tables: [
-      {
-        name: 'stocks',
-        displayName: '종목 마스터',
-        count: 2547,
-        lastUpdate: new Date(Date.now() - 3600000).toISOString(),
-        status: 'active',
-      },
-      {
-        name: 'daily_prices',
-        displayName: '일봉 데이터',
-        count: 1234567,
-        lastUpdate: new Date(Date.now() - 7200000).toISOString(),
-        status: 'active',
-      },
-      {
-        name: 'investor_flow',
-        displayName: '투자자별 수급',
-        count: 987654,
-        lastUpdate: new Date(Date.now() - 10800000).toISOString(),
-        status: 'active',
-      },
-      {
-        name: 'fundamentals',
-        displayName: '재무 데이터',
-        count: 54321,
-        lastUpdate: new Date(Date.now() - 86400000).toISOString(),
-        status: 'stale',
-      },
-      {
-        name: 'market_cap',
-        displayName: '시가총액',
-        count: 43210,
-        lastUpdate: new Date(Date.now() - 14400000).toISOString(),
-        status: 'active',
-      },
-      {
-        name: 'disclosures',
-        displayName: 'DART 공시',
-        count: 12345,
-        lastUpdate: new Date(Date.now() - 21600000).toISOString(),
-        status: 'active',
-      },
-    ],
-  }
-}
-
-export default function FetcherPage() {
-  const { data: fetcherStatus, isLoading: statusLoading } = useQuery({
-    queryKey: ['fetcherStatus'],
-    queryFn: getFetcherStatus,
-    refetchInterval: 30000, // 30초마다 갱신
-  })
-
-  const { data: tableStats, isLoading: statsLoading } = useQuery({
+  const { data: tableStatsData, isLoading: statsLoading } = useQuery({
     queryKey: ['tableStats'],
     queryFn: getTableStats,
     refetchInterval: 60000, // 1분마다 갱신
   })
+
+  const tableStats = tableStatsData?.tables || []
 
   const formatTimestamp = (ts: string) => {
     return new Date(ts).toLocaleString('ko-KR', {
@@ -187,10 +132,10 @@ export default function FetcherPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tableStats?.tables.map((table) => (
+                {tableStats.map((table) => (
                   <TableRow key={table.name}>
                     <TableCell>
-                      <div className="font-medium">{table.displayName}</div>
+                      <div className="font-medium">{table.display_name}</div>
                       <div className="text-xs text-muted-foreground font-mono">
                         data.{table.name}
                       </div>
@@ -199,10 +144,16 @@ export default function FetcherPage() {
                       {table.count.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="text-sm">{formatRelativeTime(table.lastUpdate)}</div>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        {formatTimestamp(table.lastUpdate)}
-                      </div>
+                      {table.last_update ? (
+                        <>
+                          <div className="text-sm">{formatRelativeTime(table.last_update)}</div>
+                          <div className="text-xs text-muted-foreground font-mono">
+                            {formatTimestamp(table.last_update)}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">-</div>
+                      )}
                     </TableCell>
                     <TableCell className="text-center">
                       <Badge

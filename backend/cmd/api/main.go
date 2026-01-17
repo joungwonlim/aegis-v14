@@ -190,7 +190,11 @@ func main() {
 	// Register Chart routes (simple price/flow history for charts)
 	routes.RegisterChartRoutes(httpRouter, dbPool)
 
-	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts)")
+	// Register Fetcher routes
+	fetcherStatusHandler := handlers.NewFetcherStatusHandler(dbPool.Pool)
+	routes.RegisterFetcherRoutes(httpRouter, nil, fetcherStatusHandler)
+
+	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts, Fetcher)")
 
 	// Wrap with CORS
 	handler := gorillaHandlers.CORS(allowedOrigins, allowedMethods, allowedHeaders, allowCredentials)(httpRouter)
