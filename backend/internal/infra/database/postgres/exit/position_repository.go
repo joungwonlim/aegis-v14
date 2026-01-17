@@ -241,9 +241,57 @@ func (r *PositionRepository) UpdateExitMode(ctx context.Context, positionID uuid
 }
 
 // UpdateExitModeBySymbol updates exit mode by account_id and symbol
-// If position doesn't exist, creates it from holding data
-func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string) error {
-	// Use UPSERT: INSERT if not exists, UPDATE if exists
+// If position doesn't exist, creates it from holding data (either from provided params or holdings table)
+func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string, qty *int64, avgPrice *float64) error {
+	// If qty and avgPrice are provided, use direct INSERT
+	if qty != nil && avgPrice != nil {
+		avgPriceDec := decimal.NewFromFloat(*avgPrice)
+		query := `
+			INSERT INTO trade.positions (
+				position_id,
+				account_id,
+				symbol,
+				side,
+				qty,
+				original_qty,
+				avg_price,
+				entry_ts,
+				status,
+				exit_mode,
+				exit_profile_id,
+				strategy_id,
+				updated_ts,
+				version
+			)
+			VALUES (
+				gen_random_uuid(),
+				$1,
+				$2,
+				'LONG',
+				$3,
+				$3,
+				$4,
+				NOW(),
+				'OPEN',
+				$5,
+				NULL,
+				'MANUAL',
+				NOW(),
+				1
+			)
+			ON CONFLICT (account_id, symbol)
+			DO UPDATE SET
+				exit_mode = EXCLUDED.exit_mode,
+				updated_ts = NOW()
+		`
+		_, err := r.pool.Exec(ctx, query, accountID, symbol, *qty, avgPriceDec, mode)
+		if err != nil {
+			return fmt.Errorf("upsert exit mode by symbol (direct): %w", err)
+		}
+		return nil
+	}
+
+	// Fallback: Use UPSERT with holdings table SELECT
 	query := `
 		INSERT INTO trade.positions (
 			position_id,
@@ -286,7 +334,7 @@ func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, account
 
 	result, err := r.pool.Exec(ctx, query, mode, accountID, symbol)
 	if err != nil {
-		return fmt.Errorf("upsert exit mode by symbol: %w", err)
+		return fmt.Errorf("upsert exit mode by symbol (from holdings): %w", err)
 	}
 
 	if result.RowsAffected() == 0 {

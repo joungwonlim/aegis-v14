@@ -100,7 +100,9 @@ func (h *HoldingsHandler) UpdateExitMode(w http.ResponseWriter, r *http.Request)
 
 	// Parse request body
 	var req struct {
-		ExitMode string `json:"exit_mode"`
+		ExitMode string   `json:"exit_mode"`
+		Qty      *int64   `json:"qty"`
+		AvgPrice *float64 `json:"avg_price"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -114,8 +116,8 @@ func (h *HoldingsHandler) UpdateExitMode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Update exit mode
-	if err := h.positionRepo.UpdateExitModeBySymbol(ctx, accountID, symbol, req.ExitMode); err != nil {
+	// Update exit mode (with optional holding data for upsert)
+	if err := h.positionRepo.UpdateExitModeBySymbol(ctx, accountID, symbol, req.ExitMode, req.Qty, req.AvgPrice); err != nil {
 		log.Error().Err(err).Str("account_id", accountID).Str("symbol", symbol).Msg("Failed to update exit mode")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

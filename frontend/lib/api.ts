@@ -191,13 +191,25 @@ export async function rejectIntent(intentId: string): Promise<{ status: string }
   return response.json()
 }
 
-export async function updateExitMode(accountId: string, symbol: string, exitMode: string): Promise<{ status: string, exit_mode: string }> {
+export async function updateExitMode(
+  accountId: string,
+  symbol: string,
+  exitMode: string,
+  holding?: {
+    qty: number
+    avg_price: number
+  }
+): Promise<{ status: string, exit_mode: string }> {
   const response = await fetch(`${API_BASE_URL}/holdings/${accountId}/${symbol}/exit-mode`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ exit_mode: exitMode }),
+    body: JSON.stringify({
+      exit_mode: exitMode,
+      qty: holding?.qty,
+      avg_price: holding?.avg_price,
+    }),
   })
 
   if (!response.ok) {

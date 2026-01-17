@@ -77,7 +77,7 @@ func (s *Service) syncHoldings(ctx context.Context) error {
 			if err2 != nil {
 				// Neither OPEN nor CLOSING position exists → create new one
 				if errors.Is(err, execution.ErrPositionNotFound) || strings.Contains(err.Error(), "position not found") {
-					if err := s.exitPositionRepo.UpdateExitModeBySymbol(ctx, kh.AccountID, kh.Symbol, "ENABLED"); err != nil {
+					if err := s.exitPositionRepo.UpdateExitModeBySymbol(ctx, kh.AccountID, kh.Symbol, "ENABLED", nil, nil); err != nil {
 						log.Warn().
 							Err(err).
 							Str("symbol", kh.Symbol).

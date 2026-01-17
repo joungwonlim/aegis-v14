@@ -307,7 +307,10 @@ export default function RuntimeDashboard() {
       const exitMode = enabled ? 'ENABLED' : 'DISABLED'
       console.log('Updating exit mode:', { account_id: holding.account_id, symbol: holding.symbol, exitMode })
 
-      const result = await updateExitMode(holding.account_id, holding.symbol, exitMode)
+      const result = await updateExitMode(holding.account_id, holding.symbol, exitMode, {
+        qty: holding.qty,
+        avg_price: holding.avg_price,
+      })
       console.log('Update result:', result)
 
       // Refresh holdings after update

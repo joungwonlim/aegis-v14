@@ -26,7 +26,8 @@ type PositionRepository interface {
 	UpdateExitMode(ctx context.Context, positionID uuid.UUID, mode string, profileID *string) error
 
 	// UpdateExitModeBySymbol updates exit mode by account_id and symbol
-	UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string) error
+	// If qty and avgPrice are provided, uses them directly; otherwise queries holdings table
+	UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string, qty *int64, avgPrice *float64) error
 
 	// SyncQtyAndAvgPrice syncs position qty and avg_price from holdings (KIS source of truth)
 	SyncQtyAndAvgPrice(ctx context.Context, accountID string, symbol string, qty int64, avgPrice decimal.Decimal) error
