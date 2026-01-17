@@ -265,7 +265,6 @@ export function ExitTab({
                 id="exit-engine-toggle"
                 checked={holding.exit_mode === 'ENABLED'}
                 onCheckedChange={(enabled) => {
-                  console.log('Exit tab switch toggled:', { symbol, enabled, current_mode: holding.exit_mode })
                   onExitModeToggle(enabled)
                 }}
               />

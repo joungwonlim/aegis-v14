@@ -142,7 +142,6 @@ export function StockDetailSheet({
                   id="exit-engine-header"
                   checked={holding.exit_mode === 'ENABLED'}
                   onCheckedChange={(enabled) => {
-                    console.log('Header switch toggled:', { symbol: holding.symbol, enabled, current_mode: holding.exit_mode })
                     onExitModeToggle(holding, enabled)
                   }}
                 />

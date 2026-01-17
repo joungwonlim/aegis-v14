@@ -309,7 +309,7 @@ export default function RuntimeDashboard() {
 
       const result = await updateExitMode(holding.account_id, holding.symbol, exitMode, {
         qty: holding.qty,
-        avg_price: holding.avg_price,
+        avg_price: typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price,
       })
       console.log('Update result:', result)
 
