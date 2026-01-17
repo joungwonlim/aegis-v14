@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
@@ -243,9 +244,26 @@ func (r *PositionRepository) UpdateExitMode(ctx context.Context, positionID uuid
 // UpdateExitModeBySymbol updates exit mode by account_id and symbol
 // If position doesn't exist, creates it from holding data (either from provided params or holdings table)
 func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, accountID string, symbol string, mode string, qty *int64, avgPrice *float64) error {
+	log.Info().
+		Str("account_id", accountID).
+		Str("symbol", symbol).
+		Int("symbol_len", len(symbol)).
+		Str("mode", mode).
+		Interface("qty", qty).
+		Interface("avg_price", avgPrice).
+		Msg("UpdateExitModeBySymbol - Parameters")
+
 	// If qty and avgPrice are provided, use direct INSERT
 	if qty != nil && avgPrice != nil {
 		avgPriceDec := decimal.NewFromFloat(*avgPrice)
+		log.Info().
+			Str("account_id", accountID).
+			Str("symbol", symbol).
+			Int64("qty", *qty).
+			Str("avg_price", avgPriceDec.String()).
+			Str("mode", mode).
+			Msg("UpdateExitModeBySymbol - Using direct INSERT")
+
 		query := `
 			INSERT INTO trade.positions (
 				position_id,
@@ -286,6 +304,12 @@ func (r *PositionRepository) UpdateExitModeBySymbol(ctx context.Context, account
 		`
 		_, err := r.pool.Exec(ctx, query, accountID, symbol, *qty, avgPriceDec, mode)
 		if err != nil {
+			log.Error().
+				Err(err).
+				Str("account_id", accountID).
+				Str("symbol", symbol).
+				Str("symbol_value", fmt.Sprintf("%q", symbol)).
+				Msg("Failed to execute direct INSERT")
 			return fmt.Errorf("upsert exit mode by symbol (direct): %w", err)
 		}
 		return nil

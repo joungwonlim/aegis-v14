@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
@@ -296,7 +296,7 @@ func (h *KISOrdersHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get order_no from URL path
-	orderNo := chi.URLParam(r, "order_no")
+	orderNo := mux.Vars(r)["order_no"]
 	if orderNo == "" {
 		log.Warn().Msg("Order number is required for cancel")
 		w.Header().Set("Content-Type", "application/json")

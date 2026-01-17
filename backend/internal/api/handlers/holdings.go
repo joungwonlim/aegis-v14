@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
@@ -95,8 +95,15 @@ func (h *HoldingsHandler) GetHoldings(w http.ResponseWriter, r *http.Request) {
 // PUT /api/holdings/{account_id}/{symbol}/exit-mode
 func (h *HoldingsHandler) UpdateExitMode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	accountID := chi.URLParam(r, "account_id")
-	symbol := chi.URLParam(r, "symbol")
+	vars := mux.Vars(r)
+	accountID := vars["account_id"]
+	symbol := vars["symbol"]
+
+	log.Info().
+		Str("account_id", accountID).
+		Str("symbol", symbol).
+		Int("symbol_len", len(symbol)).
+		Msg("UpdateExitMode - URL params")
 
 	// Parse request body
 	var req struct {
@@ -109,6 +116,12 @@ func (h *HoldingsHandler) UpdateExitMode(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	log.Info().
+		Str("exit_mode", req.ExitMode).
+		Interface("qty", req.Qty).
+		Interface("avg_price", req.AvgPrice).
+		Msg("UpdateExitMode - Request body")
 
 	// Validate exit mode
 	if req.ExitMode != exit.ExitModeEnabled && req.ExitMode != exit.ExitModeDisabled && req.ExitMode != exit.ExitModeManualOnly {

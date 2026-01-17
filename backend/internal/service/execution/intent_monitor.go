@@ -3,14 +3,45 @@ package execution
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
 )
 
+// 한국 시간대
+var kst = time.FixedZone("KST", 9*60*60)
+
+// isMarketOpen checks if Korean stock market is open
+// Market hours: 09:00 - 15:30 KST (weekdays only)
+func isMarketOpen() bool {
+	now := time.Now().In(kst)
+
+	// Check weekday (Monday = 1, Sunday = 0)
+	weekday := now.Weekday()
+	if weekday == time.Saturday || weekday == time.Sunday {
+		return false
+	}
+
+	// Check time (09:00 - 15:30)
+	hour, min, _ := now.Clock()
+	timeMinutes := hour*60 + min
+
+	marketOpen := 9*60 + 0   // 09:00
+	marketClose := 15*60 + 30 // 15:30
+
+	return timeMinutes >= marketOpen && timeMinutes < marketClose
+}
+
 // processNewIntents processes all NEW intents
 func (s *Service) processNewIntents(ctx context.Context) error {
+	// 0. Check market hours - skip processing if market is closed
+	if !isMarketOpen() {
+		// Market closed - keep intents in NEW status, will be processed when market opens
+		return nil
+	}
+
 	// 1. Load NEW intents
 	intents, err := s.intentRepo.LoadNewIntents(ctx)
 	if err != nil {
