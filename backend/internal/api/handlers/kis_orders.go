@@ -57,6 +57,12 @@ func (h *KISOrdersHandler) GetUnfilledOrders(w http.ResponseWriter, r *http.Requ
 		json.NewEncoder(w).Encode(cached)
 		return
 	}
+
+	// Store stale cache for rate limit fallback
+	var staleCache []*execution.KISUnfilledOrder
+	if h.unfilledCache != nil {
+		staleCache = h.unfilledCache.data.([]*execution.KISUnfilledOrder)
+	}
 	h.cacheMu.RUnlock()
 
 	// Get unfilled orders from KIS
@@ -65,8 +71,17 @@ func (h *KISOrdersHandler) GetUnfilledOrders(w http.ResponseWriter, r *http.Requ
 		// Check if it's a rate limit error (holdUntil period)
 		errMsg := err.Error()
 		if isRateLimitError(errMsg) {
-			// Rate limit - log as warning, not error
-			log.Warn().Err(err).Str("account_id", h.accountID).Msg("KIS rate limit, using cache or retrying later")
+			// Rate limit - use stale cache if available
+			if staleCache != nil {
+				log.Debug().Str("account_id", h.accountID).Msg("KIS rate limit, returning stale cache")
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Cache", "STALE")
+				json.NewEncoder(w).Encode(staleCache)
+				return
+			}
+
+			// No cache available - return rate limit error
+			log.Warn().Str("account_id", h.accountID).Msg("KIS rate limit, no cache available")
 			http.Error(w, "KIS rate limit, please retry later", http.StatusTooManyRequests)
 			return
 		}
@@ -112,6 +127,12 @@ func (h *KISOrdersHandler) GetFilledOrders(w http.ResponseWriter, r *http.Reques
 		json.NewEncoder(w).Encode(cached)
 		return
 	}
+
+	// Store stale cache for rate limit fallback
+	var staleCache []*execution.KISFill
+	if h.filledCache != nil {
+		staleCache = h.filledCache.data.([]*execution.KISFill)
+	}
 	h.cacheMu.RUnlock()
 
 	// Get filled orders since midnight
@@ -121,8 +142,17 @@ func (h *KISOrdersHandler) GetFilledOrders(w http.ResponseWriter, r *http.Reques
 		// Check if it's a rate limit error (holdUntil period)
 		errMsg := err.Error()
 		if isRateLimitError(errMsg) {
-			// Rate limit - log as warning, not error
-			log.Warn().Err(err).Str("account_id", h.accountID).Msg("KIS rate limit, using cache or retrying later")
+			// Rate limit - use stale cache if available
+			if staleCache != nil {
+				log.Debug().Str("account_id", h.accountID).Msg("KIS rate limit, returning stale cache")
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Cache", "STALE")
+				json.NewEncoder(w).Encode(staleCache)
+				return
+			}
+
+			// No cache available - return rate limit error
+			log.Warn().Str("account_id", h.accountID).Msg("KIS rate limit, no cache available")
 			http.Error(w, "KIS rate limit, please retry later", http.StatusTooManyRequests)
 			return
 		}
