@@ -12,6 +12,9 @@
 CREATE SCHEMA IF NOT EXISTS market;   -- PriceSync 소유
 CREATE SCHEMA IF NOT EXISTS trade;    -- Strategy/Execution 공유
 CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
+CREATE SCHEMA IF NOT EXISTS data;     -- 종목/가격/재무 데이터 (v13 마이그레이션)
+CREATE SCHEMA IF NOT EXISTS signals;  -- 팩터 시그널 (v13 마이그레이션)
+CREATE SCHEMA IF NOT EXISTS audit;    -- 성과 분석 (v13 마이그레이션)
 ```
 
 ### SSOT 소유권
@@ -40,6 +43,21 @@ CREATE SCHEMA IF NOT EXISTS system;   -- System/Process 관리
 | trade | picks | Router | Router만 |
 | trade | pick_decisions | Router | Router만 |
 | system | process_locks | System | 모든 모듈 (advisory lock) |
+| data | stocks | Fetcher | Fetcher만 |
+| data | daily_prices | Fetcher | Fetcher만 |
+| data | investor_flow | Fetcher | Fetcher만 |
+| data | fundamentals | Fetcher | Fetcher만 |
+| data | market_cap | Fetcher | Fetcher만 |
+| data | disclosures | Fetcher | Fetcher만 |
+| data | universe_snapshots | Universe | Universe만 |
+| signals | factor_scores | Signals | Signals만 |
+| signals | flow_details | Signals | Signals만 |
+| signals | technical_details | Signals | Signals만 |
+| signals | event_signals | Signals | Signals만 |
+| audit | performance_reports | Audit | Audit만 |
+| audit | attribution_analysis | Audit | Audit만 |
+| audit | benchmark_data | Audit | Audit만 |
+| audit | daily_pnl | Audit | Audit만 |
 
 ---
 
@@ -961,6 +979,311 @@ WHERE EXTRACT(EPOCH FROM (NOW() - heartbeat_ts)) > 15;
 
 ---
 
+## 🗃️ Data Schema (v13 마이그레이션)
+
+> v13에서 마이그레이션되는 데이터 레이어 스키마
+
+### data.stocks (종목 마스터)
+
+**목적**: 종목 기본 정보 관리 (Fetcher 소유)
+
+```sql
+CREATE TABLE data.stocks (
+    code          VARCHAR(20) PRIMARY KEY,
+    name          VARCHAR(200) NOT NULL,
+    market        VARCHAR(20) NOT NULL,           -- KOSPI, KOSDAQ, KONEX
+    sector        VARCHAR(100),
+    listing_date  DATE NOT NULL,
+    delisting_date DATE,
+    status        VARCHAR(20) DEFAULT 'active',   -- active, delisted, suspended
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_data_stocks_market ON data.stocks(market);
+CREATE INDEX idx_data_stocks_sector ON data.stocks(sector);
+CREATE INDEX idx_data_stocks_status ON data.stocks(status);
+```
+
+### data.daily_prices (일봉 데이터 - PARTITIONED)
+
+**목적**: 가격 시계열 데이터 (반기별 파티션)
+
+```sql
+CREATE TABLE data.daily_prices (
+    stock_code   VARCHAR(20) NOT NULL,
+    trade_date   DATE NOT NULL,
+    open_price   NUMERIC(12,2) NOT NULL,
+    high_price   NUMERIC(12,2) NOT NULL,
+    low_price    NUMERIC(12,2) NOT NULL,
+    close_price  NUMERIC(12,2) NOT NULL,
+    volume       BIGINT NOT NULL,
+    trading_value NUMERIC(15,0),
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (stock_code, trade_date)
+) PARTITION BY RANGE (trade_date);
+
+-- 파티션 예시
+CREATE TABLE data.daily_prices_2026_h1 PARTITION OF data.daily_prices
+    FOR VALUES FROM ('2026-01-01') TO ('2026-07-01');
+```
+
+### data.investor_flow (투자자별 수급 - PARTITIONED)
+
+**목적**: 외국인/기관/개인 순매수 데이터
+
+```sql
+CREATE TABLE data.investor_flow (
+    stock_code        VARCHAR(20) NOT NULL,
+    trade_date        DATE NOT NULL,
+    foreign_net_qty   BIGINT DEFAULT 0,
+    foreign_net_value BIGINT DEFAULT 0,
+    inst_net_qty      BIGINT DEFAULT 0,
+    inst_net_value    BIGINT DEFAULT 0,
+    indiv_net_qty     BIGINT DEFAULT 0,
+    indiv_net_value   BIGINT DEFAULT 0,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (stock_code, trade_date)
+) PARTITION BY RANGE (trade_date);
+```
+
+### data.fundamentals (재무 데이터)
+
+**목적**: PER, PBR, ROE 등 재무 지표
+
+```sql
+CREATE TABLE data.fundamentals (
+    stock_code    VARCHAR(20) NOT NULL,
+    report_date   DATE NOT NULL,
+    per           NUMERIC(10,2),
+    pbr           NUMERIC(10,2),
+    roe           NUMERIC(10,2),
+    debt_ratio    NUMERIC(10,2),
+    revenue       BIGINT,
+    operating_profit BIGINT,
+    net_profit    BIGINT,
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (stock_code, report_date)
+);
+```
+
+### data.disclosures (DART 공시)
+
+**목적**: DART 공시 데이터
+
+```sql
+CREATE TABLE data.disclosures (
+    id            SERIAL PRIMARY KEY,
+    stock_code    VARCHAR(20) NOT NULL,
+    disclosed_at  TIMESTAMPTZ NOT NULL,
+    title         TEXT NOT NULL,
+    category      VARCHAR(100),
+    content       TEXT,
+    url           TEXT,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### data.universe_snapshots (유니버스 스냅샷)
+
+**목적**: 투자 가능 종목 유니버스 (일별)
+
+```sql
+CREATE TABLE data.universe_snapshots (
+    snapshot_date DATE PRIMARY KEY,
+    eligible_stocks JSONB NOT NULL,       -- [code1, code2, ...]
+    total_count   INT NOT NULL,
+    criteria      JSONB,                   -- {min_market_cap: 100억, ...}
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
+## 🗃️ Signals Schema (v13 마이그레이션)
+
+> v13에서 마이그레이션되는 시그널 레이어 스키마
+
+### signals.factor_scores (6팩터 점수)
+
+**목적**: Momentum, Technical, Value, Quality, Flow, Event 팩터 점수
+
+```sql
+CREATE TABLE signals.factor_scores (
+    stock_code   VARCHAR(20) NOT NULL,
+    calc_date    DATE NOT NULL,
+    momentum     NUMERIC(5,4) NOT NULL DEFAULT 0.0,  -- -1.0 ~ 1.0
+    technical    NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+    value        NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+    quality      NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+    flow         NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+    event        NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+    total_score  NUMERIC(5,4),
+    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (stock_code, calc_date)
+);
+
+CREATE INDEX idx_factor_scores_date ON signals.factor_scores(calc_date);
+CREATE INDEX idx_factor_scores_total ON signals.factor_scores(total_score DESC);
+```
+
+### signals.flow_details (수급 상세)
+
+**목적**: 5D/10D/20D 수급 누적 데이터
+
+```sql
+CREATE TABLE signals.flow_details (
+    stock_code        VARCHAR(20) NOT NULL,
+    calc_date         DATE NOT NULL,
+    foreign_net_5d    BIGINT DEFAULT 0,
+    inst_net_5d       BIGINT DEFAULT 0,
+    indiv_net_5d      BIGINT DEFAULT 0,
+    foreign_net_10d   BIGINT DEFAULT 0,
+    inst_net_10d      BIGINT DEFAULT 0,
+    indiv_net_10d     BIGINT DEFAULT 0,
+    foreign_net_20d   BIGINT DEFAULT 0,
+    inst_net_20d      BIGINT DEFAULT 0,
+    indiv_net_20d     BIGINT DEFAULT 0,
+    updated_at        TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (stock_code, calc_date)
+);
+```
+
+### signals.technical_details (기술적 지표)
+
+**목적**: MA, RSI, MACD, Bollinger 등
+
+```sql
+CREATE TABLE signals.technical_details (
+    stock_code   VARCHAR(20) NOT NULL,
+    calc_date    DATE NOT NULL,
+    ma5          NUMERIC(12,2),
+    ma10         NUMERIC(12,2),
+    ma20         NUMERIC(12,2),
+    ma60         NUMERIC(12,2),
+    ma120        NUMERIC(12,2),
+    rsi14        NUMERIC(5,2),
+    macd         NUMERIC(12,4),
+    macd_signal  NUMERIC(12,4),
+    macd_hist    NUMERIC(12,4),
+    bb_upper     NUMERIC(12,2),
+    bb_middle    NUMERIC(12,2),
+    bb_lower     NUMERIC(12,2),
+    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (stock_code, calc_date)
+);
+```
+
+### signals.event_signals (이벤트 시그널)
+
+**목적**: 공시, 뉴스, 실적 이벤트
+
+```sql
+CREATE TABLE signals.event_signals (
+    id            SERIAL PRIMARY KEY,
+    stock_code    VARCHAR(20) NOT NULL,
+    event_date    DATE NOT NULL,
+    event_type    VARCHAR(50) NOT NULL,      -- disclosure, news, earning
+    event_subtype VARCHAR(50),
+    title         TEXT,
+    description   TEXT,
+    impact_score  NUMERIC(5,4) DEFAULT 0.0,  -- -1.0 ~ 1.0
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_event_signals_stock ON signals.event_signals(stock_code);
+CREATE INDEX idx_event_signals_date ON signals.event_signals(event_date);
+```
+
+---
+
+## 🗃️ Audit Schema (v13 마이그레이션)
+
+> v13에서 마이그레이션되는 성과 분석 스키마
+
+### audit.performance_reports (성과 보고서)
+
+**목적**: 주간/월간/연간 성과 분석
+
+```sql
+CREATE TABLE audit.performance_reports (
+    report_date       DATE PRIMARY KEY,
+    period_start      DATE NOT NULL,
+    period_end        DATE NOT NULL,
+    total_return      NUMERIC(10,6),
+    benchmark_return  NUMERIC(10,6),
+    alpha             NUMERIC(10,6),
+    beta              NUMERIC(10,6),
+    sharpe_ratio      NUMERIC(10,6),
+    sortino_ratio     NUMERIC(10,6),
+    volatility        NUMERIC(10,6),
+    max_drawdown      NUMERIC(10,6),
+    win_rate          NUMERIC(5,4),
+    avg_win           NUMERIC(10,6),
+    avg_loss          NUMERIC(10,6),
+    profit_factor     NUMERIC(10,6),
+    total_trades      INT,
+    created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### audit.attribution_analysis (귀속 분석)
+
+**목적**: 팩터별/섹터별/종목별 기여도
+
+```sql
+CREATE TABLE audit.attribution_analysis (
+    analysis_date     DATE PRIMARY KEY,
+    period_start      DATE NOT NULL,
+    period_end        DATE NOT NULL,
+    total_return      NUMERIC(10,6),
+    momentum_contrib  NUMERIC(10,6),
+    technical_contrib NUMERIC(10,6),
+    value_contrib     NUMERIC(10,6),
+    quality_contrib   NUMERIC(10,6),
+    flow_contrib      NUMERIC(10,6),
+    event_contrib     NUMERIC(10,6),
+    sector_contrib    JSONB,
+    stock_contrib     JSONB,
+    created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### audit.benchmark_data (벤치마크)
+
+**목적**: KOSPI, KOSDAQ 벤치마크
+
+```sql
+CREATE TABLE audit.benchmark_data (
+    benchmark_date DATE NOT NULL,
+    benchmark_code VARCHAR(20) NOT NULL,  -- KOSPI, KOSDAQ
+    close_price    NUMERIC(12,2) NOT NULL,
+    daily_return   NUMERIC(10,6),
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (benchmark_date, benchmark_code)
+);
+```
+
+### audit.daily_pnl (일별 손익)
+
+**목적**: 일별 실현/미실현 손익 기록
+
+```sql
+CREATE TABLE audit.daily_pnl (
+    pnl_date          DATE PRIMARY KEY,
+    realized_pnl      BIGINT DEFAULT 0,
+    unrealized_pnl    BIGINT DEFAULT 0,
+    total_pnl         BIGINT,
+    daily_return      NUMERIC(10,6),
+    cumulative_return NUMERIC(10,6),
+    portfolio_value   BIGINT,
+    cash_balance      BIGINT,
+    created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
 ## 📊 ERD
 
 ```mermaid
@@ -972,6 +1295,13 @@ erDiagram
     ORDER_INTENTS ||--o{ ORDERS : "has"
     ORDERS ||--o{ FILLS : "has"
     REENTRY_CANDIDATES ||--o{ ORDER_INTENTS : "candidate_id"
+
+    DATA_STOCKS ||--o{ DAILY_PRICES : "code"
+    DATA_STOCKS ||--o{ INVESTOR_FLOW : "code"
+    DATA_STOCKS ||--o{ FUNDAMENTALS : "code"
+    DATA_STOCKS ||--o{ FACTOR_SCORES : "code"
+    FACTOR_SCORES ||--|| FLOW_DETAILS : "1:1"
+    FACTOR_SCORES ||--|| TECHNICAL_DETAILS : "1:1"
 ```
 
 ---
@@ -981,8 +1311,11 @@ erDiagram
 - [modules/price-sync.md](../modules/price-sync.md) - PriceSync 모듈
 - [modules/exit-engine.md](../modules/exit-engine.md) - Exit Engine 모듈
 - [modules/reentry-engine.md](../modules/reentry-engine.md) - Reentry Engine 모듈
+- [modules/fetcher.md](../modules/fetcher.md) - Fetcher 모듈 (v13 마이그레이션)
+- [modules/signals-factors.md](../modules/signals-factors.md) - Signals & Factors 모듈 (v13 마이그레이션)
+- [modules/audit.md](../modules/audit.md) - Audit 모듈 (v13 마이그레이션)
 
 ---
 
 **Version**: v14.0.0-design
-**Last Updated**: 2026-01-13
+**Last Updated**: 2026-01-17
