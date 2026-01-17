@@ -111,6 +111,14 @@ func (s *Service) evaluatePositionWithRetry(ctx context.Context, pos *exit.Posit
 
 // evaluatePosition evaluates a single position for exit triggers
 func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, controlMode string) error {
+	// 0. Validate position data (data integrity check)
+	if pos.Symbol == "" {
+		log.Error().
+			Str("position_id", pos.PositionID.String()).
+			Msg("Position has empty symbol (data integrity issue)")
+		return fmt.Errorf("position has empty symbol")
+	}
+
 	// 1. Create position snapshot (v10 방어: 평가 시작 시 snapshot)
 	snapshot := PositionSnapshot{
 		PositionID:  pos.PositionID,

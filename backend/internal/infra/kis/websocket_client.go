@@ -393,7 +393,7 @@ func (c *WebSocketClient) handleMessages() {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			// Connection closed or error - attempt reconnect
-			log.Error().Err(err).Msg("[WS] Connection error, attempting reconnect...")
+			log.Warn().Err(err).Msg("[WS] Connection error, attempting reconnect...")
 
 			if reconnectErr := c.reconnect(); reconnectErr != nil {
 				// ✅ Don't stop message handler - keep retrying in background
