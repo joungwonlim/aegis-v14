@@ -72,6 +72,11 @@ func (s *Service) evaluateAllPositions(ctx context.Context) error {
 				continue
 			}
 
+			if err == exit.ErrStalePrice {
+				// Normal case: price too old, skip evaluation (already logged as Debug in evaluatePosition)
+				continue
+			}
+
 			log.Error().
 				Err(err).
 				Str("symbol", pos.Symbol).
@@ -204,7 +209,7 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 	// 4. Check price freshness (v10 방어: 타임스탬프 검증)
 	// Check if price is stale (from BestPrice)
 	if bestPrice.IsStale {
-		log.Warn().
+		log.Debug().
 			Str("symbol", pos.Symbol).
 			Msg("Price is stale, skipping evaluation (Fail-Closed)")
 		return exit.ErrStalePrice
@@ -213,7 +218,7 @@ func (s *Service) evaluatePosition(ctx context.Context, pos *exit.Position, cont
 	// Check timestamp age
 	age := time.Since(bestPrice.BestTS)
 	if age > freshnessThreshold {
-		log.Warn().
+		log.Debug().
 			Str("symbol", pos.Symbol).
 			Float64("age_seconds", age.Seconds()).
 			Msg("Price too old, skipping evaluation")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,10 +62,18 @@ func (h *KISOrdersHandler) GetUnfilledOrders(w http.ResponseWriter, r *http.Requ
 	// Get unfilled orders from KIS
 	orders, err := h.kisAdapter.GetUnfilledOrders(ctx, h.accountID)
 	if err != nil {
+		// Check if it's a rate limit error (holdUntil period)
+		errMsg := err.Error()
+		if isRateLimitError(errMsg) {
+			// Rate limit - log as warning, not error
+			log.Warn().Err(err).Str("account_id", h.accountID).Msg("KIS rate limit, using cache or retrying later")
+			http.Error(w, "KIS rate limit, please retry later", http.StatusTooManyRequests)
+			return
+		}
+
 		log.Error().Err(err).Str("account_id", h.accountID).Msg("Failed to get unfilled orders from KIS")
 		// Return more specific error message for debugging
-		errMsg := fmt.Sprintf("Failed to get unfilled orders: %s", err.Error())
-		http.Error(w, errMsg, http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to get unfilled orders: %s", errMsg), http.StatusInternalServerError)
 		return
 	}
 
@@ -109,9 +118,17 @@ func (h *KISOrdersHandler) GetFilledOrders(w http.ResponseWriter, r *http.Reques
 	since := time.Now().Truncate(24 * time.Hour)
 	fills, err := h.kisAdapter.GetFills(ctx, h.accountID, since)
 	if err != nil {
+		// Check if it's a rate limit error (holdUntil period)
+		errMsg := err.Error()
+		if isRateLimitError(errMsg) {
+			// Rate limit - log as warning, not error
+			log.Warn().Err(err).Str("account_id", h.accountID).Msg("KIS rate limit, using cache or retrying later")
+			http.Error(w, "KIS rate limit, please retry later", http.StatusTooManyRequests)
+			return
+		}
+
 		log.Error().Err(err).Str("account_id", h.accountID).Msg("Failed to get filled orders from KIS")
-		errMsg := fmt.Sprintf("Failed to get filled orders: %s", err.Error())
-		http.Error(w, errMsg, http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to get filled orders: %s", errMsg), http.StatusInternalServerError)
 		return
 	}
 
@@ -293,4 +310,11 @@ func (h *KISOrdersHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 // KISAdapterProvider interface for getting KIS adapter
 type KISAdapterProvider interface {
 	GetKISAdapter(ctx context.Context) (execution.KISAdapter, error)
+}
+
+// isRateLimitError checks if the error is a rate limit error
+func isRateLimitError(errMsg string) bool {
+	return strings.Contains(errMsg, "token refresh on hold") ||
+		strings.Contains(errMsg, "KIS rate limit") ||
+		strings.Contains(errMsg, "EGW00133")
 }
