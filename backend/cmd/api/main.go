@@ -30,6 +30,13 @@ const (
 )
 
 func main() {
+	// Set timezone to Asia/Seoul (KST)
+	loc, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load timezone")
+	}
+	time.Local = loc
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
