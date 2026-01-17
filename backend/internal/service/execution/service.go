@@ -11,8 +11,8 @@ import (
 
 const (
 	intentMonitorInterval = 2 * time.Second  // Intent monitor 주기 (1~3초 권장)
-	reconcileInterval     = 15 * time.Second // Reconciliation 주기 (10~30초 권장)
-	holdingsSyncInterval  = 20 * time.Second // Holdings sync 주기 (10~30초 권장)
+	reconcileInterval     = 30 * time.Second // Reconciliation 주기 (10~30초 권장, 토큰 부담 완화)
+	holdingsSyncInterval  = 30 * time.Second // Holdings sync 주기 (10~30초 권장, 토큰 부담 완화)
 	fillsSyncInterval     = 3 * time.Second  // Fills sync 주기 (3~5초 권장)
 )
 
