@@ -799,26 +799,23 @@ export interface Stock {
 }
 
 export interface DailyPrice {
-  trade_date: string
-  open_price: number
-  high_price: number
-  low_price: number
-  close_price: number
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
   volume: number
-  change_rate: number
 }
 
 export interface InvestorFlow {
-  trade_date: string
-  foreign_buy: number
-  foreign_sell: number
+  date: string
   foreign_net: number
-  inst_buy: number
-  inst_sell: number
   inst_net: number
-  retail_buy: number
-  retail_sell: number
   retail_net: number
+  close_price: number
+  price_change: number
+  change_rate: number
+  volume: number
 }
 
 export interface ListStocksResponse {

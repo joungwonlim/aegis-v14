@@ -19,7 +19,7 @@ import {
   ComposedChart,
   Cell,
 } from 'recharts'
-import type { DailyPrice, InvestorFlow } from '../types'
+import type { DailyPrice, InvestorFlow } from '@/lib/api'
 
 interface ChartTabProps {
   symbol: string

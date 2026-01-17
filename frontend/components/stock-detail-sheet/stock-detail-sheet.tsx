@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, TrendingUp, TrendingDown, ShoppingCart, DollarSign, Target, Brain, Package, Settings, Star, Bell, BarChart3, ExternalLink, LogOut } from 'lucide-react'
+import { ShoppingCart, Star, BarChart3, LogOut } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -22,8 +22,6 @@ import { Label } from '@/components/ui/label'
 import { StockSymbol } from '@/components/stock-symbol'
 import type { StockInfo, StockDetailTab } from './types'
 import { useStockPrice } from './hooks/use-stock-price'
-import { HoldingTab } from './tabs/holding-tab'
-import { PriceTab } from './tabs/price-tab'
 import { ChartTab } from './tabs/chart-tab'
 import { OrderTab } from './tabs/order-tab'
 import { ExitTab } from './tabs/exit-tab'
@@ -57,7 +55,7 @@ export function StockDetailSheet({
   totalEvaluation,
   onExitModeToggle,
 }: StockDetailSheetProps) {
-  const [activeTab, setActiveTab] = useState<StockDetailTab>('holding')
+  const [activeTab, setActiveTab] = useState<StockDetailTab>('chart')
   const [exitRuleDialogOpen, setExitRuleDialogOpen] = useState(false)
 
   // 가격 정보 조회
@@ -100,15 +98,9 @@ export function StockDetailSheet({
   if (!stock) return null
 
   const tabs = [
-    { key: 'holding', label: '보유', icon: Package },
-    { key: 'price', label: '시세', icon: TrendingUp },
     { key: 'chart', label: '차트', icon: BarChart3 },
     { key: 'order', label: '주문', icon: ShoppingCart },
     { key: 'exit', label: 'Exit', icon: LogOut },
-    // Phase 2에서 활성화
-    // { key: 'investment', label: '투자지표', icon: DollarSign },
-    // { key: 'consensus', label: '컨센서스', icon: Target },
-    // { key: 'ai', label: 'AI분석', icon: Brain },
   ] as const
 
   return (
@@ -139,31 +131,10 @@ export function StockDetailSheet({
                 />
               </div>
 
-              {/* 종목정보 + 가격 */}
+              {/* 종목정보 */}
               <div>
                 <div className="font-semibold text-lg">{stock.symbolName || stock.symbol}</div>
                 <div className="text-sm text-muted-foreground">{stock.symbol}</div>
-                {/* 현재가 + 전일대비 */}
-                {priceInfo ? (
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-xl font-bold">
-                      {Math.floor(priceInfo.currentPrice || 0).toLocaleString()}원
-                    </span>
-                    <span
-                      className="text-sm font-medium"
-                      style={{
-                        color: (priceInfo.changeRate || 0) >= 0 ? '#EA5455' : '#2196F3'
-                      }}
-                    >
-                      {(priceInfo.changeRate || 0) >= 0 ? '▲' : '▼'}
-                      {Math.floor(Math.abs(priceInfo.changePrice || 0)).toLocaleString()}
-                      {' '}
-                      ({(priceInfo.changeRate || 0) >= 0 ? '+' : ''}{(priceInfo.changeRate || 0).toFixed(2)}%)
-                    </span>
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground mt-1">가격 정보 로딩 중...</div>
-                )}
               </div>
             </div>
 
@@ -263,7 +234,7 @@ export function StockDetailSheet({
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-3">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
                 <tab.icon className="h-4 w-4" />
@@ -271,24 +242,6 @@ export function StockDetailSheet({
               </TabsTrigger>
             ))}
           </TabsList>
-
-          <TabsContent value="holding" className="mt-4">
-            <HoldingTab
-              symbol={stock.symbol}
-              symbolName={stock.symbolName}
-              holding={holding}
-              totalEvaluation={totalEvaluation}
-              onExitModeToggle={(enabled) => holding && onExitModeToggle(holding, enabled)}
-            />
-          </TabsContent>
-
-          <TabsContent value="price" className="mt-4">
-            <PriceTab
-              symbol={stock.symbol}
-              symbolName={stock.symbolName}
-              priceInfo={priceInfo}
-            />
-          </TabsContent>
 
           <TabsContent value="chart" className="mt-4">
             <ChartTab
