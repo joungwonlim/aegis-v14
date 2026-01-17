@@ -11,6 +11,7 @@ import {
   BarChart3,
   Database,
   TrendingUp,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +21,7 @@ const navItems = [
   { icon: Database, label: 'Stocks', href: '/stocks' },
   { icon: TrendingUp, label: 'Signals', href: '/signals' },
   { icon: Star, label: 'Watchlist', href: '/watchlist' },
+  { icon: Download, label: 'Fetcher', href: '/fetcher' },
 ];
 
 const bottomItems = [
