@@ -12,7 +12,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/domain/universe"
 )
 
-// Evaluator 팩터 평가기
+// Evaluator 6팩터 평가기
 type Evaluator struct {
 	factorRepo signals.FactorRepository
 	criteria   *signals.SignalCriteria
@@ -26,8 +26,8 @@ func NewEvaluator(factorRepo signals.FactorRepository, criteria *signals.SignalC
 	}
 }
 
-// EvaluateStock 종목 평가
-func (e *Evaluator) EvaluateStock(ctx context.Context, stock universe.Stock) (*signals.Signal, error) {
+// EvaluateStock 종목 평가 (6팩터)
+func (e *Evaluator) EvaluateStock(ctx context.Context, stock universe.UniverseStock) (*signals.Signal, error) {
 	// 1. Load factors
 	momentum, err := e.factorRepo.GetMomentumFactors(ctx, stock.Symbol)
 	if err != nil {
@@ -52,26 +52,44 @@ func (e *Evaluator) EvaluateStock(ctx context.Context, stock universe.Stock) (*s
 		technical = &signals.TechnicalFactors{Symbol: stock.Symbol}
 	}
 
-	// 2. Evaluate each factor
+	// Flow 팩터 로드
+	flow, err := e.factorRepo.GetFlowFactors(ctx, stock.Symbol)
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", stock.Symbol).Msg("Flow factors missing, using default")
+		flow = &signals.FlowFactors{Symbol: stock.Symbol}
+	}
+
+	// Event 팩터 로드
+	event, err := e.factorRepo.GetEventFactors(ctx, stock.Symbol)
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", stock.Symbol).Msg("Event factors missing, using default")
+		event = &signals.EventFactors{Symbol: stock.Symbol}
+	}
+
+	// 2. Evaluate each factor (6팩터)
 	momentumScore := e.evaluateMomentum(momentum)
 	qualityScore := e.evaluateQuality(quality)
 	valueScore := e.evaluateValue(value)
 	technicalScore := e.evaluateTechnical(technical)
+	flowScore := e.evaluateFlow(flow)
+	eventScore := e.evaluateEvent(event)
 
-	// 3. Calculate weighted total score
+	// 3. Calculate weighted total score (6팩터 가중치)
 	totalScore := (momentumScore.Score * e.criteria.MomentumWeight) +
-		(qualityScore.Score * e.criteria.QualityWeight) +
+		(technicalScore.Score * e.criteria.TechnicalWeight) +
 		(valueScore.Score * e.criteria.ValueWeight) +
-		(technicalScore.Score * e.criteria.TechnicalWeight)
+		(qualityScore.Score * e.criteria.QualityWeight) +
+		(flowScore.Score * e.criteria.FlowWeight) +
+		(eventScore.Score * e.criteria.EventWeight)
 
 	// 4. Determine signal type
 	signalType := e.determineSignalType(totalScore)
 
-	// 5. Calculate conviction
-	conviction := e.calculateConviction(momentumScore, qualityScore, valueScore, technicalScore)
+	// 5. Calculate conviction (6팩터)
+	conviction := e.calculateConviction6(momentumScore, technicalScore, valueScore, qualityScore, flowScore, eventScore)
 
-	// 6. Generate reasons
-	reasons := e.generateReasons(signalType, momentumScore, qualityScore, valueScore, technicalScore)
+	// 6. Generate reasons (6팩터)
+	reasons := e.generateReasons6(signalType, momentumScore, technicalScore, valueScore, qualityScore, flowScore, eventScore)
 
 	// 7. Create signal
 	signal := &signals.Signal{
@@ -87,6 +105,8 @@ func (e *Evaluator) EvaluateStock(ctx context.Context, stock universe.Stock) (*s
 			Quality:   qualityScore,
 			Value:     valueScore,
 			Technical: technicalScore,
+			Flow:      flowScore,
+			Event:     eventScore,
 		},
 		Reasons: reasons,
 	}
@@ -320,6 +340,99 @@ func (e *Evaluator) evaluateTechnical(t *signals.TechnicalFactors) signals.Facto
 	}
 }
 
+// evaluateFlow 수급 팩터 평가
+func (e *Evaluator) evaluateFlow(f *signals.FlowFactors) signals.FactorScore {
+	score := 0.0
+	indicators := []string{}
+
+	// 외국인 5일 순매수 (40점)
+	if f.ForeignNet5D > 1000000 { // 100만주 이상
+		score += 40
+		indicators = append(indicators, "FOREIGN_5D_STRONG")
+	} else if f.ForeignNet5D > 500000 {
+		score += 30
+		indicators = append(indicators, "FOREIGN_5D_GOOD")
+	} else if f.ForeignNet5D > 0 {
+		score += 20
+		indicators = append(indicators, "FOREIGN_5D_BUY")
+	} else if f.ForeignNet5D < -500000 {
+		indicators = append(indicators, "FOREIGN_5D_SELL")
+	}
+
+	// 기관 5일 순매수 (30점)
+	if f.InstNet5D > 500000 {
+		score += 30
+		indicators = append(indicators, "INST_5D_STRONG")
+	} else if f.InstNet5D > 100000 {
+		score += 20
+		indicators = append(indicators, "INST_5D_GOOD")
+	} else if f.InstNet5D > 0 {
+		score += 10
+		indicators = append(indicators, "INST_5D_BUY")
+	}
+
+	// 외국인 20일 추세 (30점)
+	if f.ForeignNet20D > 5000000 { // 500만주 이상
+		score += 30
+		indicators = append(indicators, "FOREIGN_20D_STRONG")
+	} else if f.ForeignNet20D > 1000000 {
+		score += 20
+		indicators = append(indicators, "FOREIGN_20D_GOOD")
+	} else if f.ForeignNet20D > 0 {
+		score += 10
+		indicators = append(indicators, "FOREIGN_20D_BUY")
+	}
+
+	// Normalize to 0-100
+	score = math.Min(score, 100)
+
+	return signals.FactorScore{
+		Score:      score,
+		Weight:     e.criteria.FlowWeight,
+		Triggered:  score >= 60,
+		Indicators: indicators,
+	}
+}
+
+// evaluateEvent 이벤트 팩터 평가
+func (e *Evaluator) evaluateEvent(ev *signals.EventFactors) signals.FactorScore {
+	score := 50.0 // 중립 기준
+	indicators := []string{}
+
+	// 이벤트 점수 반영 (TotalScore는 -1.0 ~ 1.0)
+	if ev.TotalScore > 0.5 {
+		score = 80
+		indicators = append(indicators, "EVENT_VERY_POSITIVE")
+	} else if ev.TotalScore > 0.2 {
+		score = 70
+		indicators = append(indicators, "EVENT_POSITIVE")
+	} else if ev.TotalScore > 0 {
+		score = 60
+		indicators = append(indicators, "EVENT_SLIGHTLY_POSITIVE")
+	} else if ev.TotalScore < -0.5 {
+		score = 20
+		indicators = append(indicators, "EVENT_VERY_NEGATIVE")
+	} else if ev.TotalScore < -0.2 {
+		score = 30
+		indicators = append(indicators, "EVENT_NEGATIVE")
+	} else if ev.TotalScore < 0 {
+		score = 40
+		indicators = append(indicators, "EVENT_SLIGHTLY_NEGATIVE")
+	}
+
+	// 최근 이벤트 수 반영
+	if ev.EventCount > 0 {
+		indicators = append(indicators, fmt.Sprintf("EVENTS_%d", ev.EventCount))
+	}
+
+	return signals.FactorScore{
+		Score:      score,
+		Weight:     e.criteria.EventWeight,
+		Triggered:  score >= 60,
+		Indicators: indicators,
+	}
+}
+
 // determineSignalType 신호 타입 결정
 func (e *Evaluator) determineSignalType(totalScore float64) signals.SignalType {
 	if totalScore >= float64(e.criteria.BuyThreshold) {
@@ -330,7 +443,7 @@ func (e *Evaluator) determineSignalType(totalScore float64) signals.SignalType {
 	return signals.SignalHold
 }
 
-// calculateConviction 신뢰도 계산
+// calculateConviction 신뢰도 계산 (4팩터 - 레거시)
 func (e *Evaluator) calculateConviction(
 	momentum, quality, value, technical signals.FactorScore,
 ) int {
@@ -370,7 +483,53 @@ func (e *Evaluator) calculateConviction(
 	return int(math.Min(conviction, 100))
 }
 
-// generateReasons 신호 생성 근거
+// calculateConviction6 신뢰도 계산 (6팩터)
+func (e *Evaluator) calculateConviction6(
+	momentum, technical, value, quality, flow, event signals.FactorScore,
+) int {
+	// 트리거된 팩터 개수
+	triggeredCount := 0
+	if momentum.Triggered {
+		triggeredCount++
+	}
+	if technical.Triggered {
+		triggeredCount++
+	}
+	if value.Triggered {
+		triggeredCount++
+	}
+	if quality.Triggered {
+		triggeredCount++
+	}
+	if flow.Triggered {
+		triggeredCount++
+	}
+	if event.Triggered {
+		triggeredCount++
+	}
+
+	// 팩터 일관성 (표준편차 기반)
+	scores := []float64{momentum.Score, technical.Score, value.Score, quality.Score, flow.Score, event.Score}
+	mean := (momentum.Score + technical.Score + value.Score + quality.Score + flow.Score + event.Score) / 6.0
+	variance := 0.0
+	for _, s := range scores {
+		variance += math.Pow(s-mean, 2)
+	}
+	stdDev := math.Sqrt(variance / 6.0)
+
+	// 표준편차가 작을수록 일관성 높음 (높은 신뢰도)
+	consistency := math.Max(0, 100-stdDev)
+
+	// 트리거 비율 (0-100) - 6팩터 기준
+	triggerScore := float64(triggeredCount) * 100.0 / 6.0
+
+	// 신뢰도 = 트리거 점수 70% + 일관성 30%
+	conviction := (triggerScore * 0.7) + (consistency * 0.3)
+
+	return int(math.Min(conviction, 100))
+}
+
+// generateReasons 신호 생성 근거 (4팩터 - 레거시)
 func (e *Evaluator) generateReasons(
 	signalType signals.SignalType,
 	momentum, quality, value, technical signals.FactorScore,
@@ -405,6 +564,63 @@ func (e *Evaluator) generateReasons(
 		}
 		if !technical.Triggered {
 			reasons = append(reasons, fmt.Sprintf("부정적 기술 지표 (%.0f점)", technical.Score))
+		}
+	}
+
+	if len(reasons) == 0 {
+		reasons = append(reasons, "중립적 신호")
+	}
+
+	return reasons
+}
+
+// generateReasons6 신호 생성 근거 (6팩터)
+func (e *Evaluator) generateReasons6(
+	signalType signals.SignalType,
+	momentum, technical, value, quality, flow, event signals.FactorScore,
+) []string {
+	reasons := []string{}
+
+	// 신호 타입별 주요 근거
+	switch signalType {
+	case signals.SignalBuy:
+		if momentum.Triggered {
+			reasons = append(reasons, fmt.Sprintf("강한 모멘텀 (%.0f점)", momentum.Score))
+		}
+		if technical.Triggered {
+			reasons = append(reasons, fmt.Sprintf("긍정적 기술 지표 (%.0f점)", technical.Score))
+		}
+		if value.Triggered {
+			reasons = append(reasons, fmt.Sprintf("저평가 (%.0f점)", value.Score))
+		}
+		if quality.Triggered {
+			reasons = append(reasons, fmt.Sprintf("우수한 품질 (%.0f점)", quality.Score))
+		}
+		if flow.Triggered {
+			reasons = append(reasons, fmt.Sprintf("스마트머니 유입 (%.0f점)", flow.Score))
+		}
+		if event.Triggered {
+			reasons = append(reasons, fmt.Sprintf("긍정적 이벤트 (%.0f점)", event.Score))
+		}
+
+	case signals.SignalSell:
+		if !momentum.Triggered {
+			reasons = append(reasons, fmt.Sprintf("약한 모멘텀 (%.0f점)", momentum.Score))
+		}
+		if !technical.Triggered {
+			reasons = append(reasons, fmt.Sprintf("부정적 기술 지표 (%.0f점)", technical.Score))
+		}
+		if !value.Triggered {
+			reasons = append(reasons, fmt.Sprintf("고평가 (%.0f점)", value.Score))
+		}
+		if !quality.Triggered {
+			reasons = append(reasons, fmt.Sprintf("낮은 품질 (%.0f점)", quality.Score))
+		}
+		if !flow.Triggered {
+			reasons = append(reasons, fmt.Sprintf("스마트머니 이탈 (%.0f점)", flow.Score))
+		}
+		if !event.Triggered {
+			reasons = append(reasons, fmt.Sprintf("부정적 이벤트 (%.0f점)", event.Score))
 		}
 	}
 

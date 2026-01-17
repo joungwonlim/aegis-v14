@@ -98,20 +98,25 @@ func (s *Service) GenerateSignals(ctx context.Context) (*signals.SignalSnapshot,
 		return nil, fmt.Errorf("load universe snapshot: %w", err)
 	}
 
-	if len(universeSnapshot.Stocks) == 0 {
+	// Universe의 모든 종목 수집 (Holdings + Watchlist)
+	allStocks := make([]universe.UniverseStock, 0, len(universeSnapshot.Holdings)+len(universeSnapshot.Watchlist))
+	allStocks = append(allStocks, universeSnapshot.Holdings...)
+	allStocks = append(allStocks, universeSnapshot.Watchlist...)
+
+	if len(allStocks) == 0 {
 		log.Warn().Msg("Universe is empty, no signals to generate")
 		return nil, signals.ErrUniverseNotReady
 	}
 
 	log.Info().
 		Str("universe_id", universeSnapshot.SnapshotID).
-		Int("stock_count", len(universeSnapshot.Stocks)).
+		Int("stock_count", len(allStocks)).
 		Msg("Universe loaded")
 
 	// 2. Generate signals for each stock
-	allSignals := make([]signals.Signal, 0, len(universeSnapshot.Stocks))
+	allSignals := make([]signals.Signal, 0, len(allStocks))
 
-	for _, stock := range universeSnapshot.Stocks {
+	for _, stock := range allStocks {
 		signal, err := s.evaluator.EvaluateStock(ctx, stock)
 		if err != nil {
 			log.Warn().
