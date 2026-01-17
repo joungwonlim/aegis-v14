@@ -66,6 +66,12 @@ func (s *Service) evaluateAllPositions(ctx context.Context) error {
 
 		// Evaluate position with retry
 		if err := s.evaluatePositionWithRetry(ctx, pos, control.Mode, 0); err != nil {
+			// Skip logging for expected business logic conditions
+			if err == exit.ErrNoAvailableQty {
+				// Normal case: all quantity is locked, skip silently
+				continue
+			}
+
 			log.Error().
 				Err(err).
 				Str("symbol", pos.Symbol).
@@ -377,7 +383,7 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 	}
 
 	if availableQty <= 0 {
-		log.Warn().
+		log.Debug().
 			Str("symbol", snapshot.Symbol).
 			Int64("available_qty", availableQty).
 			Msg("No available qty, intent creation skipped")
