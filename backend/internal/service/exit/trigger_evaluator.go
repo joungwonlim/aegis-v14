@@ -189,8 +189,8 @@ func (s *Service) evaluateTriggers(
 	}
 
 	// Priority 7: TRAIL (Phase 1: TP2_DONE or TRAILING_ACTIVE phase)
-	// - TP2_DONE: 원본 20% 부분 트레일 (단발)
-	// - TRAILING_ACTIVE: 잔량 100% 전량 트레일
+	// - TP2_DONE: 잔량 50% 부분 트레일 (단발)
+	// - TRAILING_ACTIVE: 잔량 50% 트레일
 	if state.Phase == exit.PhaseTP2Done || state.Phase == exit.PhaseTrailingActive {
 		if trigger := s.evaluateTrailing(ctx, snapshot, currentPrice, state, profile); trigger != nil {
 			return trigger
@@ -500,8 +500,8 @@ func (s *Service) evaluateTP3(snapshot PositionSnapshot, pnlPct, currentPrice de
 
 // evaluateTrailing evaluates trailing stop trigger
 // Phase 1: Phase별 분기 + 2틱 연속 확인 (confirm_ticks=2)
-// - TP2_DONE: 원본 20% 부분 트레일 (단발, fire_once)
-// - TRAILING_ACTIVE: 잔량 100% 전량 트레일
+// - TP2_DONE: 잔량 50% 부분 트레일 (단발, fire_once)
+// - TRAILING_ACTIVE: 잔량 50% 트레일
 func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapshot, currentPrice decimal.Decimal, state *exit.PositionState, profile *exit.ExitProfile) *exit.ExitTrigger {
 	// Check if HWM is set
 	if state.HWMPrice == nil {
@@ -539,21 +539,16 @@ func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapsho
 
 		// Phase 1: confirm_ticks=2 (6초 연속 조건 충족 필요)
 		if state.TrailingBreachTicks >= 2 {
-			// Phase별 수량 계산
+			// Phase별 수량 계산 - 모두 잔량의 50%
 			var qty int64
 			var reasonCode string
+			const trailQtyPct = 0.5 // 잔량의 50%
 
 			if state.Phase == exit.PhaseTP2Done {
-				// v14: TP2 부분 트레일 - 원본의 20% (OriginalQty 기준)
-				qtyPct := profile.Config.TP2.QtyPct
-				qty = int64(float64(snapshot.OriginalQty) * qtyPct)
+				// v14: TP2 부분 트레일 - 잔량의 50%
+				qty = int64(float64(snapshot.Qty) * trailQtyPct)
 				if qty < 1 {
 					qty = 1
-				}
-
-				// 현재 잔량보다 많으면 잔량으로 제한
-				if qty > snapshot.Qty {
-					qty = snapshot.Qty
 				}
 
 				// Phase 1: fire_once 보장 (action_key 멱등으로 처리됨)
@@ -565,15 +560,17 @@ func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapsho
 					Str("current_price", currentPrice.String()).
 					Str("hwm_price", state.HWMPrice.String()).
 					Str("trailing_stop_price", trailingStopPrice.String()).
-					Int64("original_qty", snapshot.OriginalQty).
 					Int64("current_qty", snapshot.Qty).
 					Int64("qty", qty).
-					Float64("qty_pct", qtyPct).
+					Float64("trail_qty_pct", trailQtyPct).
 					Int("trailing_breach_ticks", state.TrailingBreachTicks).
-					Msg("Trailing PARTIAL trigger hit (원본 기준, TP2 부분 트레일, confirmed)")
+					Msg("Trailing PARTIAL trigger hit (잔량 기준 50%, TP2 부분 트레일, confirmed)")
 			} else {
-				// TRAILING_ACTIVE: 잔량 전량
-				qty = snapshot.Qty
+				// TRAILING_ACTIVE: 잔량의 50%
+				qty = int64(float64(snapshot.Qty) * trailQtyPct)
+				if qty < 1 {
+					qty = 1
+				}
 				reasonCode = exit.ReasonTrail
 
 				log.Info().
@@ -582,9 +579,11 @@ func (s *Service) evaluateTrailing(ctx context.Context, snapshot PositionSnapsho
 					Str("current_price", currentPrice.String()).
 					Str("hwm_price", state.HWMPrice.String()).
 					Str("trailing_stop_price", trailingStopPrice.String()).
+					Int64("current_qty", snapshot.Qty).
 					Int64("qty", qty).
+					Float64("trail_qty_pct", trailQtyPct).
 					Int("trailing_breach_ticks", state.TrailingBreachTicks).
-					Msg("Trailing FULL trigger hit (confirmed)")
+					Msg("Trailing trigger hit (잔량 기준 50%, confirmed)")
 			}
 
 			// Reset counter after trigger
@@ -795,9 +794,10 @@ func (s *Service) evaluateCustomRules(
 				Msg("Custom rule triggered")
 
 			return &exit.ExitTrigger{
-				ReasonCode: exit.ReasonCustom,
-				Qty:        qty,
-				OrderType:  exit.OrderTypeMKT,
+				ReasonCode:   exit.ReasonCustom,
+				ReasonDetail: rule.Description, // 맞춤규칙 상세 사유 (예: "+4%/10% 익절")
+				Qty:          qty,
+				OrderType:    exit.OrderTypeMKT,
 			}
 		}
 	}

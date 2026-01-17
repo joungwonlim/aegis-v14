@@ -308,6 +308,10 @@ export default function RuntimeDashboard() {
 
   const handleExitModeToggle = async (holding: Holding, enabled: boolean) => {
     const exitMode = enabled ? 'ENABLED' : 'DISABLED'
+    console.log('=== EXIT MODE TOGGLE ===')
+    console.log('Symbol:', holding.symbol, 'Account:', holding.account_id)
+    console.log('Requested exit_mode:', exitMode)
+    console.log('Current exit_mode:', holding.exit_mode)
 
     try {
       // Optimistically update UI first
@@ -321,10 +325,11 @@ export default function RuntimeDashboard() {
       })
 
       // Then update server (background)
-      await updateExitMode(holding.account_id, holding.symbol, exitMode, {
+      const result = await updateExitMode(holding.account_id, holding.symbol, exitMode, {
         qty: holding.qty,
         avg_price: typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price,
       })
+      console.log('API update result:', result)
 
       // Note: No refetch needed - automatic polling will sync within 1 second
     } catch (err) {
@@ -363,6 +368,25 @@ export default function RuntimeDashboard() {
     }
 
     return <Badge variant={variants[status] || 'default'}>{statusLabels[status] || status}</Badge>
+  }
+
+  // reason_code를 상세 설명으로 변환 (reason_detail이 있으면 우선 사용)
+  const getReasonDetails = (reasonCode: string, reasonDetail?: string) => {
+    // reason_detail이 있으면 우선 사용 (CUSTOM 규칙 등)
+    if (reasonDetail) {
+      return reasonDetail
+    }
+    const details: Record<string, string> = {
+      TP1: '+7%/10% 익절',
+      TP2: '+10%/20% 익절',
+      TP3: '+15%/30% 익절',
+      TRAILING: 'HWM -3%/50%',
+      SL1: '-3%/50% 손절',
+      SL2: '-5%/100% 손절',
+      HARDSTOP: '-7%/전량 손절',
+      STOP_FLOOR: '본전+0.6%/전량',
+    }
+    return details[reasonCode] || null
   }
 
   const formatNumber = (value: number | undefined, decimals = 0) => {
@@ -788,7 +812,12 @@ export default function RuntimeDashboard() {
                       <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
                       <TableCell>{intent.order_type}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{intent.reason_code}</Badge>
+                        <div className="space-y-0.5">
+                          <Badge variant="outline">{intent.reason_code}</Badge>
+                          {getReasonDetails(intent.reason_code, intent.reason_detail) && (
+                            <div className="text-xs text-muted-foreground">{getReasonDetails(intent.reason_code, intent.reason_detail)}</div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>{getStatusBadge(intent.status)}</TableCell>
                       <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
@@ -951,7 +980,12 @@ export default function RuntimeDashboard() {
                         <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
                         <TableCell>{intent.order_type}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{intent.reason_code}</Badge>
+                          <div className="space-y-0.5">
+                            <Badge variant="outline">{intent.reason_code}</Badge>
+                            {getReasonDetails(intent.reason_code, intent.reason_detail) && (
+                              <div className="text-xs text-muted-foreground">{getReasonDetails(intent.reason_code, intent.reason_detail)}</div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>{getStatusBadge(intent.status)}</TableCell>
                         <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
@@ -1132,7 +1166,12 @@ export default function RuntimeDashboard() {
                         <TableCell className="text-right">{formatNumber(intent.qty)}</TableCell>
                         <TableCell>{intent.order_type}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{intent.reason_code}</Badge>
+                          <div className="space-y-0.5">
+                            <Badge variant="outline">{intent.reason_code}</Badge>
+                            {getReasonDetails(intent.reason_code, intent.reason_detail) && (
+                              <div className="text-xs text-muted-foreground">{getReasonDetails(intent.reason_code, intent.reason_detail)}</div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>{getStatusBadge(intent.status)}</TableCell>
                         <TableCell className="text-sm">{formatTimestamp(intent.created_ts)}</TableCell>
@@ -1444,7 +1483,7 @@ export default function RuntimeDashboard() {
                 <div className="ml-4 space-y-1 text-sm text-muted-foreground">
                   <div>• <span className="font-semibold text-foreground">우선순위 0번</span> - 모든 트리거보다 먼저 평가</div>
                   <div>• <span className="font-semibold text-red-600 dark:text-red-400">PAUSE_ALL 모드에서도 작동</span> (제어 모드 우회)</div>
-                  <div>• 기본값: -10% (설정 가능)</div>
+                  <div>• 기본값: -7% (설정 가능)</div>
                   <div className="text-xs mt-2 p-2 bg-muted rounded">
                     ※ 시스템 전체가 일시정지 상태여도 비상 손절은 계속 작동하여 큰 손실 방지
                   </div>

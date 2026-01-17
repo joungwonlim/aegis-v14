@@ -334,11 +334,11 @@ flowchart TD
 #### Phase별 트리거 평가 순서
 
 **OPEN (초기 포지션):**
-1. HARD_STOP (-3.0% 비상 손절) - 🚨 PAUSE_ALL 우회
-2. SL2 (-10.0% 전량 손절)
-3. SL1 (-5.0% 부분 손절)
+1. HARD_STOP (-7.0% 비상 손절) - 🚨 PAUSE_ALL 우회
+2. SL2 (-5.0% 전량 손절)
+3. SL1 (-3.0% 부분 손절 50%)
 4. CUSTOM_RULES (사용자 정의 조건)
-5. TP1 (+5.0% 첫 익절)
+5. TP1 (+7.0% 첫 익절 10%)
 6. TIME_EXIT (최대 보유 기간)
 
 **TP1_DONE (첫 익절 완료):**
@@ -347,7 +347,7 @@ flowchart TD
 3. STOP_FLOOR (본전 방어선 돌파)
 4. SL1
 5. CUSTOM_RULES
-6. TP2 (+10.0% 2단계 익절)
+6. TP2 (+10.0% 2단계 익절 20%)
 7. TIME_EXIT
 
 **TP2_DONE (2단계 익절 완료):**
@@ -356,7 +356,7 @@ flowchart TD
 3. STOP_FLOOR
 4. SL1
 5. CUSTOM_RULES
-6. TP3 (+15.0% 3단계 익절)
+6. TP3 (+15.0% 3단계 익절 30%)
 7. TIME_EXIT
 
 **TP3_DONE (3단계 익절 완료):**
@@ -417,15 +417,15 @@ try {
 
 ### 4. 수량 계산 (부분 청산)
 
-**규칙 (예시):**
+**규칙 (v14 기본값):**
 
 | 트리거 | 수량 | 계산 |
 |--------|------|------|
 | SL1 | 50% | `ceil(remaining_qty * 0.5)` |
 | SL2 | 100% | `remaining_qty` |
-| TP1 | 25% | `ceil(original_qty * 0.25)` |
-| TP2 | 25% | `ceil(original_qty * 0.25)` |
-| TP3 | 20% | `ceil(original_qty * 0.20)` |
+| TP1 | 10% | `ceil(original_qty * 0.10)` |
+| TP2 | 20% | `ceil(original_qty * 0.20)` |
+| TP3 | 30% | `ceil(original_qty * 0.30)` |
 | TRAIL | 잔량 | `remaining_qty` |
 
 **잔량 추적:**
@@ -451,18 +451,18 @@ GROUP BY p.qty;
 ```go
 type ExitRulesConfig struct {
     // 1. HARD_STOP (하드 손절)
-    HardStopPercent    float64  // -3.0% (기본값)
+    HardStopPercent    float64  // -7.0% (기본값)
 
     // 2. GAP_DOWN (갭 하락 손절)
     GapDownPercent     float64  // -3.0% (장 시작 시 갭 기준)
     GapDownCheckWindow int      // 30초 (장 시작 후 체크 시간)
 
     // 3. FIXED TP/SL (고정 익절/손절 - TP1/2/3, SL1/2)
-    TP1Percent         float64  // +5.0% (1차 익절)
-    TP2Percent         float64  // +10.0% (2차 익절)
-    TP3Percent         float64  // +15.0% (3차 익절)
-    SL1Percent         float64  // -5.0% (1차 손절)
-    SL2Percent         float64  // -10.0% (2차 손절)
+    TP1Percent         float64  // +7.0% (1차 익절 10%)
+    TP2Percent         float64  // +10.0% (2차 익절 20%)
+    TP3Percent         float64  // +15.0% (3차 익절 30%)
+    SL1Percent         float64  // -3.0% (1차 손절 50%)
+    SL2Percent         float64  // -5.0% (2차 손절 100%)
 
     // 4. ATR_TRAILING (ATR 기반 트레일링)
     ATRPeriod          int      // 14일 (ATR 계산 기간)
@@ -491,7 +491,7 @@ type ExitRulesConfig struct {
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| HardStopPercent | -3.0% | 손절 수익률 |
+| HardStopPercent | -7.0% | 손절 수익률 |
 
 **조건:**
 ```go
