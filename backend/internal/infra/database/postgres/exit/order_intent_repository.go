@@ -35,10 +35,11 @@ func (r *OrderIntentRepository) CreateIntent(ctx context.Context, intent *exit.O
 			order_type,
 			limit_price,
 			reason_code,
+			reason_detail,
 			action_key,
 			status,
 			created_ts
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
 	`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -50,6 +51,7 @@ func (r *OrderIntentRepository) CreateIntent(ctx context.Context, intent *exit.O
 		intent.OrderType,
 		intent.LimitPrice,
 		intent.ReasonCode,
+		intent.ReasonDetail,
 		intent.ActionKey,
 		intent.Status,
 	)
@@ -239,6 +241,7 @@ func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int)
 			i.order_type,
 			i.limit_price,
 			i.reason_code,
+			COALESCE(i.reason_detail, '') AS reason_detail,
 			i.action_key,
 			i.status,
 			i.created_ts
@@ -271,6 +274,7 @@ func (r *OrderIntentRepository) GetRecentIntents(ctx context.Context, limit int)
 			&intent.OrderType,
 			&intent.LimitPrice,
 			&intent.ReasonCode,
+			&intent.ReasonDetail,
 			&intent.ActionKey,
 			&intent.Status,
 			&intent.CreatedTS,

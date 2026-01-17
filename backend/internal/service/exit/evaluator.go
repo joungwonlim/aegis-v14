@@ -424,16 +424,17 @@ func (s *Service) createIntentWithVersionCheck(ctx context.Context, snapshot Pos
 	// action_key에 Phase 포함 → 평단가 리셋 후 재발동 가능
 	actionKey := fmt.Sprintf("%s:%s:%s", snapshot.PositionID.String(), snapshot.Phase, trigger.ReasonCode)
 	intent := &exit.OrderIntent{
-		IntentID:   uuid.New(),
-		PositionID: snapshot.PositionID,
-		Symbol:     snapshot.Symbol,
-		IntentType: intentType,
-		Qty:        qty,
-		OrderType:  trigger.OrderType,
-		LimitPrice: trigger.LimitPrice,
-		ReasonCode: trigger.ReasonCode,
-		ActionKey:  actionKey,
-		Status:     exit.IntentStatusPendingApproval, // 사용자 승인 대기
+		IntentID:     uuid.New(),
+		PositionID:   snapshot.PositionID,
+		Symbol:       snapshot.Symbol,
+		IntentType:   intentType,
+		Qty:          qty,
+		OrderType:    trigger.OrderType,
+		LimitPrice:   trigger.LimitPrice,
+		ReasonCode:   trigger.ReasonCode,
+		ReasonDetail: trigger.ReasonDetail, // 상세 사유 (Custom rule description)
+		ActionKey:    actionKey,
+		Status:       exit.IntentStatusPendingApproval, // 사용자 승인 대기
 	}
 
 	err = s.intentRepo.CreateIntent(ctx, intent)

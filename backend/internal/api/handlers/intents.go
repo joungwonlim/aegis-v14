@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 )
@@ -50,7 +50,7 @@ func (h *IntentsHandler) GetIntents(w http.ResponseWriter, r *http.Request) {
 // POST /api/intents/{intent_id}/approve
 func (h *IntentsHandler) ApproveIntent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	intentIDStr := chi.URLParam(r, "intent_id")
+	intentIDStr := mux.Vars(r)["intent_id"]
 
 	// Parse intent ID
 	intentID, err := uuid.Parse(intentIDStr)
@@ -77,7 +77,7 @@ func (h *IntentsHandler) ApproveIntent(w http.ResponseWriter, r *http.Request) {
 // POST /api/intents/{intent_id}/reject
 func (h *IntentsHandler) RejectIntent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	intentIDStr := chi.URLParam(r, "intent_id")
+	intentIDStr := mux.Vars(r)["intent_id"]
 
 	// Parse intent ID
 	intentID, err := uuid.Parse(intentIDStr)
