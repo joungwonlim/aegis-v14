@@ -310,13 +310,7 @@ export default function RuntimeDashboard() {
     const exitMode = enabled ? 'ENABLED' : 'DISABLED'
 
     try {
-      // Update API
-      await updateExitMode(holding.account_id, holding.symbol, exitMode, {
-        qty: holding.qty,
-        avg_price: typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price,
-      })
-
-      // Immediately update local cache for instant UI feedback
+      // Optimistically update UI first
       queryClient.setQueryData(['runtime', 'holdings'], (old: Holding[] | undefined) => {
         if (!old) return old
         return old.map(h =>
@@ -326,11 +320,16 @@ export default function RuntimeDashboard() {
         )
       })
 
-      // Also refetch in background to ensure sync
-      refetchHoldings()
+      // Then update server (background)
+      await updateExitMode(holding.account_id, holding.symbol, exitMode, {
+        qty: holding.qty,
+        avg_price: typeof holding.avg_price === 'string' ? parseFloat(holding.avg_price) : holding.avg_price,
+      })
+
+      // Note: No refetch needed - automatic polling will sync within 1 second
     } catch (err) {
       console.error('Failed to update exit mode:', err)
-      // Revert by refetching
+      // Revert optimistic update by refetching
       await refetchHoldings()
     }
   }
