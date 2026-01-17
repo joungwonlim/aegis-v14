@@ -193,8 +193,122 @@ const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
 
 ---
 
+---
+
+## 📚 Stocks 페이지 설계 (종목 목록)
+
+### 목적
+전체 종목 목록 조회 및 관리 (Watchlist와 동일한 모듈 재사용)
+
+### 페이지 경로
+`/stocks`
+
+### 핵심 기능
+- **전체 종목 목록 표시** (market.stocks 테이블 기반)
+- **Watchlist 모듈 재사용** (동일한 테이블 컴포넌트)
+- **페이징 처리** (서버 사이드 페이징)
+- **종목명 클릭 시 StockDetailSheet 열림**
+- **필터링** (KOSPI/KOSDAQ, 업종)
+- **검색** (종목코드/종목명)
+
+### 테이블 구조
+
+| 컬럼명 | 타입 | 정렬 가능 | 설명 |
+|--------|------|-----------|------|
+| 순번 | number | ❌ | 페이지 내 순서 번호 |
+| 종목명 | string | ❌ | 종목명 + 로고 (StockSymbol 클릭 가능) |
+| 현재가 | number | ❌ | 실시간 현재가 (prices_best 조인) |
+| 전일대비 | number | ❌ | 전일 대비 등락률 (%) |
+| 업종 | string | ❌ | 업종명 |
+
+**변경 사항**:
+- ❌ 시장 컬럼 삭제 (사용자 요청)
+- ✅ 현재가 컬럼 추가
+- ✅ 전일대비 컬럼 추가
+- ❌ 정렬 기능 미구현 (서버에서 고정 순서)
+
+### 정렬 정책
+
+**현재 상태**: 정렬 기능 미구현
+
+**기본 정렬**: 서버에서 고정 (stock_code 오름차순)
+
+**향후 계획**:
+- 클라이언트 사이드 정렬 추가
+- 종목명, 현재가, 전일대비 정렬 지원
+
+### 페이징 사양 ✅
+
+**서버 사이드 페이징** (구현 완료):
+- 페이지당 100개 종목
+- 총 페이지 수 표시
+- 페이지 번호 클릭 이동 (1~10 표시, 생략 표시)
+- 이전/다음 버튼
+
+**쿼리 파라미터**:
+```
+GET /api/stocks?page=1&limit=100&search=삼성전자
+```
+
+**실제 구현**:
+- `frontend/app/stocks/page.tsx`
+- `backend/internal/api/handlers/stocks_mux.go`
+
+### Watchlist 모듈 재사용 전략
+
+**재사용 컴포넌트**:
+- `StockTable` 컴포넌트 (테이블 UI)
+- `StockSymbol` 컴포넌트 (종목명 표시 + 클릭)
+- `useStockDetail` 훅 (StockDetailSheet 열기)
+
+**Props 차이**:
+```tsx
+// Watchlist 모드
+<StockTable
+  stocks={watchlistStocks}
+  mode="watchlist"
+  showWatchlistActions={true}  // 즐겨찾기 버튼 표시
+  pagination={false}
+/>
+
+// Stocks 모드
+<StockTable
+  stocks={allStocks}
+  mode="all"
+  showWatchlistActions={false}  // 즐겨찾기 버튼 숨김
+  pagination={true}
+  currentPage={currentPage}
+  totalPages={totalPages}
+  onPageChange={handlePageChange}
+/>
+```
+
+### 필터링 기능
+
+**필터 옵션**:
+1. **시장 구분**: 전체, KOSPI, KOSDAQ
+2. **업종**: 전체, 제조업, IT, 금융, ...
+3. **검색**: 종목코드 또는 종목명
+
+**UI 위치**:
+- 페이지 상단 (테이블 위)
+- 수평 배치 (Filters Row)
+
+### 상호작용
+
+**클릭 동작**:
+- 종목명(StockSymbol) 클릭 → StockDetailSheet 열림
+- 컬럼 헤더 클릭 → 해당 컬럼 정렬 토글
+
+**자동 갱신**:
+- 현재가는 10초마다 자동 갱신 (prices_best)
+- 페이지 전환 시 새로고침
+
+---
+
 ## 🔗 관련 문서
 
 - [CLAUDE.md](../../CLAUDE.md)
 - [docs/ui/README.md](./README.md)
 - [docs/api/runtime-api.md](../api/runtime-api.md)
+- [docs/modules/stock-detail-sheet.md](../modules/stock-detail-sheet.md)

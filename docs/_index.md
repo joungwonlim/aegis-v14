@@ -103,6 +103,7 @@ scripts/                         # 실행 스크립트 ✨ NEW
 | `database/access-control.md` | ✅ 완료 | PostgreSQL RBAC 설계 (role 기반 접근 제어) |
 | `database/migration-stocks.md` | ✅ 완료 | market.stocks 테이블 마이그레이션 계획 (Phase 1~5, FK 제약조건) |
 | `database/setup-guide.md` | ✅ 완료 | DB 초기화 및 권한 설정 가이드 (권한 문제 방지, 트러블슈팅) |
+| `database/migration-charts.md` | ✅ 완료 | 차트 데이터 마이그레이션 (daily_prices, investor_trading) |
 | `database/erd.md` | ⬜ TODO | ERD 상세 (schema.md에 포함되어 있음) |
 | `database/indexes.md` | ⬜ TODO | 인덱스 최적화 전략 (schema.md에 일부 포함) |
 
@@ -128,8 +129,9 @@ scripts/                         # 실행 스크립트 ✨ NEW
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
-| `modules/stock-detail-sheet.md` | ✅ 완료 | StockDetailSheet 모듈 (v10 포팅, Phase 1 완료) |
-| `ui/pages.md` | ✅ 완료 | 페이지 구조 (Dashboard, Portfolio 기본 정렬 정책: 평가금액 내림차순) |
+| `modules/stock-detail-sheet.md` | ✅ 완료 | StockDetailSheet 모듈 (v10 포팅, Phase 1~2 완료) |
+| `ui/pages.md` | ✅ 완료 | 페이지 구조 (Dashboard, Stocks 페이지 - Pagination 완료) |
+| `ui/charts.md` | ✅ 완료 | 차트 컴포넌트 설계 (일봉/수급 차트, v10 포팅 완료) |
 | `ui/components.md` | ⬜ TODO | 컴포넌트 계층 |
 | `ui/state-management.md` | ⬜ TODO | 상태 관리 전략 |
 | `ui/api-integration.md` | ⬜ TODO | API 연동 방안 |

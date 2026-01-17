@@ -124,7 +124,80 @@ frontend/components/stock-detail-sheet/
 
 ---
 
-## Phase 2: 예정 기능 (v10 DB 필요)
+## Phase 2: 차트 기능 (일봉차트 + 수급차트) ✅
+
+### Chart 탭 (구현 완료: 2026-01-17)
+
+**목적**: v10의 일봉 차트 및 수급 차트를 v14로 포팅
+
+**기능**:
+1. **일봉 차트 (PriceChart)** ✅
+   - Candlestick 차트 (고/저/시/종, 상승/하락 색상 구분)
+   - 거래량 차트 (하단 100px)
+   - 기간 필터 (1M, 3M, 6M, 1Y) - 기본값: 3M
+   - 평단가 ReferenceLine (보유 종목 시, fontSize:14, bold)
+   - 마우스 crosshair (파란색 수평선)
+   - Y축 가격 라벨 (마우스 위치 가격 표시)
+   - Tooltip (고가/저가/종가, 천 단위 구분자)
+
+2. **수급 차트 (InvestorTradingChart)** ✅
+   - 외국인/기관/개인 순매수량 라인 차트
+   - 기간 필터 (1M, 3M, 6M, 1Y) - 기본값: 1M
+   - 0 기준선 표시
+   - 데이터 테이블 (최근 10일)
+   - Y축 자동 포맷팅 (억/만/천)
+
+**레이아웃**:
+```
+┌─────────────────────────────────────┐
+│ 일봉 차트 (400px)                   │
+│ - Candlestick                        │
+│ - 평단가 선 (보유종목만)              │
+│ - 마우스 crosshair                   │
+├─────────────────────────────────────┤
+│ 거래량 (100px)                       │
+└─────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│ 수급 차트 (200px)                    │
+│ - 외국인/기관/개인 라인              │
+│ - 0 기준선                           │
+├─────────────────────────────────────┤
+│ 데이터 테이블 (최근 10일)            │
+└─────────────────────────────────────┘
+```
+
+**데이터 소스** ✅:
+- **일봉 데이터**: `data.daily_prices` 파티션 테이블
+  - 컬럼: stock_code, trade_date, open_price, high_price, low_price, close_price, volume
+- **수급 데이터**: `data.investor_flow` 파티션 테이블 (LEFT JOIN daily_prices)
+  - 컬럼: stock_code, trade_date, foreign_net_qty, inst_net_qty, indiv_net_qty
+  - 가격 정보는 daily_prices에서 JOIN
+
+**API 엔드포인트** ✅:
+```
+GET /api/v1/fetcher/prices/{code}/history?start_date=2025-01-17&end_date=2026-01-17
+GET /api/v1/fetcher/flows/{code}/history?start_date=2025-12-17&end_date=2026-01-17
+```
+
+**구현 파일** ✅:
+- Frontend: `tabs/chart-tab.tsx` (통합 구현, PriceChart + InvestorTradingChart)
+- Frontend: `types.ts` (DailyPrice, InvestorFlow 타입)
+- Frontend: `lib/api.ts` (getPriceHistory, getFlowHistory)
+- Backend: `internal/api/handlers/chart_handler.go`
+- Backend: `internal/api/routes/chart_routes.go`
+
+**기술 스택**:
+- **recharts**: 차트 라이브러리 (v10과 동일)
+- **ComposedChart**: 일봉 차트 (Candlestick + 거래량)
+- **LineChart**: 수급 차트
+
+**v10 참조 파일**:
+- `/Users/wonny/Dev/aegis/v10/frontend/src/modules/stock/components/PriceChart.tsx`
+- `/Users/wonny/Dev/aegis/v10/frontend/src/modules/stock/components/InvestorTradingChart.tsx`
+
+---
+
+## Phase 3: 예정 기능 (v10 DB 필요)
 
 ### Investment 탭 (투자 지표)
 
@@ -340,10 +413,12 @@ tabs/ai-tab.tsx
 | 버전 | 날짜 | 내용 |
 |------|------|------|
 | v14.1.0-phase1 | 2026-01-15 | Phase 1 완료 (Holding, Price, Order 탭) |
-| v14.2.0-phase2 | TBD | Phase 2 (Investment, Consensus, AI 탭) |
+| v14.2.0-phase2 | 2026-01-17 | Phase 2 완료 (Chart 탭 - 일봉/수급 차트) ✅ |
+| v14.3.0-phase3 | TBD | Phase 3 (Investment, Consensus, AI 탭) |
 
 ---
 
 **작성일**: 2026-01-15
-**Phase**: Phase 1 완료
-**다음 단계**: v10 DB 마이그레이션 (Phase 2)
+**업데이트**: 2026-01-17
+**Phase**: Phase 2 완료 ✅
+**다음 단계**: Phase 3 (v10 fundamentals/consensus/ai_analysis DB 마이그레이션)
