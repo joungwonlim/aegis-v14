@@ -423,10 +423,17 @@ try {
 |--------|------|------|
 | SL1 | 50% | `ceil(remaining_qty * 0.5)` |
 | SL2 | 100% | `remaining_qty` |
-| TP1 | 10% | `ceil(original_qty * 0.10)` |
-| TP2 | 20% | `ceil(original_qty * 0.20)` |
-| TP3 | 30% | `ceil(original_qty * 0.30)` |
-| TRAIL | 잔량 | `remaining_qty` |
+| TP1 | 10% | `ceil(remaining_qty * 0.10)` |
+| TP2 | 20% | `ceil(remaining_qty * 0.20)` |
+| TP3 | 30% | `ceil(remaining_qty * 0.30)` |
+| TRAIL_PARTIAL | 50% | `ceil(remaining_qty * 0.5)` - TP2 후 1회 |
+| TRAIL | 50% | `ceil(remaining_qty * 0.5)` - TP3 후 1회 |
+
+**Trailing 특성:**
+- TP2 후 HWM -3% 도달 → 잔량 50% 청산 (TRAIL_PARTIAL, 1회만)
+- TP3 후 HWM -3% 도달 → 잔량 50% 청산 (TRAIL, 1회만)
+- action_key 멱등성으로 Phase당 1회만 발동
+- 가격 재상승 후 재하락 시 추가 발동 안됨
 
 **잔량 추적:**
 
