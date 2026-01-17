@@ -12,12 +12,13 @@ import (
 
 // Router holds all dependencies for API routing
 type Router struct {
-	engine        *gin.Engine
-	config        *config.Config
-	dbPool        *postgres.Pool
-	healthHandler *handlers.HealthHandler
-	stockHandler  *handlers.StockHandler
-	priceHandler  *handlers.PriceHandler
+	engine           *gin.Engine
+	config           *config.Config
+	dbPool           *postgres.Pool
+	healthHandler    *handlers.HealthHandler
+	stockHandler     *handlers.StockHandler
+	priceHandler     *handlers.PriceHandler
+	watchlistHandler *handlers.WatchlistHandler
 }
 
 // NewRouter creates a new API router with all dependencies
@@ -35,14 +36,16 @@ func NewRouter(cfg *config.Config, dbPool *postgres.Pool, priceService *pricesyn
 	healthHandler := handlers.NewHealthHandler(dbPool, version)
 	stockHandler := handlers.NewStockHandler(stockRepo)
 	priceHandler := handlers.NewPriceHandler(priceService)
+	watchlistHandler := handlers.NewWatchlistHandler(dbPool.DB())
 
 	router := &Router{
-		engine:        engine,
-		config:        cfg,
-		dbPool:        dbPool,
-		healthHandler: healthHandler,
-		stockHandler:  stockHandler,
-		priceHandler:  priceHandler,
+		engine:           engine,
+		config:           cfg,
+		dbPool:           dbPool,
+		healthHandler:    healthHandler,
+		stockHandler:     stockHandler,
+		priceHandler:     priceHandler,
+		watchlistHandler: watchlistHandler,
 	}
 
 	// Setup middlewares and routes
@@ -104,6 +107,20 @@ func (r *Router) setupRoutes() {
 			prices.GET("/:symbol", r.priceHandler.GetBestPrice)
 			prices.POST("/batch", r.priceHandler.BatchGetBestPrices)
 			prices.GET("/:symbol/freshness", r.priceHandler.GetFreshness)
+		}
+
+		// Watchlist API (v1)
+		v1 := api.Group("/v1")
+		{
+			watchlist := v1.Group("/watchlist")
+			{
+				watchlist.GET("", r.watchlistHandler.List)
+				watchlist.GET("/watch", r.watchlistHandler.ListWatch)
+				watchlist.GET("/candidate", r.watchlistHandler.ListCandidate)
+				watchlist.POST("", r.watchlistHandler.Create)
+				watchlist.PUT("/:id", r.watchlistHandler.Update)
+				watchlist.DELETE("/:id", r.watchlistHandler.Delete)
+			}
 		}
 	}
 }
