@@ -166,6 +166,60 @@ func (r *ExitProfileRepository) CreateOrUpdateProfile(ctx context.Context, profi
 	return nil
 }
 
+// GetAllProfiles retrieves all profiles (including inactive)
+func (r *ExitProfileRepository) GetAllProfiles(ctx context.Context) ([]*exit.ExitProfile, error) {
+	query := `
+		SELECT
+			profile_id,
+			name,
+			description,
+			config,
+			is_active,
+			created_by,
+			created_ts
+		FROM trade.exit_profiles
+		ORDER BY created_ts DESC
+	`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query all profiles: %w", err)
+	}
+	defer rows.Close()
+
+	var profiles []*exit.ExitProfile
+	for rows.Next() {
+		var profile exit.ExitProfile
+		var configJSON []byte
+
+		err := rows.Scan(
+			&profile.ProfileID,
+			&profile.Name,
+			&profile.Description,
+			&configJSON,
+			&profile.IsActive,
+			&profile.CreatedBy,
+			&profile.CreatedTS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan profile: %w", err)
+		}
+
+		// Unmarshal config JSON
+		if err := json.Unmarshal(configJSON, &profile.Config); err != nil {
+			return nil, fmt.Errorf("unmarshal config: %w", err)
+		}
+
+		profiles = append(profiles, &profile)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate profiles: %w", err)
+	}
+
+	return profiles, nil
+}
+
 // DeleteProfile deactivates a profile
 func (r *ExitProfileRepository) DeleteProfile(ctx context.Context, profileID string) error {
 	query := `

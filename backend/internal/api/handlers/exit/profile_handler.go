@@ -60,9 +60,7 @@ func (h *ProfileHandler) GetProfiles(w http.ResponseWriter, r *http.Request) {
 	if activeOnly {
 		profiles, err = h.exitSvc.GetActiveProfiles(ctx)
 	} else {
-		// TODO: Implement GetAllProfiles in service
-		// For now, just return active profiles
-		profiles, err = h.exitSvc.GetActiveProfiles(ctx)
+		profiles, err = h.exitSvc.GetAllProfiles(ctx)
 	}
 
 	if err != nil {

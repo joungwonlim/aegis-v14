@@ -181,18 +181,19 @@ type CustomExitRule struct {
 
 // OrderIntent represents exit intent (idempotent)
 type OrderIntent struct {
-	IntentID   uuid.UUID        `json:"intent_id"`
-	PositionID uuid.UUID        `json:"position_id"`
-	Symbol     string           `json:"symbol"`
-	SymbolName string           `json:"symbol_name"` // 종목명
-	IntentType string           `json:"intent_type"` // EXIT_PARTIAL | EXIT_FULL
-	Qty        int64            `json:"qty"`
-	OrderType  string           `json:"order_type"` // MKT | LMT
-	LimitPrice *decimal.Decimal `json:"limit_price"`
-	ReasonCode string           `json:"reason_code"` // SL1 | SL2 | TP1 | TP2 | TP3 | TRAIL | TIME | MANUAL
-	ActionKey  string           `json:"action_key"`  // {position_id}:SL1 (unique)
-	Status     string           `json:"status"`      // NEW | ACK | REJECTED | FILLED
-	CreatedTS  time.Time        `json:"created_ts"`
+	IntentID     uuid.UUID        `json:"intent_id"`
+	PositionID   uuid.UUID        `json:"position_id"`
+	Symbol       string           `json:"symbol"`
+	SymbolName   string           `json:"symbol_name"`   // 종목명
+	IntentType   string           `json:"intent_type"`   // EXIT_PARTIAL | EXIT_FULL
+	Qty          int64            `json:"qty"`
+	OrderType    string           `json:"order_type"`    // MKT | LMT
+	LimitPrice   *decimal.Decimal `json:"limit_price"`
+	ReasonCode   string           `json:"reason_code"`   // SL1 | SL2 | TP1 | TP2 | TP3 | TRAIL | TIME | MANUAL | CUSTOM
+	ReasonDetail string           `json:"reason_detail"` // 상세 사유 (예: "+4%/10% 익절")
+	ActionKey    string           `json:"action_key"`    // {position_id}:SL1 (unique)
+	Status       string           `json:"status"`        // NEW | ACK | REJECTED | FILLED
+	CreatedTS    time.Time        `json:"created_ts"`
 }
 
 // Intent Types
@@ -257,10 +258,11 @@ func IsActiveIntent(status string) bool {
 
 // ExitTrigger represents a triggered exit condition
 type ExitTrigger struct {
-	ReasonCode string
-	Qty        int64
-	OrderType  string
-	LimitPrice *decimal.Decimal
+	ReasonCode   string
+	ReasonDetail string // 상세 사유 (예: "+4%/10% 익절")
+	Qty          int64
+	OrderType    string
+	LimitPrice   *decimal.Decimal
 }
 
 // ====================

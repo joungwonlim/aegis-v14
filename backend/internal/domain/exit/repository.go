@@ -96,6 +96,9 @@ type ExitProfileRepository interface {
 	// GetActiveProfiles retrieves all active profiles
 	GetActiveProfiles(ctx context.Context) ([]*ExitProfile, error)
 
+	// GetAllProfiles retrieves all profiles (including inactive)
+	GetAllProfiles(ctx context.Context) ([]*ExitProfile, error)
+
 	// CreateOrUpdateProfile creates or updates a profile
 	CreateOrUpdateProfile(ctx context.Context, profile *ExitProfile) error
 

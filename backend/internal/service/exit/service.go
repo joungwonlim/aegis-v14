@@ -192,6 +192,11 @@ func (s *Service) GetActiveProfiles(ctx context.Context) ([]*exit.ExitProfile, e
 	return s.profileRepo.GetActiveProfiles(ctx)
 }
 
+// GetAllProfiles retrieves all exit profiles (including inactive)
+func (s *Service) GetAllProfiles(ctx context.Context) ([]*exit.ExitProfile, error) {
+	return s.profileRepo.GetAllProfiles(ctx)
+}
+
 // CreateOrUpdateProfile creates or updates an exit profile
 func (s *Service) CreateOrUpdateProfile(ctx context.Context, profile *exit.ExitProfile) error {
 	return s.profileRepo.CreateOrUpdateProfile(ctx, profile)
