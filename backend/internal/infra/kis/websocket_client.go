@@ -117,12 +117,19 @@ func (c *WebSocketClient) Connect(ctx context.Context) error {
 	c.conn = conn
 	c.isActive = true
 
+	// Setup ping/pong handlers
+	c.setupPingPongHandlers(conn)
+
 	// Start context
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Start message handler
 	c.wg.Add(1)
 	go c.handleMessages()
+
+	// Start keepalive
+	c.wg.Add(1)
+	go c.keepalive()
 
 	return nil
 }
@@ -367,6 +374,65 @@ func (c *WebSocketClient) Stop() error {
 	return c.Disconnect()
 }
 
+// setupPingPongHandlers sets up WebSocket ping/pong handlers
+func (c *WebSocketClient) setupPingPongHandlers(conn *websocket.Conn) {
+	// Set read deadline (60 seconds)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+	// Pong handler - reset read deadline when pong received
+	conn.SetPongHandler(func(appData string) error {
+		log.Debug().Msg("[WS] Pong received")
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	// Ping handler - respond with pong
+	conn.SetPingHandler(func(appData string) error {
+		log.Debug().Msg("[WS] Ping received, sending pong")
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+		if err != nil {
+			log.Warn().Err(err).Msg("[WS] Failed to send pong")
+		}
+		return err
+	})
+}
+
+// keepalive sends periodic ping messages to keep connection alive
+func (c *WebSocketClient) keepalive() {
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	log.Debug().Msg("[WS] Keepalive started (30s interval)")
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Debug().Msg("[WS] Keepalive stopped")
+			return
+
+		case <-ticker.C:
+			c.connMu.RLock()
+			conn := c.conn
+			c.connMu.RUnlock()
+
+			if conn == nil {
+				continue
+			}
+
+			// Send ping
+			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+			if err != nil {
+				log.Warn().Err(err).Msg("[WS] Failed to send ping")
+			} else {
+				log.Debug().Msg("[WS] Ping sent")
+			}
+		}
+	}
+}
+
 // handleMessages handles incoming WebSocket messages
 func (c *WebSocketClient) handleMessages() {
 	defer c.wg.Done()
@@ -527,6 +593,9 @@ func (c *WebSocketClient) reconnect() error {
 		c.conn = conn
 		c.isActive = true
 		c.connMu.Unlock()
+
+		// Setup ping/pong handlers for new connection
+		c.setupPingPongHandlers(conn)
 
 		// ✅ Increased stabilization time (500ms → 2s) to prevent immediate disconnect
 		log.Debug().Msg("[WS] Waiting for connection to stabilize...")
