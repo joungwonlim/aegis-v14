@@ -2,10 +2,12 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 )
@@ -95,4 +97,9 @@ func checkPermissions(ctx context.Context, pool *pgxpool.Pool) error {
 func (p *Pool) Close() {
 	log.Info().Msg("Closing PostgreSQL connection pool...")
 	p.Pool.Close()
+}
+
+// DB returns a *sql.DB compatible interface for legacy code
+func (p *Pool) DB() *sql.DB {
+	return stdlib.OpenDBFromPool(p.Pool)
 }
