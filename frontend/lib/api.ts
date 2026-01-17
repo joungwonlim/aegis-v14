@@ -33,7 +33,8 @@ export interface OrderIntent {
   qty: number
   order_type: string // MKT, LMT
   limit_price?: number
-  reason_code: string // SL1, SL2, TP1, TP2, TRAILING, etc.
+  reason_code: string // SL1, SL2, TP1, TP2, TRAILING, CUSTOM, etc.
+  reason_detail?: string // 상세 사유 (예: "+4%/10% 익절")
   status: string // PENDING_APPROVAL, NEW, ACK, REJECTED, FILLED, CANCELLED, SUBMITTED
   created_ts: string
 }
@@ -112,7 +113,16 @@ export async function getHoldings(): Promise<Holding[]> {
     throw new Error(`Failed to fetch holdings: ${response.statusText}`)
   }
 
-  return response.json()
+  const data = await response.json()
+  console.log('Holdings API response:', data)
+
+  // Debug: Check specific symbol 316140
+  const symbol316140 = data.find((h: Holding) => h.symbol === '316140')
+  if (symbol316140) {
+    console.log('Symbol 316140 exit_mode:', symbol316140.exit_mode, 'Account:', symbol316140.account_id)
+  }
+
+  return data
 }
 
 export async function getOrderIntents(): Promise<OrderIntent[]> {

@@ -169,8 +169,8 @@ export function StockDetailSheet({
                   <div className="font-medium">{qty.toLocaleString()}</div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground text-xs">매도가능</div>
-                  <div className="font-medium">{qty.toLocaleString()}</div>
+                  <div className="text-muted-foreground text-xs">평가금액</div>
+                  <div className="font-medium font-mono">{evalAmount.toLocaleString()}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">평가손익</div>
@@ -185,16 +185,17 @@ export function StockDetailSheet({
                   </div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground text-xs">매입단가</div>
-                  <div className="font-medium font-mono">{avgPrice.toLocaleString()}</div>
+                  <div className="text-muted-foreground text-xs">매도가능</div>
+                  <div className="font-medium">{qty.toLocaleString()}</div>
                 </div>
-                <div>
-                  <div className="text-muted-foreground text-xs">평가금액</div>
-                  <div className="font-medium font-mono">{evalAmount.toLocaleString()}</div>
-                </div>
+                
                 <div>
                   <div className="text-muted-foreground text-xs">매입금액</div>
                   <div className="font-medium font-mono">{purchaseAmount.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground text-xs">매입단가</div>
+                  <div className="font-medium font-mono">{avgPrice.toLocaleString()}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">비중</div>

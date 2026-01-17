@@ -44,7 +44,7 @@ export function useHoldings() {
       return result || []
     },
     staleTime: 500, // 0.5초
-    refetchInterval: 1000, // 1초마다 갱신
+    refetchInterval: 5000, // 5초마다 갱신 (임시로 늘림)
     placeholderData: (previousData) => previousData, // 이전 데이터 유지 (깜빡임 방지)
   })
 }
