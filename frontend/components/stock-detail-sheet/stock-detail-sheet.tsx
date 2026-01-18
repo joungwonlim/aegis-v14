@@ -158,16 +158,40 @@ export function StockDetailSheet({
                   )}
                 </div>
 
-                {/* 라인 3: 현재가 · 전일대비 */}
+                {/* 라인 3: 현재가 · 전일대비 · 평단가(보유종목) */}
                 {priceInfo && (
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-medium text-base">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* 현재가 */}
+                    <span className="font-mono font-semibold text-2xl">
                       {priceInfo.currentPrice.toLocaleString()}
                     </span>
+
+                    {/* 전일대비 */}
                     <ChangeIndicator
                       changePrice={priceInfo.changePrice}
                       changeRate={priceInfo.changeRate}
                     />
+
+                    {/* 보유종목인 경우: 평단가 및 차이 */}
+                    {holding && holding.avg_price > 0 && (() => {
+                      const avgPrice = Math.floor(holding.avg_price)
+                      const priceDiff = priceInfo.currentPrice - avgPrice
+                      const priceDiffPct = avgPrice > 0 ? (priceDiff / avgPrice) * 100 : 0
+
+                      return (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-sm text-muted-foreground">평단</span>
+                          <span className="font-mono text-sm font-medium">
+                            {avgPrice.toLocaleString()}
+                          </span>
+                          <ChangeIndicator
+                            changePrice={priceDiff}
+                            changeRate={priceDiffPct}
+                          />
+                        </>
+                      )
+                    })()}
                   </div>
                 )}
               </div>
