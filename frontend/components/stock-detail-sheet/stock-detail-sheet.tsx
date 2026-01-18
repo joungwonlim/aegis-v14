@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ShoppingCart, Star, BarChart3, LogOut } from 'lucide-react'
+import { ShoppingCart, Star, BarChart3, LogOut, ExternalLink, Sparkles } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -23,7 +23,9 @@ import { StockSymbol } from '@/components/stock-symbol'
 import { ChangeIndicator } from '@/components/ui/change-indicator'
 import type { StockInfo, StockDetailTab } from './types'
 import { useStockPrice } from './hooks/use-stock-price'
+import { useStockInfo } from './hooks/use-stock-info'
 import { ChartTab } from './tabs/chart-tab'
+import { AITab } from './tabs/ai-tab'
 import { OrderTab } from './tabs/order-tab'
 import { ExitTab } from './tabs/exit-tab'
 import { useIsInWatchlist, useCreateWatchlistItem, useDeleteWatchlistItem } from '@/hooks/useWatchlist'
@@ -61,6 +63,9 @@ export function StockDetailSheet({
 
   // 가격 정보 조회
   const { data: priceInfo } = useStockPrice(stock?.symbol || '', holdings)
+
+  // 기업 개요 조회
+  const { data: stockInfo } = useStockInfo(stock?.symbol || '')
 
   // 해당 종목의 보유 정보 찾기
   const holding = holdings.find((h) => h.symbol === stock?.symbol)
@@ -100,6 +105,7 @@ export function StockDetailSheet({
 
   const tabs = [
     { key: 'chart', label: '차트', icon: BarChart3 },
+    { key: 'ai', label: 'AI', icon: Sparkles },
     { key: 'order', label: '주문', icon: ShoppingCart },
     { key: 'exit', label: 'Exit', icon: LogOut },
   ] as const
@@ -197,30 +203,50 @@ export function StockDetailSheet({
             </div>
 
             {/* 우측 액션 버튼들 */}
-            <div className="flex items-center gap-3">
-              {/* Watchlist 추가/삭제 버튼 (별 아이콘만) */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleToggleWatchlist}
-                disabled={createWatchlistItem.isPending || deleteWatchlistItem.isPending}
-                className="h-9 w-9"
-                title={isInWatchlist ? '관심종목에서 제거' : '관심종목에 추가'}
-              >
-                <Star
-                  className={`h-5 w-5 ${
-                    isInWatchlist
-                      ? 'fill-yellow-500 text-yellow-500'
-                      : 'text-muted-foreground'
-                  }`}
-                />
-              </Button>
+            <div className="flex flex-col items-end gap-2">
+              {/* 첫째 줄: 네이버증권 링크 + Watchlist */}
+              <div className="flex items-center gap-2">
+                {/* 네이버증권 링크 */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  asChild
+                  className="h-8 w-8"
+                  title="네이버증권에서 보기"
+                >
+                  <a
+                    href={`https://stock.naver.com/domestic/stock/${stock.symbol}/price`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                  </a>
+                </Button>
 
-              {/* Exit Engine 스위치 */}
+                {/* Watchlist 추가/삭제 버튼 (별 아이콘만) */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleToggleWatchlist}
+                  disabled={createWatchlistItem.isPending || deleteWatchlistItem.isPending}
+                  className="h-8 w-8"
+                  title={isInWatchlist ? '관심종목에서 제거' : '관심종목에 추가'}
+                >
+                  <Star
+                    className={`h-4 w-4 ${
+                      isInWatchlist
+                        ? 'fill-yellow-500 text-yellow-500'
+                        : 'text-muted-foreground'
+                    }`}
+                  />
+                </Button>
+              </div>
+
+              {/* 둘째 줄: Exit Engine 스위치 */}
               {holding && (
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="exit-engine-header" className="text-sm font-medium">
-                    Exit Engine
+                  <Label htmlFor="exit-engine-header" className="text-xs font-medium text-muted-foreground">
+                    Exit
                   </Label>
                   <Switch
                     id="exit-engine-header"
@@ -229,9 +255,6 @@ export function StockDetailSheet({
                       onExitModeToggle(holding, enabled)
                     }}
                   />
-                  <span className="text-xs text-muted-foreground">
-                    {holding.exit_mode === 'ENABLED' ? '활성화됨' : '비활성화됨'}
-                  </span>
                 </div>
               )}
             </div>
@@ -289,10 +312,17 @@ export function StockDetailSheet({
               </div>
             )
           })()}
+
+          {/* 기업 개요 */}
+          {stockInfo?.company_overview && (
+            <div className="mt-3 text-xs text-muted-foreground leading-relaxed line-clamp-3">
+              {stockInfo.company_overview}
+            </div>
+          )}
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as StockDetailTab)} className="mt-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="gap-2">
                 <tab.icon className="h-4 w-4" />
@@ -306,6 +336,13 @@ export function StockDetailSheet({
               symbol={stock.symbol}
               symbolName={stock.symbolName}
               avgBuyPrice={holding?.avg_price}
+            />
+          </TabsContent>
+
+          <TabsContent value="ai" className="mt-4">
+            <AITab
+              symbol={stock.symbol}
+              symbolName={stock.symbolName}
             />
           </TabsContent>
 

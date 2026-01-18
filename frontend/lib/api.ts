@@ -652,7 +652,7 @@ export interface PerformanceReport {
 }
 
 export interface DailyPnL {
-  pnl_date: string
+  date: string  // Backend JSON 태그와 일치
   realized_pnl: number
   unrealized_pnl: number
   total_pnl: number
@@ -660,7 +660,6 @@ export interface DailyPnL {
   cumulative_return: number
   portfolio_value: number
   cash_balance: number
-  position_count: number
 }
 
 export interface AttributionAnalysis {
@@ -700,9 +699,16 @@ export async function getPerformance(period: AuditPeriod = '1M'): Promise<Perfor
   })
 
   if (!response.ok) {
-    const data = await response.json()
-    if (data.error === 'Insufficient data for analysis') return null
-    throw new Error(`Failed to get performance: ${response.statusText}`)
+    try {
+      const data = await response.json()
+      // 데이터 부족 에러는 null 반환 (정상 상황)
+      if (data.error && data.error.includes('Insufficient data')) return null
+      if (data.error && data.error.includes('insufficient data')) return null
+    } catch (e) {
+      // JSON 파싱 실패 시 null 반환
+      return null
+    }
+    return null
   }
 
   const data = await response.json()
@@ -716,16 +722,21 @@ export async function getDailyPnL(startDate?: string, endDate?: string): Promise
   if (endDate) params.append('end_date', endDate)
   if (params.toString()) url += `?${params.toString()}`
 
+  console.log('[API] getDailyPnL request:', url)
+
   const response = await fetch(url, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
   })
 
   if (!response.ok) {
+    const errorText = await response.text()
+    console.error('[API] getDailyPnL error:', response.status, errorText)
     throw new Error(`Failed to get daily PnL: ${response.statusText}`)
   }
 
   const data = await response.json()
+  console.log('[API] getDailyPnL response:', data)
   return data.data || []
 }
 
@@ -752,9 +763,16 @@ export async function getRiskMetrics(period: AuditPeriod = '1M'): Promise<RiskMe
   })
 
   if (!response.ok) {
-    const data = await response.json()
-    if (data.error === 'Insufficient data for analysis') return null
-    throw new Error(`Failed to get risk metrics: ${response.statusText}`)
+    try {
+      const data = await response.json()
+      // 데이터 부족 에러는 null 반환 (정상 상황)
+      if (data.error && data.error.includes('Insufficient data')) return null
+      if (data.error && data.error.includes('insufficient data')) return null
+    } catch (e) {
+      // JSON 파싱 실패 시 null 반환
+      return null
+    }
+    return null
   }
 
   const data = await response.json()
@@ -1017,7 +1035,7 @@ export async function getLatestSignalSnapshot(): Promise<SignalSnapshot | null> 
   }
 
   const data = await response.json()
-  return data.data
+  return data // Backend returns data directly, not wrapped in {data: ...}
 }
 
 export async function getBuySignals(snapshotId: string): Promise<Signal[]> {
@@ -1031,7 +1049,23 @@ export async function getBuySignals(snapshotId: string): Promise<Signal[]> {
   }
 
   const data = await response.json()
-  return data.data || []
+  const signals = data.signals || []
+
+  // Map backend response to frontend Signal type
+  return signals.map((s: any) => ({
+    stock_code: s.symbol,
+    stock_name: s.name,
+    signal_type: s.signal_type,
+    total_score: (s.strength || 0) / 100, // Convert 0-100 to 0-1
+    momentum: (s.factors?.momentum?.score || 0) / 100,
+    technical: (s.factors?.technical?.score || 0) / 100,
+    value: (s.factors?.value?.score || 0) / 100,
+    quality: (s.factors?.quality?.score || 0) / 100,
+    flow: (s.factors?.flow?.score || 0) / 100,
+    event: (s.factors?.event?.score || 0) / 100,
+    current_price: s.current_price,
+    change_rate: s.change_rate,
+  }))
 }
 
 export async function getSellSignals(snapshotId: string): Promise<Signal[]> {
@@ -1045,7 +1079,23 @@ export async function getSellSignals(snapshotId: string): Promise<Signal[]> {
   }
 
   const data = await response.json()
-  return data.data || []
+  const signals = data.signals || []
+
+  // Map backend response to frontend Signal type
+  return signals.map((s: any) => ({
+    stock_code: s.symbol,
+    stock_name: s.name,
+    signal_type: s.signal_type,
+    total_score: (s.strength || 0) / 100, // Convert 0-100 to 0-1
+    momentum: (s.factors?.momentum?.score || 0) / 100,
+    technical: (s.factors?.technical?.score || 0) / 100,
+    value: (s.factors?.value?.score || 0) / 100,
+    quality: (s.factors?.quality?.score || 0) / 100,
+    flow: (s.factors?.flow?.score || 0) / 100,
+    event: (s.factors?.event?.score || 0) / 100,
+    current_price: s.current_price,
+    change_rate: s.change_rate,
+  }))
 }
 
 export async function getFactors(symbol: string): Promise<FactorScore | null> {
@@ -1206,6 +1256,89 @@ export async function getStockRanking(category: RankingCategory, limit = 20, mar
 
   if (!response.ok) {
     throw new Error(`Failed to get ${category} ranking: ${response.statusText}`)
+  }
+
+  return await response.json()
+}
+
+// =====================================
+// KIS Audit Builder API
+// =====================================
+
+export interface BuildFromKISRequest {
+  account_no?: string
+  account_product_code?: string
+  start_date?: string // YYYY-MM-DD
+  end_date?: string   // YYYY-MM-DD
+}
+
+export async function buildAuditFromKIS(params?: BuildFromKISRequest): Promise<void> {
+  const searchParams = new URLSearchParams()
+  if (params?.account_no) searchParams.append('account_no', params.account_no)
+  if (params?.account_product_code) searchParams.append('account_product_code', params.account_product_code)
+  if (params?.start_date) searchParams.append('start_date', params.start_date)
+  if (params?.end_date) searchParams.append('end_date', params.end_date)
+
+  const url = searchParams.toString()
+    ? `${API_BASE_URL}/v1/audit/build-from-kis?${searchParams.toString()}`
+    : `${API_BASE_URL}/v1/audit/build-from-kis`
+
+  console.log('[API] buildAuditFromKIS request:', url, params)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('[API] buildAuditFromKIS error:', response.status, errorText)
+    throw new Error(errorText || response.statusText)
+  }
+
+  const result = await response.json()
+  console.log('[API] buildAuditFromKIS success:', result)
+}
+
+// =====================================
+// Stock Info API (Company Overview)
+// =====================================
+
+export interface StockInfoDetail {
+  symbol: string
+  symbol_name?: string
+  company_overview?: string
+  overview_source?: string
+}
+
+/**
+ * 종목의 기업 개요 조회
+ * DB에 없으면 네이버증권에서 자동으로 가져와서 저장 후 반환
+ */
+export async function getStockInfo(symbol: string): Promise<StockInfoDetail> {
+  const response = await fetch(`${API_BASE_URL}/stocks/${symbol}/info`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get stock info: ${response.statusText}`)
+  }
+
+  return await response.json()
+}
+
+/**
+ * 종목의 기업 개요 강제 새로고침 (네이버에서 다시 가져오기)
+ */
+export async function refreshStockInfo(symbol: string): Promise<StockInfoDetail> {
+  const response = await fetch(`${API_BASE_URL}/stocks/${symbol}/info/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to refresh stock info: ${response.statusText}`)
   }
 
   return await response.json()

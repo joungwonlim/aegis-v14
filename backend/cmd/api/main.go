@@ -16,20 +16,30 @@ import (
 	"github.com/wonny/aegis/v14/internal/api/handlers"
 	audithandlers "github.com/wonny/aegis/v14/internal/api/handlers/audit"
 	fetcherhandlers "github.com/wonny/aegis/v14/internal/api/handlers/fetcher"
+	signalshandlers "github.com/wonny/aegis/v14/internal/api/handlers/signals"
+	universehandlers "github.com/wonny/aegis/v14/internal/api/handlers/universe"
 	"github.com/wonny/aegis/v14/internal/api/routes"
+	"github.com/wonny/aegis/v14/internal/infra/external/deepseek"
+	"github.com/wonny/aegis/v14/internal/infra/external/openai"
+	ai_analysis_repo "github.com/wonny/aegis/v14/internal/infrastructure/postgres/ai_analysis"
+	ai_analysis_service "github.com/wonny/aegis/v14/internal/service/ai_analysis"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	fetcherrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/fetcher"
+	signalsrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/signals"
 	exitrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
 	"github.com/wonny/aegis/v14/internal/infra/external/dart"
 	"github.com/wonny/aegis/v14/internal/infra/external/naver"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
+	universerepo "github.com/wonny/aegis/v14/internal/infrastructure/postgres/universe"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
 	auditservice "github.com/wonny/aegis/v14/internal/service/audit"
 	exitservice "github.com/wonny/aegis/v14/internal/service/exit"
 	fetcherservice "github.com/wonny/aegis/v14/internal/service/fetcher"
 	"github.com/wonny/aegis/v14/internal/service/pricesync"
+	universeservice "github.com/wonny/aegis/v14/internal/service/universe"
+	signalsservice "github.com/wonny/aegis/v14/internal/strategy/signals"
 )
 
 const (
@@ -193,6 +203,7 @@ func main() {
 	apiRouter.HandleFunc("/kis/filled-orders", kisOrdersHandler.GetFilledOrders).Methods("GET")
 	apiRouter.HandleFunc("/kis/orders", kisOrdersHandler.PlaceOrder).Methods("POST")
 	apiRouter.HandleFunc("/kis/orders/{order_no}", kisOrdersHandler.CancelOrder).Methods("DELETE")
+	apiRouter.HandleFunc("/kis/trade-profit-loss", kisOrdersHandler.GetTradeProfitLoss).Methods("GET")
 
 	// Register Exit routes
 	routes.RegisterExitRoutes(httpRouter, exitSvc)
@@ -208,6 +219,27 @@ func main() {
 
 	// Register Ranking routes
 	routes.RegisterRankingRoutes(httpRouter, dbPool)
+
+	// Initialize AI Analysis
+	openaiAPIKey := os.Getenv("CHATGPT_API_KEY")
+	deepseekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
+	deepseekBaseURL := os.Getenv("DEEPSEEK_BASE_URL")
+
+	if openaiAPIKey != "" || deepseekAPIKey != "" {
+		openaiClient := openai.NewClient(openaiAPIKey)
+		deepseekClient := deepseek.NewClient(deepseekAPIKey, deepseekBaseURL)
+		aiRepo := ai_analysis_repo.NewRepository(dbPool.Pool)
+		aiSvc := ai_analysis_service.NewService(aiRepo, openaiClient, deepseekClient)
+		aiHandler := handlers.NewAIAnalysisHandler(aiSvc)
+
+		// AI Analysis routes
+		apiRouter.HandleFunc("/v1/stock/{symbol}/ai-analysis", aiHandler.AnalyzeStock).Methods("POST")
+		apiRouter.HandleFunc("/v1/ai-analyses/recent", aiHandler.GetRecentAnalyses).Methods("GET")
+
+		log.Info().Msg("✅ AI Analysis initialized")
+	} else {
+		log.Warn().Msg("⚠️ AI API keys not set, AI analysis will be disabled")
+	}
 
 	// Initialize Fetcher Service
 	// 1. External Clients
@@ -273,6 +305,49 @@ func main() {
 	fetcherHandler := fetcherhandlers.NewHandler(fetcherSvc)
 	routes.RegisterFetcherRoutes(httpRouter, fetcherHandler, fetcherStatusHandler)
 
+	// Initialize Universe Service
+	// 1. Universe Repository
+	universeRepo := universerepo.NewUniverseRepository(dbPool.Pool)
+
+	// 2. Readers for Universe
+	holdingReader := universerepo.NewHoldingReader(dbPool.Pool)
+	watchlistReader := universerepo.NewWatchlistReader(dbPool.Pool)
+	rankingReader := universerepo.NewRankingReader(dbPool.Pool)
+
+	// 3. Stock Repository and Statistics Reader
+	universeStockRepo := universerepo.NewStockRepository(dbPool.Pool)
+	universeStatsReader := universerepo.NewStatisticsReader(dbPool.Pool)
+
+	// 4. Create Universe Service
+	universeSvc := universeservice.NewService(
+		ctx,
+		universeRepo, // Already created above for Signals
+		universeStockRepo,
+		universeStatsReader,
+		holdingReader,
+		watchlistReader,
+		rankingReader,
+	)
+
+	// 5. Start Universe Service (will auto-generate initial snapshot)
+	if err := universeSvc.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to start Universe service")
+	} else {
+		log.Info().Msg("✅ Universe service started")
+	}
+
+	// 6. Create Universe Handler and Register Routes
+	universeHandler := universehandlers.NewUniverseHandler(universeSvc)
+	routes.RegisterUniverseRoutes(httpRouter, universeHandler)
+
+	// Initialize Stock Info Handler (for company overview)
+	stockInfoRepo := universerepo.NewStockInfoRepository(dbPool.Pool)
+	stockInfoHandler := handlers.NewStockInfoHandler(stockInfoRepo, naverClient)
+
+	// Stock Info routes
+	apiRouter.HandleFunc("/stocks/{symbol}/info", stockInfoHandler.GetCompanyOverview).Methods("GET")
+	apiRouter.HandleFunc("/stocks/{symbol}/info/refresh", stockInfoHandler.RefreshCompanyOverview).Methods("POST")
+
 	// Initialize Audit Service
 	auditRepo := postgres.NewAuditRepository(dbPool.Pool)
 	auditSvc := auditservice.NewService(auditRepo)
@@ -284,7 +359,31 @@ func main() {
 
 	routes.RegisterAuditRoutes(httpRouter, auditHandler)
 
-	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts, Fetcher, Audit)")
+	// Initialize Signals Service
+	// 1. Signals Repositories
+	signalsSignalRepo := signalsrepo.NewSignalRepository(dbPool.Pool)
+	signalsFactorRepo := signalsrepo.NewFactorRepository(dbPool.Pool)
+
+	// 2. Create Signals Service (using universeRepo from Universe Service above)
+	signalsSvc := signalsservice.NewService(
+		ctx,
+		signalsSignalRepo,
+		signalsFactorRepo,
+		universeRepo,
+	)
+
+	// 4. Start Signals Service
+	if err := signalsSvc.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to start Signals service")
+	} else {
+		log.Info().Msg("✅ Signals service started")
+	}
+
+	// 5. Create Signals Handler and Register Routes
+	signalsHandler := signalshandlers.NewHandler(signalsSvc, signalsFactorRepo)
+	routes.RegisterSignalsRoutes(httpRouter, signalsHandler)
+
+	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts, Fetcher, Universe, Audit, Signals)")
 
 	// Wrap with CORS
 	handler := gorillaHandlers.CORS(allowedOrigins, allowedMethods, allowedHeaders, allowCredentials)(httpRouter)

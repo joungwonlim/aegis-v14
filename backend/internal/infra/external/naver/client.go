@@ -2,6 +2,7 @@ package naver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -638,6 +639,137 @@ func (c *Client) FetchMarketCapRanking(ctx context.Context, market string, limit
 	})
 
 	return stocks, nil
+}
+
+// =============================================================================
+// Company Overview (기업 개요)
+// =============================================================================
+
+const stockNaverURL = "https://stock.naver.com"
+
+// CompanyOverview 기업 개요 정보
+type CompanyOverview struct {
+	Symbol      string `json:"symbol"`
+	SymbolName  string `json:"symbol_name"`
+	Overview    string `json:"overview"`
+	FetchedFrom string `json:"fetched_from"`
+}
+
+// FetchCompanyOverview 기업 개요 수집 (stock.naver.com API)
+// URL: https://stock.naver.com/domestic/stock/{symbol}/info/company
+func (c *Client) FetchCompanyOverview(ctx context.Context, stockCode string) (*CompanyOverview, error) {
+	// stock.naver.com은 내부적으로 API를 호출함
+	// API 엔드포인트: https://api.stock.naver.com/stock/{code}/basic
+	apiURL := fmt.Sprintf("https://api.stock.naver.com/stock/%s/basic", stockCode)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// API 실패 시 HTML 파싱 시도
+		return c.fetchCompanyOverviewFromHTML(ctx, stockCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	// JSON에서 기업 개요 추출
+	// 응답 구조: {"stockName": "...", "corporateSummary": "..."}
+	type BasicResponse struct {
+		StockName        string `json:"stockName"`
+		CorporateSummary string `json:"corporateSummary"`
+	}
+
+	var basicResp BasicResponse
+	if err := json.Unmarshal(body, &basicResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if basicResp.CorporateSummary == "" {
+		// API에 데이터 없으면 HTML 파싱 시도
+		return c.fetchCompanyOverviewFromHTML(ctx, stockCode)
+	}
+
+	return &CompanyOverview{
+		Symbol:      stockCode,
+		SymbolName:  basicResp.StockName,
+		Overview:    basicResp.CorporateSummary,
+		FetchedFrom: "naver_api",
+	}, nil
+}
+
+// fetchCompanyOverviewFromHTML HTML 파싱으로 기업 개요 수집 (fallback)
+func (c *Client) fetchCompanyOverviewFromHTML(ctx context.Context, stockCode string) (*CompanyOverview, error) {
+	// finance.naver.com에서 기업 개요 파싱
+	url := fmt.Sprintf("%s/item/coinfo.naver?code=%s", baseURL, stockCode)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("parse html: %w", err)
+	}
+
+	// 종목명 파싱
+	name := strings.TrimSpace(doc.Find("div.wrap_company h2 a").Text())
+	if name == "" {
+		name = strings.TrimSpace(doc.Find("div.h_company h2").Text())
+	}
+
+	// 기업 개요 파싱 (summary 영역)
+	var overview string
+	doc.Find("div.summary").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if text != "" {
+			overview = text
+		}
+	})
+
+	if overview == "" {
+		// 다른 위치에서 시도
+		doc.Find("p.content").Each(func(i int, s *goquery.Selection) {
+			text := strings.TrimSpace(s.Text())
+			if text != "" && len(text) > 50 {
+				overview = text
+			}
+		})
+	}
+
+	if overview == "" {
+		return nil, fmt.Errorf("company overview not found for %s", stockCode)
+	}
+
+	return &CompanyOverview{
+		Symbol:      stockCode,
+		SymbolName:  name,
+		Overview:    overview,
+		FetchedFrom: "naver_html",
+	}, nil
 }
 
 // =============================================================================
