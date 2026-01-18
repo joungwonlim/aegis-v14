@@ -113,7 +113,7 @@ export function StockDetailSheet({
 
             <div className="flex items-start gap-3">
               {/* Stock Logo */}
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
+              <div className="relative w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
                 <img
                   src={`https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock${stock.symbol}.svg`}
                   alt={stock.symbolName || stock.symbol}
@@ -130,26 +130,40 @@ export function StockDetailSheet({
                     }
                   }}
                 />
+
+                {/* 빨간점: 보유종목 또는 Exit 활성화 */}
+                {(holding || (holding && holding.exit_mode === 'ENABLED')) && (
+                  <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 rounded-full border-2 border-background" />
+                )}
               </div>
 
               {/* 종목정보 */}
               <div>
-                <div className="font-semibold text-lg">{stock.symbolName || stock.symbol}</div>
+                {/* 종목명 · 종목코드 · 시장 */}
                 <div className="flex items-center gap-2">
+                  <span className="font-semibold text-lg">{stock.symbolName || stock.symbol}</span>
+                  <span className="text-muted-foreground">•</span>
                   <span className="text-sm text-muted-foreground">{stock.symbol}</span>
-                  {priceInfo && (
+                  {stock.market && (
                     <>
                       <span className="text-muted-foreground">·</span>
-                      <span className="font-mono font-medium">
-                        {priceInfo.currentPrice.toLocaleString()}원
-                      </span>
-                      <ChangeIndicator
-                        changePrice={priceInfo.changePrice}
-                        changeRate={priceInfo.changeRate}
-                      />
+                      <span className="text-sm text-muted-foreground">{stock.market}</span>
                     </>
                   )}
                 </div>
+
+                {/* 현재가 · 전일대비 */}
+                {priceInfo && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="font-mono font-medium text-base">
+                      {priceInfo.currentPrice.toLocaleString()}
+                    </span>
+                    <ChangeIndicator
+                      changePrice={priceInfo.changePrice}
+                      changeRate={priceInfo.changeRate}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
