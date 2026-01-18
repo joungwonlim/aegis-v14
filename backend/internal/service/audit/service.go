@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -81,20 +82,20 @@ func (s *Service) GeneratePerformanceReport(ctx context.Context, period audit.Pe
 		Period:       period,
 		StartDate:    startDate,
 		EndDate:      endDate,
-		TotalReturn:  totalReturn,
-		AnnualReturn: annualReturn,
-		Volatility:   volatility,
-		Sharpe:       sharpe,
-		Sortino:      sortino,
-		MaxDrawdown:  maxDrawdown,
-		WinRate:      tradingMetrics.WinRate,
-		AvgWin:       tradingMetrics.AvgWin,
-		AvgLoss:      tradingMetrics.AvgLoss,
-		ProfitFactor: tradingMetrics.ProfitFactor,
+		TotalReturn:  sanitizeFloat(totalReturn),
+		AnnualReturn: sanitizeFloat(annualReturn),
+		Volatility:   sanitizeFloat(volatility),
+		Sharpe:       sanitizeFloat(sharpe),
+		Sortino:      sanitizeFloat(sortino),
+		MaxDrawdown:  sanitizeFloat(maxDrawdown),
+		WinRate:      sanitizeFloat(tradingMetrics.WinRate),
+		AvgWin:       sanitizeFloat(tradingMetrics.AvgWin),
+		AvgLoss:      sanitizeFloat(tradingMetrics.AvgLoss),
+		ProfitFactor: sanitizeFloat(tradingMetrics.ProfitFactor),
 		TotalTrades:  tradingMetrics.TotalTrades,
-		Benchmark:    benchmark,
-		Alpha:        alpha,
-		Beta:         beta,
+		Benchmark:    sanitizeFloat(benchmark),
+		Alpha:        sanitizeFloat(alpha),
+		Beta:         sanitizeFloat(beta),
 	}
 
 	// 리포트 저장
@@ -132,6 +133,11 @@ func (s *Service) GetDailyPnLHistory(ctx context.Context, startDate, endDate tim
 // RecordDailyPnL 일별 손익 기록
 func (s *Service) RecordDailyPnL(ctx context.Context, pnl *audit.DailyPnL) error {
 	return s.repo.SaveDailyPnL(ctx, pnl)
+}
+
+// SaveTradeHistory 거래 내역 저장
+func (s *Service) SaveTradeHistory(ctx context.Context, trade *audit.Trade) error {
+	return s.repo.SaveTradeHistory(ctx, trade)
 }
 
 // =============================================================================
@@ -218,12 +224,12 @@ func (s *Service) CalculateRiskMetrics(ctx context.Context, period audit.Period)
 	}
 
 	return &audit.RiskMetrics{
-		VaR95:       CalculateVaR(dailyReturns, 0.95),
-		VaR99:       CalculateVaR(dailyReturns, 0.99),
-		CVaR95:      CalculateCVaR(dailyReturns, 0.95),
-		CVaR99:      CalculateCVaR(dailyReturns, 0.99),
-		MaxDrawdown: CalculateMaxDrawdown(dailyReturns),
-		Volatility:  CalculateVolatility(dailyReturns),
+		VaR95:       sanitizeFloat(CalculateVaR(dailyReturns, 0.95)),
+		VaR99:       sanitizeFloat(CalculateVaR(dailyReturns, 0.99)),
+		CVaR95:      sanitizeFloat(CalculateCVaR(dailyReturns, 0.95)),
+		CVaR99:      sanitizeFloat(CalculateCVaR(dailyReturns, 0.99)),
+		MaxDrawdown: sanitizeFloat(CalculateMaxDrawdown(dailyReturns)),
+		Volatility:  sanitizeFloat(CalculateVolatility(dailyReturns)),
 	}, nil
 }
 
@@ -276,4 +282,12 @@ func (s *Service) calculateDateRange(period audit.Period) (time.Time, time.Time)
 	}
 
 	return startDate, endDate
+}
+
+// sanitizeFloat NaN/Inf 값을 0으로 대체 (JSON 직렬화 가능하도록)
+func sanitizeFloat(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
 }

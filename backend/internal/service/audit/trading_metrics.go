@@ -73,7 +73,7 @@ func CalculateProfitFactor(trades []audit.Trade) float64 {
 
 	if totalLoss == 0 {
 		if totalWin > 0 {
-			return math.Inf(1) // 무한대 (손실 없음)
+			return 999.99 // 손실 없음 (Inf 대신 최대값 반환)
 		}
 		return 0
 	}
