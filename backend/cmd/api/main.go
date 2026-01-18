@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/api/handlers"
+	audithandlers "github.com/wonny/aegis/v14/internal/api/handlers/audit"
 	fetcherhandlers "github.com/wonny/aegis/v14/internal/api/handlers/fetcher"
 	"github.com/wonny/aegis/v14/internal/api/routes"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
@@ -24,6 +26,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
+	auditservice "github.com/wonny/aegis/v14/internal/service/audit"
 	exitservice "github.com/wonny/aegis/v14/internal/service/exit"
 	fetcherservice "github.com/wonny/aegis/v14/internal/service/fetcher"
 	"github.com/wonny/aegis/v14/internal/service/pricesync"
@@ -108,6 +111,14 @@ func main() {
 	}
 	if accountID == "" {
 		log.Fatal().Msg("KIS_ACCOUNT_ID or KIS_ACCOUNT_NO environment variable is required")
+	}
+
+	// Parse account number and product code (format: "12345678-01")
+	accountNo := accountID
+	accountProductCode := "01" // Default
+	if idx := strings.Index(accountID, "-"); idx > 0 {
+		accountNo = accountID[:idx]
+		accountProductCode = accountID[idx+1:]
 	}
 
 	log.Info().Str("account_id", accountID).Msg("✅ KIS client initialized")
@@ -218,6 +229,7 @@ func main() {
 	fetcherMarketCapRepo := fetcherrepo.NewMarketCapRepository(dbPool)
 	fetcherDisclosureRepo := fetcherrepo.NewDisclosureRepository(dbPool)
 	fetcherLogRepo := fetcherrepo.NewFetchLogRepository(dbPool.Pool)
+	rankingRepo := postgres.NewRankingRepository(dbPool.Pool)
 
 	// 3. Fetcher Service Configuration
 	fetcherConfig := &fetcherservice.Config{
@@ -236,6 +248,7 @@ func main() {
 	fetcherSvc := fetcherservice.NewService(
 		ctx,
 		fetcherConfig,
+		dbPool.Pool,
 		naverClient,
 		dartClient,
 		fetcherStockRepo,
@@ -245,6 +258,7 @@ func main() {
 		fetcherMarketCapRepo,
 		fetcherDisclosureRepo,
 		fetcherLogRepo,
+		rankingRepo,
 	)
 
 	// 5. Start Fetcher Service in background
@@ -259,7 +273,18 @@ func main() {
 	fetcherHandler := fetcherhandlers.NewHandler(fetcherSvc)
 	routes.RegisterFetcherRoutes(httpRouter, fetcherHandler, fetcherStatusHandler)
 
-	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts, Fetcher)")
+	// Initialize Audit Service
+	auditRepo := postgres.NewAuditRepository(dbPool.Pool)
+	auditSvc := auditservice.NewService(auditRepo)
+	auditHandler := audithandlers.NewHandler(auditSvc)
+
+	// Initialize KIS Audit Builder
+	kisAuditBuilder := auditservice.NewKISAuditBuilder(auditSvc, kisClient, accountNo, accountProductCode)
+	auditHandler.SetKISBuilder(kisAuditBuilder)
+
+	routes.RegisterAuditRoutes(httpRouter, auditHandler)
+
+	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts, Fetcher, Audit)")
 
 	// Wrap with CORS
 	handler := gorillaHandlers.CORS(allowedOrigins, allowedMethods, allowedHeaders, allowCredentials)(httpRouter)
