@@ -23,6 +23,7 @@ type PriorityManager struct {
 	watchlistRepo WatchlistRepository
 	systemRepo    SystemRepository
 	rankingRepo   RankingRepository // 랭킹 종목 (optional)
+	signalsRepo   SignalsRepository // 매수 시그널 종목 (optional)
 }
 
 // SymbolPriority represents priority metadata for a symbol
@@ -34,6 +35,7 @@ type SymbolPriority struct {
 	IsWatchlist bool // 관심 종목
 	IsSystem    bool // 시스템 필수 (지수 등)
 	IsRanking   bool // 랭킹 종목 (거래량/거래대금/등락률 등)
+	IsSignal    bool // 매수 시그널 종목
 	Score       int  // 최종 점수
 }
 
@@ -73,6 +75,11 @@ type RankingRepository interface {
 	GetRankingSymbols(ctx context.Context) ([]string, error)
 }
 
+// SignalsRepository provides buy signal symbols
+type SignalsRepository interface {
+	GetSignalSymbols(ctx context.Context) ([]string, error)
+}
+
 // ==============================================================================
 // Constructor
 // ==============================================================================
@@ -84,6 +91,13 @@ type PriorityManagerOption func(*PriorityManager)
 func WithRankingRepo(repo RankingRepository) PriorityManagerOption {
 	return func(pm *PriorityManager) {
 		pm.rankingRepo = repo
+	}
+}
+
+// WithSignalsRepo sets the signals repository
+func WithSignalsRepo(repo SignalsRepository) PriorityManagerOption {
+	return func(pm *PriorityManager) {
+		pm.signalsRepo = repo
 	}
 }
 
@@ -224,7 +238,27 @@ func (pm *PriorityManager) Refresh(ctx context.Context) error {
 		}
 	}
 
-	// 7. Calculate scores
+	// 7. Load signals symbols (매수 시그널 종목)
+	var signalSymbols []string
+	if pm.signalsRepo != nil {
+		signalSymbols, err = pm.signalsRepo.GetSignalSymbols(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get signal symbols")
+		} else {
+			for _, symbol := range signalSymbols {
+				if p, exists := pm.priorities[symbol]; exists {
+					p.IsSignal = true
+				} else {
+					pm.priorities[symbol] = &SymbolPriority{
+						Symbol:   symbol,
+						IsSignal: true,
+					}
+				}
+			}
+		}
+	}
+
+	// 8. Calculate scores
 	for _, p := range pm.priorities {
 		p.Score = pm.calculateScore(p)
 	}
@@ -237,6 +271,7 @@ func (pm *PriorityManager) Refresh(ctx context.Context) error {
 		Int("watchlist", len(watchlistSymbols)).
 		Int("system", len(systemSymbols)).
 		Int("ranking", len(rankingSymbols)).
+		Int("signals", len(signalSymbols)).
 		Msg("Priorities refreshed")
 
 	return nil
@@ -266,7 +301,7 @@ func (pm *PriorityManager) GetTier0Symbols() []string {
 	return pm.GetWSSymbols()
 }
 
-// GetTier1Symbols returns Watchlist + Orders for REST Tier1 (10s interval)
+// GetTier1Symbols returns Watchlist + Orders + Signals for REST Tier1 (15s interval)
 // These don't need WS but should be refreshed reasonably fast
 func (pm *PriorityManager) GetTier1Symbols() []string {
 	pm.mu.RLock()
@@ -278,8 +313,8 @@ func (pm *PriorityManager) GetTier1Symbols() []string {
 		if p.IsHolding {
 			continue
 		}
-		// Include watchlist and orders
-		if p.IsWatchlist || p.IsOrder {
+		// Include watchlist, orders, and signals
+		if p.IsWatchlist || p.IsOrder || p.IsSignal {
 			tier1 = append(tier1, p.Symbol)
 		}
 	}
@@ -287,7 +322,7 @@ func (pm *PriorityManager) GetTier1Symbols() []string {
 	return tier1
 }
 
-// GetTier2Symbols returns Ranking + System for REST Tier2 (30s interval)
+// GetTier2Symbols returns Ranking + System for REST Tier2 (45s interval)
 // Low priority symbols that don't need frequent updates
 func (pm *PriorityManager) GetTier2Symbols() []string {
 	pm.mu.RLock()
@@ -295,8 +330,8 @@ func (pm *PriorityManager) GetTier2Symbols() []string {
 
 	tier2 := make([]string, 0, 200)
 	for _, p := range pm.priorities {
-		// Skip holdings, watchlist, orders (already in higher tiers)
-		if p.IsHolding || p.IsWatchlist || p.IsOrder {
+		// Skip holdings, watchlist, orders, signals (already in higher tiers)
+		if p.IsHolding || p.IsWatchlist || p.IsOrder || p.IsSignal {
 			continue
 		}
 		// Include ranking and system symbols
@@ -327,6 +362,7 @@ func (pm *PriorityManager) GetPriority(symbol string) (*SymbolPriority, bool) {
 		IsWatchlist: p.IsWatchlist,
 		IsSystem:    p.IsSystem,
 		IsRanking:   p.IsRanking,
+		IsSignal:    p.IsSignal,
 		Score:       p.Score,
 	}, true
 }
@@ -367,6 +403,11 @@ func (pm *PriorityManager) calculateScore(p *SymbolPriority) int {
 		score += 1000
 	}
 
+	// P2.5: Signals (매수 시그널 종목 - Watchlist와 비슷한 우선순위)
+	if p.IsSignal {
+		score += 800
+	}
+
 	// P3: System symbols (지수 등)
 	if p.IsSystem {
 		score += 500
@@ -395,6 +436,7 @@ func (pm *PriorityManager) getSortedPriorities() []*SymbolPriority {
 			IsWatchlist: p.IsWatchlist,
 			IsSystem:    p.IsSystem,
 			IsRanking:   p.IsRanking,
+			IsSignal:    p.IsSignal,
 			Score:       p.Score,
 		})
 	}

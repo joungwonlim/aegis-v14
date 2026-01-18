@@ -11,6 +11,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
 	exitpg "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
+	signalsrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/signals"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
@@ -137,15 +138,23 @@ func main() {
 	// ========================================
 	// 1.5. Initialize Holdings Sync Service
 	// ========================================
+	// ✅ 2026-01-18: 간격 120초로 증가 (rate limit 방지)
+	// Execution Service의 holdings sync와 역할 분담:
+	// - 이 서비스: DB에 holdings 저장 (API용)
+	// - Execution Service: ExitEvent 감지용
 	holdingsSync := NewHoldingsSyncService(
 		kisAdapter,
 		postgres.NewHoldingRepository(dbPool.Pool),
 		accountID,
-		30*time.Second, // Sync every 30 seconds
+		120*time.Second, // Sync every 2 minutes (rate limit 완화)
 	)
 
-	go holdingsSync.Start(ctx)
-	log.Info().Msg("✅ Holdings Sync Service started (interval: 30s)")
+	// 3초 대기 후 시작 (다른 서비스와 시차 두기)
+	go func() {
+		time.Sleep(3 * time.Second)
+		holdingsSync.Start(ctx)
+	}()
+	log.Info().Msg("✅ Holdings Sync Service started (interval: 120s, delayed start)")
 
 	// ========================================
 	// 2. Initialize Execution Service
@@ -171,6 +180,10 @@ func main() {
 	)
 
 	// Bootstrap execution service (sync holdings, orders, fills from KIS)
+	// ✅ 2026-01-18: 5초 대기 후 bootstrap (rate limit 방지)
+	log.Info().Msg("Waiting 5s before Execution Service bootstrap (rate limit prevention)...")
+	time.Sleep(5 * time.Second)
+
 	if err := executionService.Bootstrap(ctx); err != nil {
 		log.Error().Err(err).Msg("Execution Service bootstrap failed, continuing anyway")
 	} else {
@@ -289,12 +302,17 @@ func main() {
 	systemAdapter := NewSystemRepoAdapter()
 	rankingAdapter := NewRankingRepoAdapter(dbPool.Pool)
 
+	// Signals repository for buy signal symbols
+	signalRepo := signalsrepo.NewSignalRepository(dbPool.Pool)
+	signalsAdapter := pricesync.NewSignalsRepositoryAdapter(signalRepo)
+
 	priorityManager := pricesync.NewPriorityManager(
 		positionAdapter,
 		orderAdapter,
 		watchlistAdapter,
 		systemAdapter,
 		pricesync.WithRankingRepo(rankingAdapter),
+		pricesync.WithSignalsRepo(signalsAdapter),
 	)
 
 	// Set PriorityManager to existing running Manager

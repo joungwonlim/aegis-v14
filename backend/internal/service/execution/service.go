@@ -10,14 +10,18 @@ import (
 )
 
 const (
-	intentMonitorInterval = 2 * time.Second  // Intent monitor 주기 (1~3초 권장)
-	reconcileInterval     = 30 * time.Second // Reconciliation 주기 (10~30초 권장, 토큰 부담 완화)
-	holdingsSyncInterval  = 30 * time.Second // Holdings sync 주기 (10~30초 권장, 토큰 부담 완화)
-	fillsSyncInterval     = 10 * time.Second // Fills sync 주기 (10~30초 권장, rate limit 대응)
+	intentMonitorInterval = 2 * time.Second   // Intent monitor 주기 (1~3초 권장)
+	reconcileInterval     = 120 * time.Second // Reconciliation 주기 (2분, rate limit 완화)
+	holdingsSyncInterval  = 120 * time.Second // Holdings sync 주기 (2분, rate limit 완화)
+	fillsSyncInterval     = 60 * time.Second  // Fills sync 주기 (1분, rate limit 완화)
+
+	// ✅ 2026-01-18: Fills/Holdings sync 간격 증가
+	// Portfolio 가격(Tier0)은 2.5초로 유지 (Exit Engine 우선)
+	// Fills/Holdings는 실시간성보다 안정성 우선
 
 	// Fills sync backoff (EGW00201 대응)
-	fillsSyncBaseBackoff = 1 * time.Second
-	fillsSyncMaxBackoff  = 30 * time.Second
+	fillsSyncBaseBackoff = 5 * time.Second
+	fillsSyncMaxBackoff  = 120 * time.Second
 	fillsSyncMaxRetries  = 5
 )
 
