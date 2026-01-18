@@ -23,4 +23,7 @@ func RegisterAuditRoutes(router *mux.Router, auditHandler *auditHandlers.Handler
 	// Snapshot endpoints
 	router.HandleFunc("/api/v1/audit/snapshot/{date}", auditHandler.GetSnapshot).Methods("GET")
 	router.HandleFunc("/api/v1/audit/snapshots", auditHandler.GetSnapshotHistory).Methods("GET")
+
+	// KIS Data Builder endpoint
+	router.HandleFunc("/api/v1/audit/build-from-kis", auditHandler.BuildFromKIS).Methods("POST")
 }

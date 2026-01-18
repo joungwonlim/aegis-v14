@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -17,12 +18,18 @@ import (
 
 // Handler Audit API 핸들러
 type Handler struct {
-	service *auditService.Service
+	service    *auditService.Service
+	kisBuilder *auditService.KISAuditBuilder
 }
 
 // NewHandler 새 핸들러 생성
 func NewHandler(service *auditService.Service) *Handler {
 	return &Handler{service: service}
+}
+
+// SetKISBuilder KIS Builder 설정
+func (h *Handler) SetKISBuilder(builder *auditService.KISAuditBuilder) {
+	h.kisBuilder = builder
 }
 
 // =============================================================================
@@ -39,7 +46,7 @@ type PerformanceResponse struct {
 // DailyPnLResponse 일별 손익 응답
 type DailyPnLResponse struct {
 	Success bool            `json:"success"`
-	Data    []audit.DailyPnL `json:"data,omitempty"`
+	Data    []audit.DailyPnL `json:"data"`
 	Count   int             `json:"count"`
 	Error   string          `json:"error,omitempty"`
 }
@@ -146,6 +153,11 @@ func (h *Handler) GetDailyPnL(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Msg("Failed to get daily PnL history")
 		h.writeError(w, "Failed to get daily PnL", http.StatusInternalServerError)
 		return
+	}
+
+	// Ensure data field is always present (empty array instead of null)
+	if pnls == nil {
+		pnls = make([]audit.DailyPnL, 0)
 	}
 
 	h.writeJSON(w, DailyPnLResponse{
@@ -276,6 +288,66 @@ func (h *Handler) GetSnapshotHistory(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"data":    snapshots,
 		"count":   len(snapshots),
+	})
+}
+
+// =============================================================================
+// KIS Data Builder Handlers
+// =============================================================================
+
+// BuildFromKIS handles POST /api/v1/audit/build-from-kis
+func (h *Handler) BuildFromKIS(w http.ResponseWriter, r *http.Request) {
+	if h.kisBuilder == nil {
+		h.writeError(w, "KIS builder not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Query parameters
+	accountNo := r.URL.Query().Get("account_no")
+	accountProductCode := r.URL.Query().Get("account_product_code")
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+
+	// Defaults
+	if accountProductCode == "" {
+		accountProductCode = "01" // 기본값
+	}
+
+	// Parse dates
+	var startDate, endDate time.Time
+	var err error
+
+	if startDateStr != "" {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			h.writeError(w, "Invalid start_date format (use YYYY-MM-DD)", http.StatusBadRequest)
+			return
+		}
+	} else {
+		startDate = time.Now().AddDate(0, -1, 0) // 1개월 전
+	}
+
+	if endDateStr != "" {
+		endDate, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			h.writeError(w, "Invalid end_date format (use YYYY-MM-DD)", http.StatusBadRequest)
+			return
+		}
+	} else {
+		endDate = time.Now()
+	}
+
+	// Build audit data from KIS
+	err = h.kisBuilder.BuildFromKIS(r.Context(), accountNo, accountProductCode, startDate, endDate)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to build audit data from KIS")
+		h.writeError(w, fmt.Sprintf("Failed to build audit data: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Audit data successfully built from KIS",
 	})
 }
 
