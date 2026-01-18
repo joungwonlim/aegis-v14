@@ -158,9 +158,9 @@ export function StockDetailSheet({
                   )}
                 </div>
 
-                {/* 라인 3: 현재가 · 전일대비 · 평단가(보유종목) */}
+                {/* 라인 3: 현재가 · 전일대비 */}
                 {priceInfo && (
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
                     {/* 현재가 */}
                     <span className="font-mono font-semibold text-2xl">
                       {priceInfo.currentPrice.toLocaleString()}
@@ -171,29 +171,28 @@ export function StockDetailSheet({
                       changePrice={priceInfo.changePrice}
                       changeRate={priceInfo.changeRate}
                     />
-
-                    {/* 보유종목인 경우: 평단가 및 차이 */}
-                    {holding && holding.avg_price > 0 && (() => {
-                      const avgPrice = Math.floor(holding.avg_price)
-                      const priceDiff = priceInfo.currentPrice - avgPrice
-                      const priceDiffPct = avgPrice > 0 ? (priceDiff / avgPrice) * 100 : 0
-
-                      return (
-                        <>
-                          <span className="text-muted-foreground">|</span>
-                          <span className="text-sm text-muted-foreground">평단</span>
-                          <span className="font-mono text-sm font-medium">
-                            {avgPrice.toLocaleString()}
-                          </span>
-                          <ChangeIndicator
-                            changePrice={priceDiff}
-                            changeRate={priceDiffPct}
-                          />
-                        </>
-                      )
-                    })()}
                   </div>
                 )}
+
+                {/* 라인 4: 매입단가 (보유종목만) */}
+                {holding && holding.avg_price > 0 && priceInfo && (() => {
+                  const avgPrice = Math.floor(holding.avg_price)
+                  const priceDiff = priceInfo.currentPrice - avgPrice
+                  const priceDiffPct = avgPrice > 0 ? (priceDiff / avgPrice) * 100 : 0
+
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-medium text-base">
+                        {avgPrice.toLocaleString()}
+                      </span>
+                      <ChangeIndicator
+                        changePrice={priceDiff}
+                        changeRate={priceDiffPct}
+                      />
+                      <span className="text-sm text-muted-foreground">- 매입단가</span>
+                    </div>
+                  )
+                })()}
               </div>
             </div>
 
