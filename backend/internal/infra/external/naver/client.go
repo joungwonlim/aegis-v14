@@ -575,16 +575,9 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// MarketCapRanking 시가총액 상위 종목 조회
-type MarketCapRanking struct {
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	MarketCap int64  `json:"market_cap"`
-	Rank      int    `json:"rank"`
-}
-
 // FetchMarketCapRanking 시가총액 순위 조회 (KOSPI/KOSDAQ)
-func (c *Client) FetchMarketCapRanking(ctx context.Context, market string, page int) ([]*MarketCapRanking, error) {
+func (c *Client) FetchMarketCapRanking(ctx context.Context, market string, limit int) ([]*fetcher.Stock, error) {
+	page := 1
 	marketCode := "0" // KOSPI
 	if market == "KOSDAQ" {
 		marketCode = "1"
@@ -609,10 +602,13 @@ func (c *Client) FetchMarketCapRanking(ctx context.Context, market string, page 
 		return nil, fmt.Errorf("parse html: %w", err)
 	}
 
-	var rankings []*MarketCapRanking
-	rank := (page-1)*50 + 1
+	var stocks []*fetcher.Stock
 
 	doc.Find("table.type_2 tr").Each(func(i int, s *goquery.Selection) {
+		if len(stocks) >= limit {
+			return
+		}
+
 		tds := s.Find("td")
 		if tds.Length() < 7 {
 			return
@@ -633,20 +629,15 @@ func (c *Client) FetchMarketCapRanking(ctx context.Context, market string, page 
 		code := matches[1]
 		name := strings.TrimSpace(link.Text())
 
-		// 시가총액 파싱
-		marketCapStr := strings.TrimSpace(tds.Eq(6).Text())
-		marketCap := parseNumber(marketCapStr) * 100_000_000 // 억원 -> 원
-
-		rankings = append(rankings, &MarketCapRanking{
-			Code:      code,
-			Name:      name,
-			MarketCap: marketCap,
-			Rank:      rank,
+		stocks = append(stocks, &fetcher.Stock{
+			Code:   code,
+			Name:   name,
+			Market: market,
+			Status: "active",
 		})
-		rank++
 	})
 
-	return rankings, nil
+	return stocks, nil
 }
 
 // =============================================================================

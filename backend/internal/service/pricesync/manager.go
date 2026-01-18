@@ -13,8 +13,11 @@ import (
 
 // Manager manages all price sync components
 type Manager struct {
-	// Core service
+	// Core service (legacy)
 	service *Service
+
+	// Core service v2 (with DB protection)
+	serviceV2 *ServiceV2
 
 	// Priority management
 	priorityManager *PriorityManager
@@ -28,6 +31,7 @@ type Manager struct {
 
 	// State
 	isRunning bool
+	useV2     bool // Use ServiceV2 with DB protection
 	mu        sync.RWMutex
 
 	// Control
@@ -44,6 +48,19 @@ func NewManager(service *Service, kisClient *kis.Client, priorityManager *Priori
 		priorityManager: priorityManager,
 		naverClient:     naver.NewClient(),
 		isRunning:       false,
+		useV2:           false,
+	}
+}
+
+// NewManagerV2 creates a new PriceSync manager with DB protection
+func NewManagerV2(serviceV2 *ServiceV2, kisClient *kis.Client, priorityManager *PriorityManager) *Manager {
+	return &Manager{
+		serviceV2:       serviceV2,
+		kisClient:       kisClient,
+		priorityManager: priorityManager,
+		naverClient:     naver.NewClient(),
+		isRunning:       false,
+		useV2:           true,
 	}
 }
 
@@ -67,7 +84,15 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
-	log.Info().Msg("Starting PriceSync Manager...")
+	log.Info().Bool("use_v2", m.useV2).Msg("Starting PriceSync Manager...")
+
+	// 0. Start ServiceV2 if using V2
+	if m.useV2 && m.serviceV2 != nil {
+		if err := m.serviceV2.Start(ctx); err != nil {
+			log.Error().Err(err).Msg("Failed to start ServiceV2")
+			return err
+		}
+	}
 
 	// 1. Start WebSocket client
 	if err := m.startWebSocket(); err != nil {
@@ -86,7 +111,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.isRunning = true
 
-	log.Info().Msg("✅ PriceSync Manager started")
+	log.Info().Bool("use_v2", m.useV2).Msg("✅ PriceSync Manager started")
 
 	return nil
 }
@@ -117,6 +142,11 @@ func (m *Manager) Stop() {
 		m.restPoller.Stop()
 	}
 
+	// Stop ServiceV2
+	if m.useV2 && m.serviceV2 != nil {
+		m.serviceV2.Stop()
+	}
+
 	// Wait for all goroutines
 	m.wg.Wait()
 
@@ -129,15 +159,26 @@ func (m *Manager) Stop() {
 func (m *Manager) startWebSocket() error {
 	log.Info().Msg("Starting KIS WebSocket...")
 
-	// Set tick handler
-	m.kisClient.WS.SetTickHandler(func(tick price.Tick) {
-		// Process tick through service
-		if err := m.service.ProcessTick(m.ctx, tick); err != nil {
-			log.Error().Err(err).Str("symbol", tick.Symbol).Msg("Failed to process WS tick")
-		} else {
-			log.Debug().Str("symbol", tick.Symbol).Int64("price", tick.LastPrice).Msg("Processed WS tick")
-		}
-	})
+	// Set tick handler based on service version
+	if m.useV2 && m.serviceV2 != nil {
+		m.kisClient.WS.SetTickHandler(func(tick price.Tick) {
+			// Process tick through ServiceV2 (with DB protection)
+			if err := m.serviceV2.ProcessTick(m.ctx, tick); err != nil {
+				log.Error().Err(err).Str("symbol", tick.Symbol).Msg("Failed to process WS tick (v2)")
+			} else {
+				log.Debug().Str("symbol", tick.Symbol).Int64("price", tick.LastPrice).Msg("Processed WS tick (v2)")
+			}
+		})
+	} else {
+		m.kisClient.WS.SetTickHandler(func(tick price.Tick) {
+			// Process tick through legacy service
+			if err := m.service.ProcessTick(m.ctx, tick); err != nil {
+				log.Error().Err(err).Str("symbol", tick.Symbol).Msg("Failed to process WS tick")
+			} else {
+				log.Debug().Str("symbol", tick.Symbol).Int64("price", tick.LastPrice).Msg("Processed WS tick")
+			}
+		})
+	}
 
 	// Start WebSocket
 	if err := m.kisClient.WS.Start(m.ctx); err != nil {
@@ -154,7 +195,14 @@ func (m *Manager) startRESTPoller() error {
 	log.Info().Msg("Starting REST Poller...")
 
 	// Create REST poller with Naver fallback
-	m.restPoller = NewRESTPoller(m.kisClient.REST, m.naverClient, m.service)
+	// Use appropriate processor based on service version
+	var processor TickProcessor
+	if m.useV2 && m.serviceV2 != nil {
+		processor = m.serviceV2
+	} else {
+		processor = m.service
+	}
+	m.restPoller = NewRESTPoller(m.kisClient.REST, m.naverClient, processor)
 
 	// Start poller
 	if err := m.restPoller.Start(m.ctx); err != nil {

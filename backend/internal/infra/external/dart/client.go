@@ -91,9 +91,9 @@ type CorpCodeDTO struct {
 // =============================================================================
 
 // FetchDisclosures 공시 목록 조회
-// from, to: 공시 검색 기간
 // corpCode: 회사 고유번호 (optional, 빈 문자열이면 전체)
-func (c *Client) FetchDisclosures(ctx context.Context, from, to time.Time, corpCode string) ([]*fetcher.Disclosure, error) {
+// from, to: 공시 검색 기간
+func (c *Client) FetchDisclosures(ctx context.Context, corpCode string, from, to time.Time) ([]*fetcher.Disclosure, error) {
 	params := url.Values{}
 	params.Set("crtfc_key", c.apiKey)
 	params.Set("bgn_de", from.Format("20060102"))
@@ -264,7 +264,7 @@ func (c *Client) FetchDisclosuresByStock(ctx context.Context, stockCode string, 
 	// DART API는 종목코드가 아닌 회사 고유번호(corp_code)로 검색
 	// 여기서는 일단 전체 공시에서 필터링
 
-	allDisc, err := c.FetchDisclosures(ctx, from, to, "")
+	allDisc, err := c.FetchDisclosures(ctx, "", from, to)
 	if err != nil {
 		return nil, err
 	}

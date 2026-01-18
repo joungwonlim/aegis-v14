@@ -90,19 +90,25 @@ func main() {
 	}
 
 	// ========================================
-	// 1. Initialize PriceSync Service
+	// 1. Initialize PriceSync Service (V2 with DB protection)
 	// ========================================
 	priceRepo := postgres.NewPriceRepository(dbPool.Pool)
+
+	// Legacy service for Exit Engine (uses *price.BestPrice)
 	priceService := pricesync.NewService(priceRepo)
 
+	// ServiceV2 with DB protection (Coalescing + Cache + Broker) for REST/WS polling
+	priceServiceV2 := pricesync.NewServiceV2(priceRepo, pricesync.DefaultServiceV2Config())
+
 	// Note: PriorityManager will be configured later after Position/Order repositories are ready
-	priceSyncManager := pricesync.NewManager(priceService, kisClient, nil)
+	// Use V2 manager for optimized DB writes (coalescing/caching)
+	priceSyncManager := pricesync.NewManagerV2(priceServiceV2, kisClient, nil)
 
 	if err := priceSyncManager.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start PriceSync Manager")
 	}
 
-	log.Info().Msg("✅ PriceSync Manager started")
+	log.Info().Msg("✅ PriceSync Manager started (V2 with DB protection)")
 
 	// ========================================
 	// 1.1. Subscribe to KIS Execution Notifications
@@ -279,7 +285,7 @@ func main() {
 	// Now that all repositories are ready, create PriorityManager
 	positionAdapter := NewPositionRepoAdapter(positionRepo, holdingRepo, accountID)
 	orderAdapter := NewOrderRepoAdapter(kisAdapter, accountID)
-	watchlistAdapter := NewWatchlistRepoAdapter()
+	watchlistAdapter := NewWatchlistRepoAdapter(dbPool.Pool)
 	systemAdapter := NewSystemRepoAdapter()
 
 	priorityManager := pricesync.NewPriorityManager(

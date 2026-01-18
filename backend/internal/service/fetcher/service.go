@@ -76,6 +76,7 @@ type Service struct {
 	fundamentalRepo fetcher.FundamentalsRepository
 	marketCapRepo   fetcher.MarketCapRepository
 	disclosureRepo  fetcher.DisclosureRepository
+	fetchLogRepo    fetcher.FetchLogRepository
 
 	// State
 	running bool
@@ -94,6 +95,7 @@ func NewService(
 	fundamentalRepo fetcher.FundamentalsRepository,
 	marketCapRepo fetcher.MarketCapRepository,
 	disclosureRepo fetcher.DisclosureRepository,
+	fetchLogRepo fetcher.FetchLogRepository,
 ) *Service {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -113,6 +115,7 @@ func NewService(
 		fundamentalRepo: fundamentalRepo,
 		marketCapRepo:   marketCapRepo,
 		disclosureRepo:  disclosureRepo,
+		fetchLogRepo:    fetchLogRepo,
 	}
 }
 
@@ -322,6 +325,11 @@ func (s *Service) collectFundamentals(ctx context.Context) error {
 
 // collectMarketCaps 시가총액 데이터 수집
 func (s *Service) collectMarketCaps(ctx context.Context) error {
+	// TODO: 네이버 페이지 파싱 로직 수정 필요
+	log.Debug().Msg("Market cap collection skipped (parsing logic needs update)")
+	return nil
+
+	/*
 	log.Info().Msg("Collecting market caps")
 
 	stocks, err := s.stockRepo.GetActive(ctx)
@@ -361,11 +369,18 @@ func (s *Service) collectMarketCaps(ctx context.Context) error {
 		Msg("Market cap collection completed")
 
 	return nil
+	*/
 }
 
 // collectDisclosures 공시 데이터 수집
 func (s *Service) collectDisclosures(ctx context.Context) error {
 	log.Info().Msg("Collecting disclosures")
+
+	// DART 클라이언트가 없으면 스킵
+	if s.dartClient == nil {
+		log.Warn().Msg("DART client not configured, skipping disclosure collection")
+		return nil
+	}
 
 	// 오늘 날짜 기준 공시 수집
 	today := time.Now()

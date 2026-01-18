@@ -13,14 +13,19 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/api/handlers"
+	fetcherhandlers "github.com/wonny/aegis/v14/internal/api/handlers/fetcher"
 	"github.com/wonny/aegis/v14/internal/api/routes"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/infra/database/postgres"
+	fetcherrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/fetcher"
 	exitrepo "github.com/wonny/aegis/v14/internal/infra/database/postgres/exit"
+	"github.com/wonny/aegis/v14/internal/infra/external/dart"
+	"github.com/wonny/aegis/v14/internal/infra/external/naver"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
 	exitservice "github.com/wonny/aegis/v14/internal/service/exit"
+	fetcherservice "github.com/wonny/aegis/v14/internal/service/fetcher"
 	"github.com/wonny/aegis/v14/internal/service/pricesync"
 )
 
@@ -190,9 +195,69 @@ func main() {
 	// Register Chart routes (simple price/flow history for charts)
 	routes.RegisterChartRoutes(httpRouter, dbPool)
 
+	// Register Ranking routes
+	routes.RegisterRankingRoutes(httpRouter, dbPool)
+
+	// Initialize Fetcher Service
+	// 1. External Clients
+	naverClient := naver.NewClient()
+	dartAPIKey := os.Getenv("DART_API_KEY")
+	var dartClient *dart.Client
+	if dartAPIKey != "" {
+		dartClient = dart.NewClient(dartAPIKey)
+		log.Info().Msg("✅ DART client initialized")
+	} else {
+		log.Warn().Msg("⚠️ DART_API_KEY not set, disclosure collection will be disabled")
+	}
+
+	// 2. Fetcher Repositories
+	fetcherStockRepo := fetcherrepo.NewStockRepository(dbPool)
+	fetcherPriceRepo := fetcherrepo.NewPriceRepository(dbPool)
+	fetcherFlowRepo := fetcherrepo.NewFlowRepository(dbPool)
+	fetcherFundamentalRepo := fetcherrepo.NewFundamentalsRepository(dbPool)
+	fetcherMarketCapRepo := fetcherrepo.NewMarketCapRepository(dbPool)
+	fetcherDisclosureRepo := fetcherrepo.NewDisclosureRepository(dbPool)
+	fetcherLogRepo := fetcherrepo.NewFetchLogRepository(dbPool.Pool)
+
+	// 3. Fetcher Service Configuration
+	fetcherConfig := &fetcherservice.Config{
+		PriceInterval:       1 * time.Hour,
+		FlowInterval:        1 * time.Hour,
+		FundamentalInterval: 24 * time.Hour,
+		MarketCapInterval:   24 * time.Hour * 365, // 임시 비활성화 (파싱 로직 수정 필요)
+		DisclosureInterval:  30 * time.Minute,
+		BatchSize:           100,
+		MaxRetries:          3,
+		RetryBackoff:        5 * time.Second,
+		MaxConcurrent:       5,
+	}
+
+	// 4. Create Fetcher Service
+	fetcherSvc := fetcherservice.NewService(
+		ctx,
+		fetcherConfig,
+		naverClient,
+		dartClient,
+		fetcherStockRepo,
+		fetcherPriceRepo,
+		fetcherFlowRepo,
+		fetcherFundamentalRepo,
+		fetcherMarketCapRepo,
+		fetcherDisclosureRepo,
+		fetcherLogRepo,
+	)
+
+	// 5. Start Fetcher Service in background
+	if err := fetcherSvc.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to start Fetcher service")
+	} else {
+		log.Info().Msg("✅ Fetcher service started (background data collection running)")
+	}
+
 	// Register Fetcher routes
 	fetcherStatusHandler := handlers.NewFetcherStatusHandler(dbPool.Pool)
-	routes.RegisterFetcherRoutes(httpRouter, nil, fetcherStatusHandler)
+	fetcherHandler := fetcherhandlers.NewHandler(fetcherSvc)
+	routes.RegisterFetcherRoutes(httpRouter, fetcherHandler, fetcherStatusHandler)
 
 	log.Info().Msg("✅ All routes registered (Exit, Holdings, Intents, Orders, Fills, KIS, Watchlist, Stocks, Charts, Fetcher)")
 
@@ -236,6 +301,13 @@ func main() {
 	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
+
+	// Stop Fetcher Service
+	if err := fetcherSvc.Stop(); err != nil {
+		log.Error().Err(err).Msg("Fetcher service stop failed")
+	} else {
+		log.Info().Msg("✅ Fetcher service stopped")
+	}
 
 	// Shutdown HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {

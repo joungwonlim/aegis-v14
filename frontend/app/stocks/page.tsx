@@ -182,48 +182,46 @@ export default function StocksPage() {
         )}
       </div>
 
-      {/* Market Filter Tabs */}
-      <div className="flex gap-2 items-center">
-        <span className="text-sm font-medium text-muted-foreground">시장:</span>
-        <div className="flex gap-2">
-          {(['ALL', 'KOSPI', 'KOSDAQ'] as MarketFilter[]).map((market) => {
-            const isSelected = selectedMarket === market
-            const label = market === 'ALL' ? '전체' : market
-            return (
-              <Button
-                key={market}
-                variant={isSelected ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSelectedMarket(market)}
-                className={cn(
-                  'transition-all',
-                  isSelected && 'shadow-md'
-                )}
-              >
-                {label}
-              </Button>
-            )
-          })}
-        </div>
-      </div>
+      {/* Market & Category Filters - Naver Style */}
+      <div className="flex gap-2 items-center flex-wrap">
+        {/* Market Filters */}
+        {(['ALL', 'KOSPI', 'KOSDAQ'] as MarketFilter[]).map((market) => {
+          const isSelected = selectedMarket === market
+          const label = market === 'ALL' ? '전체' : market === 'KOSPI' ? '코스피' : '코스닥'
+          return (
+            <Button
+              key={market}
+              variant="outline"
+              size="default"
+              onClick={() => setSelectedMarket(market)}
+              className={cn(
+                'rounded-md border transition-all font-medium',
+                isSelected
+                  ? 'bg-black text-white border-black hover:bg-black/90 hover:text-white'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              )}
+            >
+              {label}
+            </Button>
+          )
+        })}
 
-      {/* Category Tabs */}
-      <div className="flex gap-2 flex-wrap">
-        {RANKING_CATEGORIES.map((cat) => {
-          const Icon = cat.icon
+        {/* Category Filters */}
+        {RANKING_CATEGORIES.filter(cat => cat.key !== 'all').map((cat) => {
           const isSelected = selectedCategory === cat.key
           return (
             <Button
               key={cat.key}
-              variant={isSelected ? 'default' : 'outline'}
-              size="sm"
+              variant="outline"
+              size="default"
               onClick={() => handleCategoryChange(cat.key)}
               className={cn(
-                'transition-all',
-                isSelected && 'shadow-md'
+                'rounded-md border transition-all font-medium',
+                isSelected
+                  ? 'bg-black text-white border-black hover:bg-black/90 hover:text-white'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
               )}
             >
-              <Icon className="h-4 w-4 mr-2" />
               {cat.label}
             </Button>
           )

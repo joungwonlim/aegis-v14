@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/wonny/aegis/v14/internal/domain/price"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/infra/naver"
 )
@@ -38,11 +39,16 @@ func DefaultTierConfigs() map[Tier]TierConfig {
 	}
 }
 
+// TickProcessor processes price ticks
+type TickProcessor interface {
+	ProcessTick(ctx context.Context, tick price.Tick) error
+}
+
 // RESTPoller handles REST API polling with tiering
 type RESTPoller struct {
 	kisClient   *kis.RESTClient
 	naverClient *naver.Client // Fallback source
-	service     *Service
+	processor   TickProcessor // Supports both Service and ServiceV2
 
 	// Tier management
 	tierConfigs map[Tier]TierConfig
@@ -62,11 +68,11 @@ type RESTPoller struct {
 }
 
 // NewRESTPoller creates a new REST poller
-func NewRESTPoller(kisClient *kis.RESTClient, naverClient *naver.Client, service *Service) *RESTPoller {
+func NewRESTPoller(kisClient *kis.RESTClient, naverClient *naver.Client, processor TickProcessor) *RESTPoller {
 	return &RESTPoller{
 		kisClient:   kisClient,
 		naverClient: naverClient,
-		service:     service,
+		processor:   processor,
 		tierConfigs: DefaultTierConfigs(),
 		tiers: map[Tier][]string{
 			Tier0: {},
@@ -190,7 +196,7 @@ func (p *RESTPoller) fetchTierPrices(tier Tier) {
 	// Process each tick
 	successCount := 0
 	for _, tick := range ticks {
-		if err := p.service.ProcessTick(p.ctx, *tick); err != nil {
+		if err := p.processor.ProcessTick(p.ctx, *tick); err != nil {
 			log.Debug().
 				Err(err).
 				Str("symbol", tick.Symbol).
@@ -241,7 +247,7 @@ func (p *RESTPoller) FetchSymbolPrice(symbol string) error {
 
 	// Process ticks
 	for _, tick := range ticks {
-		if err := p.service.ProcessTick(p.ctx, *tick); err != nil {
+		if err := p.processor.ProcessTick(p.ctx, *tick); err != nil {
 			log.Debug().
 				Err(err).
 				Str("symbol", tick.Symbol).

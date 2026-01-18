@@ -5,15 +5,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Activity, Database, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
-import { getTableStats } from '@/lib/api'
+import { getTableStats, getFetchLogs } from '@/lib/api'
+
+interface FetcherStatus {
+  active: boolean
+  lastRun: string
+  nextRun: string
+}
 
 export default function FetcherPage() {
-  // Placeholder for fetcher status (to be implemented)
-  const fetcherStatus = {
-    active: true,
-    lastRun: new Date().toISOString(),
-    nextRun: new Date(Date.now() + 3600000).toISOString(),
-  }
+  // Fetcher status will be implemented later
+  const fetcherStatus = null as FetcherStatus | null
   const statusLoading = false
 
   const { data: tableStatsData, isLoading: statsLoading } = useQuery({
@@ -22,7 +24,19 @@ export default function FetcherPage() {
     refetchInterval: 60000, // 1분마다 갱신
   })
 
+  const { data: fetchLogsData, isLoading: logsLoading } = useQuery({
+    queryKey: ['fetchLogs'],
+    queryFn: getFetchLogs,
+    refetchInterval: 60000, // 1분마다 갱신
+  })
+
   const tableStats = tableStatsData?.tables || []
+  const fetchLogs = fetchLogsData?.logs || []
+
+  // Create a map of table name to latest fetch log
+  const fetchLogMap = new Map(
+    fetchLogs.map(log => [log.target_table, log])
+  )
 
   const formatTimestamp = (ts: string) => {
     return new Date(ts).toLocaleString('ko-KR', {
@@ -70,13 +84,17 @@ export default function FetcherPage() {
             </div>
             {statusLoading ? (
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            ) : (
-              <Badge variant={fetcherStatus?.active ? 'default' : 'destructive'}>
-                {fetcherStatus?.active ? (
+            ) : fetcherStatus ? (
+              <Badge variant={fetcherStatus.active ? 'default' : 'destructive'}>
+                {fetcherStatus.active ? (
                   <><CheckCircle2 className="h-3 w-3 mr-1" /> 활성화</>
                 ) : (
                   <><XCircle className="h-3 w-3 mr-1" /> 비활성화</>
                 )}
+              </Badge>
+            ) : (
+              <Badge variant="secondary">
+                <Clock className="h-3 w-3 mr-1" /> 구현 예정
               </Badge>
             )}
           </div>
@@ -126,49 +144,71 @@ export default function FetcherPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>테이블</TableHead>
-                  <TableHead className="text-right">레코드 수</TableHead>
+                  <TableHead className="text-right">현재 레코드 수</TableHead>
+                  <TableHead className="text-right">마지막 실행</TableHead>
                   <TableHead className="text-right">최근 업데이트</TableHead>
                   <TableHead className="text-center">상태</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tableStats.map((table) => (
-                  <TableRow key={table.name}>
-                    <TableCell>
-                      <div className="font-medium">{table.display_name}</div>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        data.{table.name}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {table.count.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {table.last_update ? (
-                        <>
-                          <div className="text-sm">{formatRelativeTime(table.last_update)}</div>
-                          <div className="text-xs text-muted-foreground font-mono">
-                            {formatTimestamp(table.last_update)}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-sm text-muted-foreground">-</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Badge
-                        variant={table.status === 'active' ? 'default' : 'secondary'}
-                        className="text-xs"
-                      >
-                        {table.status === 'active' ? (
-                          <><CheckCircle2 className="h-3 w-3 mr-1" /> 정상</>
+                {tableStats.map((table) => {
+                  const log = fetchLogMap.get(table.name)
+                  return (
+                    <TableRow key={table.name}>
+                      <TableCell>
+                        <div className="font-medium">{table.display_name}</div>
+                        <div className="text-xs text-muted-foreground font-mono">
+                          data.{table.name}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {table.count.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {log ? (
+                          <>
+                            <div className="text-sm font-medium">
+                              {log.records_fetched.toLocaleString()}건 조회
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {log.records_inserted > 0 && `추가: ${log.records_inserted.toLocaleString()} `}
+                              {log.records_updated > 0 && `갱신: ${log.records_updated.toLocaleString()}`}
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {formatRelativeTime(log.started_at)}
+                            </div>
+                          </>
                         ) : (
-                          <><Clock className="h-3 w-3 mr-1" /> 오래됨</>
+                          <div className="text-sm text-muted-foreground">-</div>
                         )}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {table.last_update ? (
+                          <>
+                            <div className="text-sm">{formatRelativeTime(table.last_update)}</div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {formatTimestamp(table.last_update)}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">-</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge
+                          variant={table.status === 'active' ? 'default' : 'secondary'}
+                          className="text-xs"
+                        >
+                          {table.status === 'active' ? (
+                            <><CheckCircle2 className="h-3 w-3 mr-1" /> 정상</>
+                          ) : (
+                            <><Clock className="h-3 w-3 mr-1" /> 오래됨</>
+                          )}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           )}

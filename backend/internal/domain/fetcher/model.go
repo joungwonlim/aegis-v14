@@ -91,6 +91,23 @@ type Disclosure struct {
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 }
 
+// FetchLog 수집 실행 로그 (data.fetch_logs)
+type FetchLog struct {
+	ID              int       `json:"id" db:"id"`
+	JobType         string    `json:"job_type" db:"job_type"`
+	Source          string    `json:"source" db:"source"`
+	TargetTable     string    `json:"target_table" db:"target_table"`
+	RecordsFetched  int       `json:"records_fetched" db:"records_fetched"`
+	RecordsInserted int       `json:"records_inserted" db:"records_inserted"`
+	RecordsUpdated  int       `json:"records_updated" db:"records_updated"`
+	Status          string    `json:"status" db:"status"` // pending, running, completed, failed
+	ErrorMessage    *string   `json:"error_message" db:"error_message"`
+	StartedAt       time.Time `json:"started_at" db:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at" db:"finished_at"`
+	DurationMs      *int      `json:"duration_ms" db:"duration_ms"`
+	CreatedAt       time.Time `json:"created_at" db:"created_at"`
+}
+
 // =============================================================================
 // Job/Result Models
 // =============================================================================

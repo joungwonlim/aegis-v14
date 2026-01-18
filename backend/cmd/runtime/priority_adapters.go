@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wonny/aegis/v14/internal/domain/execution"
 	"github.com/wonny/aegis/v14/internal/domain/exit"
 	"github.com/wonny/aegis/v14/internal/service/pricesync"
@@ -112,17 +113,42 @@ func (a *OrderRepoAdapter) GetActiveOrderSymbols(ctx context.Context) ([]string,
 
 // WatchlistRepoAdapter provides watchlist symbols
 type WatchlistRepoAdapter struct {
-	// TODO: Add real watchlist repository when available
+	pool *pgxpool.Pool
 }
 
-func NewWatchlistRepoAdapter() *WatchlistRepoAdapter {
-	return &WatchlistRepoAdapter{}
+func NewWatchlistRepoAdapter(pool *pgxpool.Pool) *WatchlistRepoAdapter {
+	return &WatchlistRepoAdapter{pool: pool}
 }
 
 func (a *WatchlistRepoAdapter) GetWatchlistSymbols(ctx context.Context) ([]string, error) {
-	// TODO: Query watchlist from database
-	// For now, return empty list
-	return []string{}, nil
+	if a.pool == nil {
+		return []string{}, nil
+	}
+
+	// v14 watchlist uses stock_code column (no is_active column)
+	query := `
+		SELECT DISTINCT stock_code
+		FROM portfolio.watchlist
+		ORDER BY stock_code
+	`
+
+	rows, err := a.pool.Query(ctx, query)
+	if err != nil {
+		// If table doesn't exist, return empty
+		return []string{}, nil
+	}
+	defer rows.Close()
+
+	var symbols []string
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			return nil, err
+		}
+		symbols = append(symbols, symbol)
+	}
+
+	return symbols, rows.Err()
 }
 
 // HoldingRepoAdapter provides all holdings symbols

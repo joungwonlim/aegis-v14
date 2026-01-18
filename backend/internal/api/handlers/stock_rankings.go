@@ -83,6 +83,8 @@ func (h *StockRankingsHandler) GetTopByVolume(w http.ResponseWriter, r *http.Req
 		JOIN latest_prices lp ON s.code = lp.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lp.volume > 0
 		  %s
 		ORDER BY lp.volume DESC
@@ -166,6 +168,8 @@ func (h *StockRankingsHandler) GetTopByTradingValue(w http.ResponseWriter, r *ht
 		JOIN latest_prices lp ON s.code = lp.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lp.trading_value > 0
 		  %s
 		ORDER BY lp.trading_value DESC
@@ -258,6 +262,8 @@ func (h *StockRankingsHandler) GetTopGainers(w http.ResponseWriter, r *http.Requ
 		JOIN latest_two lt ON s.code = lt.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lt.prev_close > 0
 		  AND lt.current_price > lt.prev_close
 		  %s
@@ -350,6 +356,8 @@ func (h *StockRankingsHandler) GetTopLosers(w http.ResponseWriter, r *http.Reque
 		JOIN latest_two lt ON s.code = lt.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lt.prev_close > 0
 		  AND lt.current_price < lt.prev_close
 		  %s
@@ -439,6 +447,8 @@ func (h *StockRankingsHandler) GetTopForeignNetBuy(w http.ResponseWriter, r *htt
 		LEFT JOIN latest_prices lp ON s.code = lp.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lf.foreign_net_value != 0
 		  %s
 		ORDER BY ABS(lf.foreign_net_value) DESC
@@ -527,6 +537,8 @@ func (h *StockRankingsHandler) GetTopInstNetBuy(w http.ResponseWriter, r *http.R
 		LEFT JOIN latest_prices lp ON s.code = lp.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lf.inst_net_value != 0
 		  %s
 		ORDER BY ABS(lf.inst_net_value) DESC
@@ -622,6 +634,8 @@ func (h *StockRankingsHandler) GetTopByVolumeSurge(w http.ResponseWriter, r *htt
 		JOIN latest_two lt ON s.code = lt.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lt.current_volume > lt.prev_volume
 		  %s
 		ORDER BY volume_surge_rate DESC
@@ -704,6 +718,8 @@ func (h *StockRankingsHandler) GetTopBy52WeekHigh(w http.ResponseWriter, r *http
 		JOIN stock_52week s52 ON s.code = s52.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND s52.current_price >= s52.high_52week * 0.99
 		  %s
 		ORDER BY s52.current_price DESC
@@ -794,6 +810,8 @@ func (h *StockRankingsHandler) GetTopByMarketCap(w http.ResponseWriter, r *http.
 		LEFT JOIN latest_prices lp ON s.code = lp.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
+		  AND s.name NOT LIKE '%%스팩%%'
+		  AND s.name NOT LIKE '%%SPAC%%'
 		  AND lmc.market_cap > 0
 		  %s
 		ORDER BY lmc.market_cap DESC

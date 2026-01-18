@@ -122,6 +122,25 @@ type JobRepository interface {
 }
 
 // =============================================================================
+// FetchLog Repository
+// =============================================================================
+
+// FetchLogRepository 수집 실행 로그 저장소 (data.fetch_logs)
+type FetchLogRepository interface {
+	// Create 로그 생성 (실행 시작 시)
+	Create(ctx context.Context, log *FetchLog) (*FetchLog, error)
+
+	// Update 로그 업데이트 (실행 완료/실패 시)
+	Update(ctx context.Context, log *FetchLog) error
+
+	// Query 로그 조회
+	GetByID(ctx context.Context, id int) (*FetchLog, error)
+	GetRecent(ctx context.Context, limit int) ([]*FetchLog, error)
+	GetByJobType(ctx context.Context, jobType string, limit int) ([]*FetchLog, error)
+	GetByStatus(ctx context.Context, status string, limit int) ([]*FetchLog, error)
+}
+
+// =============================================================================
 // External Client Interfaces
 // =============================================================================
 
