@@ -281,6 +281,21 @@ func (s *Service) createExitEvent(ctx context.Context, accountID, symbol string)
 		Float64("realized_pnl_pct", realizedPnlPct).
 		Msg("ExitEvent created")
 
+	// Save to audit.trade_history for performance page (optional hook)
+	if s.auditTradeWriter != nil {
+		if err := s.auditTradeWriter.SaveExitTrade(ctx, exitEvent, position.EntryTS); err != nil {
+			log.Warn().
+				Err(err).
+				Str("symbol", symbol).
+				Msg("Failed to save trade to audit (performance page)")
+			// Don't return error - exit event was created successfully
+		} else {
+			log.Debug().
+				Str("symbol", symbol).
+				Msg("Trade saved to audit.trade_history")
+		}
+	}
+
 	return nil
 }
 

@@ -42,6 +42,9 @@ type Service struct {
 	// External adapters
 	kisAdapter execution.KISAdapter
 
+	// Optional hooks
+	auditTradeWriter execution.AuditTradeWriter // For saving trades to audit (performance page)
+
 	// Config
 	accountID string
 
@@ -79,6 +82,11 @@ func NewService(
 		accountID:        accountID,
 		prevHoldings:     []*execution.Holding{},
 	}
+}
+
+// SetAuditTradeWriter sets the optional audit trade writer hook
+func (s *Service) SetAuditTradeWriter(writer execution.AuditTradeWriter) {
+	s.auditTradeWriter = writer
 }
 
 // Start starts the Execution Engine

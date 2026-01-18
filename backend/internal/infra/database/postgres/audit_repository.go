@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wonny/aegis/v14/internal/domain/audit"
 )
@@ -167,10 +168,10 @@ func (r *AuditRepository) GetSnapshotHistory(ctx context.Context, startDate, end
 func (r *AuditRepository) GetDailyReturns(ctx context.Context, startDate, endDate time.Time) ([]float64, error) {
 	query := `
 		SELECT daily_return
-		FROM audit.daily_snapshots
-		WHERE date BETWEEN $1 AND $2
+		FROM audit.daily_pnl
+		WHERE pnl_date BETWEEN $1 AND $2
 		AND daily_return IS NOT NULL
-		ORDER BY date ASC
+		ORDER BY pnl_date ASC
 	`
 
 	rows, err := r.pool.Query(ctx, query, startDate, endDate)
@@ -598,6 +599,82 @@ func (r *AuditRepository) GetTradesBySymbol(ctx context.Context, symbol string, 
 	}
 
 	return trades, rows.Err()
+}
+
+// SaveTradeHistory 거래 내역 저장 (중복 방지: symbol + entry_date + exit_date 기준)
+func (r *AuditRepository) SaveTradeHistory(ctx context.Context, trade *audit.Trade) error {
+	// 먼저 중복 확인 (symbol + entry_date + exit_date + entry_price 기준)
+	checkQuery := `
+		SELECT 1 FROM audit.trade_history
+		WHERE stock_code = $1
+		  AND entry_date = $2
+		  AND exit_date = $3
+		  AND entry_price = $4
+		LIMIT 1
+	`
+	var exists int
+	err := r.pool.QueryRow(ctx, checkQuery,
+		trade.Symbol,
+		trade.EntryDate,
+		trade.ExitDate,
+		trade.Price,
+	).Scan(&exists)
+
+	if err == nil {
+		// 이미 존재하면 skip
+		return nil
+	}
+
+	query := `
+		INSERT INTO audit.trade_history (
+			trade_id, stock_code, stock_name,
+			entry_date, entry_price, entry_qty,
+			exit_date, exit_price, exit_qty,
+			realized_pnl, realized_pnl_pct, holding_days,
+			exit_reason
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT (trade_id) DO NOTHING
+	`
+
+	tradeID := uuid.New()
+	_, err = r.pool.Exec(ctx, query,
+		tradeID,
+		trade.Symbol,
+		"", // stock_name - optional
+		trade.EntryDate,
+		trade.Price,
+		trade.Quantity,
+		trade.ExitDate,
+		trade.Price,
+		trade.Quantity,
+		int64(trade.PnL),
+		trade.PnLPercent,
+		trade.HoldDays,
+		trade.ExitReason,
+	)
+
+	return err
+}
+
+// GetLastTradeDate 마지막 거래 날짜 조회
+func (r *AuditRepository) GetLastTradeDate(ctx context.Context) (time.Time, error) {
+	query := `
+		SELECT COALESCE(MAX(exit_date), '1970-01-01'::DATE)
+		FROM audit.trade_history
+		WHERE exit_date IS NOT NULL
+	`
+
+	var lastDate time.Time
+	err := r.pool.QueryRow(ctx, query).Scan(&lastDate)
+	return lastDate, err
+}
+
+// GetTradeCount 거래 내역 개수 조회
+func (r *AuditRepository) GetTradeCount(ctx context.Context) (int, error) {
+	query := `SELECT COUNT(*) FROM audit.trade_history WHERE exit_date IS NOT NULL`
+	var count int
+	err := r.pool.QueryRow(ctx, query).Scan(&count)
+	return count, err
 }
 
 // =============================================================================

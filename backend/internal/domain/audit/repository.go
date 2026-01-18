@@ -46,6 +46,15 @@ type TradeRepository interface {
 	// 거래 내역 조회
 	GetTrades(ctx context.Context, startDate, endDate time.Time) ([]Trade, error)
 	GetTradesBySymbol(ctx context.Context, symbol string, startDate, endDate time.Time) ([]Trade, error)
+
+	// 거래 내역 저장
+	SaveTradeHistory(ctx context.Context, trade *Trade) error
+
+	// 마지막 거래 날짜 조회 (증분 동기화용)
+	GetLastTradeDate(ctx context.Context) (time.Time, error)
+
+	// 거래 개수 조회
+	GetTradeCount(ctx context.Context) (int, error)
 }
 
 // BenchmarkRepository 벤치마크 리포지토리 인터페이스

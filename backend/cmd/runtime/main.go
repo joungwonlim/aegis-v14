@@ -15,6 +15,7 @@ import (
 	"github.com/wonny/aegis/v14/internal/infra/kis"
 	"github.com/wonny/aegis/v14/internal/pkg/config"
 	"github.com/wonny/aegis/v14/internal/pkg/logger"
+	auditservice "github.com/wonny/aegis/v14/internal/service/audit"
 	"github.com/wonny/aegis/v14/internal/service/execution"
 	exitservice "github.com/wonny/aegis/v14/internal/service/exit"
 	"github.com/wonny/aegis/v14/internal/service/pricesync"
@@ -178,6 +179,14 @@ func main() {
 		kisAdapter,
 		accountID,
 	)
+
+	// ========================================
+	// 2.1. Connect Audit Trade Writer (for performance page)
+	// ========================================
+	auditRepo := postgres.NewAuditRepository(dbPool.Pool)
+	auditTradeWriter := auditservice.NewTradeWriter(auditRepo)
+	executionService.SetAuditTradeWriter(auditTradeWriter)
+	log.Info().Msg("✅ Audit Trade Writer connected (trades will be saved to audit.trade_history)")
 
 	// Bootstrap execution service (sync holdings, orders, fills from KIS)
 	// ✅ 2026-01-18: 5초 대기 후 bootstrap (rate limit 방지)

@@ -139,3 +139,9 @@ type PositionReader interface {
 	// GetPosition retrieves a position by ID
 	GetPosition(ctx context.Context, positionID uuid.UUID) (*exit.Position, error)
 }
+
+// AuditTradeWriter is an optional hook for saving trades to audit (for performance page)
+type AuditTradeWriter interface {
+	// SaveExitTrade saves a trade to audit.trade_history when an exit event is created
+	SaveExitTrade(ctx context.Context, event *ExitEvent, entryDate time.Time) error
+}

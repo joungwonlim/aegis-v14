@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/wonny/aegis/v14/internal/domain/audit"
 	"github.com/wonny/aegis/v14/internal/infra/kis"
@@ -38,7 +37,7 @@ func NewKISAuditBuilder(service *Service, kisClient *kis.Client, defaultAccountN
 // Build Audit Data from KIS
 // =============================================================================
 
-// BuildFromKIS KIS 체결 내역에서 audit 데이터 생성
+// BuildFromKIS KIS 체결 내역에서 audit 데이터 생성 (증분 동기화 지원)
 func (b *KISAuditBuilder) BuildFromKIS(ctx context.Context, accountNo, accountProductCode string, startDate, endDate time.Time) error {
 	// Use defaults if not provided
 	if accountNo == "" {
@@ -46,6 +45,28 @@ func (b *KISAuditBuilder) BuildFromKIS(ctx context.Context, accountNo, accountPr
 	}
 	if accountProductCode == "" {
 		accountProductCode = b.defaultProductCode
+	}
+
+	// 기존 데이터 확인 및 증분 동기화
+	lastTradeDate, err := b.service.repo.GetLastTradeDate(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to get last trade date, doing full sync")
+	} else if !lastTradeDate.IsZero() && lastTradeDate.Year() > 1970 {
+		// 이미 데이터가 있으면 마지막 날짜 다음날부터 동기화
+		nextDate := lastTradeDate.AddDate(0, 0, 1)
+		if nextDate.After(startDate) {
+			log.Info().
+				Str("last_trade_date", lastTradeDate.Format("2006-01-02")).
+				Str("adjusted_start_date", nextDate.Format("2006-01-02")).
+				Msg("Incremental sync: adjusting start date based on existing data")
+			startDate = nextDate
+		}
+	}
+
+	// 시작일이 종료일 이후면 동기화할 게 없음
+	if startDate.After(endDate) {
+		log.Info().Msg("No new data to sync - already up to date")
+		return nil
 	}
 
 	log.Info().
@@ -114,8 +135,12 @@ func (b *KISAuditBuilder) BuildFromKIS(ctx context.Context, accountNo, accountPr
 
 	log.Info().Int("trade_histories", len(tradeHistories)).Msg("Matched trades created")
 
-	// 4. trade_history 저장 (아직 DB 메서드 없음 - TODO)
-	// TODO: 나중에 trade_history 저장 구현
+	// 4. trade_history 저장
+	for i := range tradeHistories {
+		if err := b.service.SaveTradeHistory(ctx, &tradeHistories[i]); err != nil {
+			log.Error().Err(err).Str("symbol", tradeHistories[i].Symbol).Msg("Failed to save trade history")
+		}
+	}
 
 	// 5. 일별 PnL 계산
 	dailyPnLs := b.calculateDailyPnL(tradeHistories, startDate, endDate)
@@ -235,52 +260,40 @@ func (b *KISAuditBuilder) calculateDailyPnL(trades []audit.Trade, startDate, end
 		}
 	}
 
-	// map을 slice로 변환
+	// 초기 자본 가정 (10,000,000원)
+	const initialCapital = 10_000_000
+
+	// 누적 계산 및 수익률 계산 (날짜순으로 정렬된 상태로)
 	var result []audit.DailyPnL
+	var cumulativePnL int64 = 0
+	var prevPortfolioValue int64 = initialCapital
+
 	for d := startDate; !d.After(endDate); d = d.AddDate(0, 0, 1) {
 		if pnl, ok := dailyMap[d]; ok {
+			// 누적 PnL 계산
+			cumulativePnL += pnl.RealizedPnL
+
+			// Portfolio Value = 초기 자본 + 누적 PnL
+			portfolioValue := initialCapital + cumulativePnL
+			pnl.PortfolioValue = portfolioValue
+			pnl.CashBalance = portfolioValue // 간단화: 현금 = 포트폴리오 가치
+
+			// Daily Return = 일 PnL / 이전일 Portfolio Value
+			if prevPortfolioValue > 0 {
+				pnl.DailyReturn = float64(pnl.RealizedPnL) / float64(prevPortfolioValue)
+			}
+
+			// Cumulative Return = 누적 PnL / 초기 자본
+			if initialCapital > 0 {
+				pnl.CumulativeReturn = float64(cumulativePnL) / float64(initialCapital)
+			}
+
 			result = append(result, *pnl)
+
+			// 다음 날 계산을 위한 이전 포트폴리오 가치 업데이트
+			prevPortfolioValue = portfolioValue
 		}
 	}
 
 	return result
-}
-
-// =============================================================================
-// Save Trade History (TODO)
-// =============================================================================
-
-// SaveTradeHistory trade_history 테이블에 저장
-func (b *KISAuditBuilder) SaveTradeHistory(ctx context.Context, trade *audit.Trade) error {
-	// TODO: audit repository에 SaveTradeHistory 메서드 추가 필요
-	query := `
-		INSERT INTO audit.trade_history (
-			trade_id, stock_code, stock_name,
-			entry_date, entry_price, entry_qty,
-			exit_date, exit_price, exit_qty,
-			realized_pnl, realized_pnl_pct,
-			holding_days
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (trade_id) DO NOTHING
-	`
-
-	tradeID := uuid.New()
-	_, err := b.service.repo.(interface {
-		Exec(ctx context.Context, sql string, arguments ...any) (int64, error)
-	}).Exec(ctx, query,
-		tradeID,
-		trade.Symbol,
-		"", // stock_name (TODO: 조회 필요)
-		trade.EntryDate,
-		trade.Price,
-		trade.Quantity,
-		trade.ExitDate,
-		trade.Price,
-		trade.Quantity,
-		trade.PnL,
-		trade.PnLPercent,
-		trade.HoldDays,
-	)
-
-	return err
 }

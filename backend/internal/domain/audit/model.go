@@ -156,6 +156,7 @@ type Trade struct {
 	EntryDate  time.Time `json:"entry_date"`
 	ExitDate   time.Time `json:"exit_date"`
 	HoldDays   int       `json:"hold_days"`
+	ExitReason string    `json:"exit_reason,omitempty"` // SL1, SL2, TP1, TP2, TP3, TRAIL, TIME, MANUAL
 }
 
 // =============================================================================
