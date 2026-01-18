@@ -191,3 +191,55 @@ func (a *SystemRepoAdapter) GetSystemSymbols(ctx context.Context) ([]string, err
 	// System symbols: KOSPI 200 ETF (069500), KOSDAQ 150 ETF (229200)
 	return []string{"069500", "229200"}, nil
 }
+
+// RankingRepoAdapter provides ranking symbols from data.stock_rankings table
+// (collected by fetcher every 10 minutes from Naver)
+type RankingRepoAdapter struct {
+	pool *pgxpool.Pool
+}
+
+func NewRankingRepoAdapter(pool *pgxpool.Pool) *RankingRepoAdapter {
+	return &RankingRepoAdapter{
+		pool: pool,
+	}
+}
+
+// GetRankingSymbols returns unique stock codes from the stock_rankings table
+// Categories included: volume, trading_value, gainers, foreign_net_buy, inst_net_buy, volume_surge, high_52week
+func (a *RankingRepoAdapter) GetRankingSymbols(ctx context.Context) ([]string, error) {
+	if a.pool == nil {
+		return []string{}, nil
+	}
+
+	// Get unique stock codes from the latest ranking collection
+	// Uses the most recent collected_at timestamp to avoid stale data
+	query := `
+		WITH latest_collection AS (
+			SELECT MAX(collected_at) as max_collected_at
+			FROM data.stock_rankings
+			WHERE collected_at >= NOW() - INTERVAL '30 minutes'
+		)
+		SELECT DISTINCT stock_code
+		FROM data.stock_rankings r
+		INNER JOIN latest_collection lc ON r.collected_at = lc.max_collected_at
+		ORDER BY stock_code
+	`
+
+	rows, err := a.pool.Query(ctx, query)
+	if err != nil {
+		// If query fails (table might not exist), return empty list
+		return []string{}, nil
+	}
+	defer rows.Close()
+
+	var symbols []string
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			return nil, err
+		}
+		symbols = append(symbols, symbol)
+	}
+
+	return symbols, rows.Err()
+}

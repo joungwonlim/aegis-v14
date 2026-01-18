@@ -421,34 +421,30 @@ func (m *Manager) RefreshSubscriptions(ctx context.Context) error {
 
 	// 5. Update REST tiers
 	// Strategy:
-	// - Tier0 (3s): High priority non-WS symbols only (holdings without WS, closing positions)
-	// - Tier1 (10s): WS backup + watchlist (WS symbols need backup but not ultra-fast)
-	// - Tier2 (30s): Universe / low priority symbols
+	// - Tier0 (3s): Portfolio (Holding) - WS backup in case WS disconnects
+	// - Tier1 (10s): Watchlist + Orders - no WS, REST only
+	// - Tier2 (30s): Ranking + System - low priority, REST only
 	if m.restPoller != nil {
-		// Tier0: Only non-WS high priority symbols
+		// Tier0: Portfolio backup (same as WS symbols)
 		if err := m.restPoller.SetTierSymbols(Tier0, tier0Symbols); err != nil {
 			log.Error().Err(err).Msg("Failed to set Tier0 symbols")
 		}
 
-		// Tier1: WS symbols as backup + original tier1 symbols
-		// This provides redundancy at 10s interval (acceptable for WS backup)
-		allTier1Symbols := make([]string, 0, len(wsSymbols)+len(tier1Symbols))
-		allTier1Symbols = append(allTier1Symbols, wsSymbols...)
-		allTier1Symbols = append(allTier1Symbols, tier1Symbols...)
-		if err := m.restPoller.SetTierSymbols(Tier1, allTier1Symbols); err != nil {
+		// Tier1: Watchlist + Orders (REST only)
+		if err := m.restPoller.SetTierSymbols(Tier1, tier1Symbols); err != nil {
 			log.Error().Err(err).Msg("Failed to set Tier1 symbols")
 		}
 
+		// Tier2: Ranking + System (REST only)
 		if err := m.restPoller.SetTierSymbols(Tier2, tier2Symbols); err != nil {
 			log.Error().Err(err).Msg("Failed to set Tier2 symbols")
 		}
 
 		log.Info().
-			Int("tier0", len(tier0Symbols)).
-			Int("tier1", len(allTier1Symbols)).
-			Int("tier1_ws_backup", len(wsSymbols)).
-			Int("tier2", len(tier2Symbols)).
-			Msg("REST tiers updated (WS symbols in Tier1 as backup)")
+			Int("tier0_portfolio", len(tier0Symbols)).
+			Int("tier1_watchlist_orders", len(tier1Symbols)).
+			Int("tier2_ranking_system", len(tier2Symbols)).
+			Msg("REST tiers updated")
 	}
 
 	log.Info().Msg("✅ Subscriptions refreshed successfully")

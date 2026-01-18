@@ -287,12 +287,14 @@ func main() {
 	orderAdapter := NewOrderRepoAdapter(kisAdapter, accountID)
 	watchlistAdapter := NewWatchlistRepoAdapter(dbPool.Pool)
 	systemAdapter := NewSystemRepoAdapter()
+	rankingAdapter := NewRankingRepoAdapter(dbPool.Pool)
 
 	priorityManager := pricesync.NewPriorityManager(
 		positionAdapter,
 		orderAdapter,
 		watchlistAdapter,
 		systemAdapter,
+		pricesync.WithRankingRepo(rankingAdapter),
 	)
 
 	// Set PriorityManager to existing running Manager
