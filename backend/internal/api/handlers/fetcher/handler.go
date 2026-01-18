@@ -41,6 +41,9 @@ type FetcherService interface {
 	// Collection
 	CollectNow(ctx context.Context, collectorType fetcherService.CollectorType) error
 	CollectStock(ctx context.Context, stockCode string) (*fetcher.FetchResult, error)
+
+	// Schedule
+	GetSchedules() []fetcherService.ScheduleInfo
 }
 
 // Handler Fetcher API 핸들러
@@ -411,6 +414,17 @@ func (h *Handler) RefreshStockMaster(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"success": true,
 		"message": "Stock master refreshed successfully",
+	}
+
+	h.writeJSON(w, response)
+}
+
+// GetSchedules handles GET /api/v1/fetcher/schedules
+func (h *Handler) GetSchedules(w http.ResponseWriter, r *http.Request) {
+	schedules := h.service.GetSchedules()
+
+	response := map[string]interface{}{
+		"schedules": schedules,
 	}
 
 	h.writeJSON(w, response)

@@ -15,6 +15,7 @@ func RegisterFetcherRoutes(
 	// Status endpoints
 	router.HandleFunc("/api/v1/fetcher/tables/stats", statusHandler.GetTableStats).Methods("GET")
 	router.HandleFunc("/api/v1/fetcher/execution-logs", statusHandler.GetFetchLogs).Methods("GET")
+	router.HandleFunc("/api/v1/fetcher/schedules", fetcherHandler.GetSchedules).Methods("GET")
 	// Stock endpoints
 	router.HandleFunc("/api/v1/fetcher/stocks", fetcherHandler.ListStocks).Methods("GET")
 	router.HandleFunc("/api/v1/fetcher/stocks/{code}", fetcherHandler.GetStock).Methods("GET")

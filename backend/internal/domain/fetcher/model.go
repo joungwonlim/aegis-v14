@@ -199,3 +199,35 @@ type PriceFilter struct {
 	To        time.Time
 	Limit     int
 }
+
+// =============================================================================
+// Stock Rankings (data.stock_rankings)
+// =============================================================================
+
+// RankingStock 순위 데이터 (data.stock_rankings)
+type RankingStock struct {
+	ID        int64     `json:"id" db:"id"`
+	Category  string    `json:"category" db:"category"`   // volume, trading_value, gainers, etc
+	Market    string    `json:"market" db:"market"`       // ALL, KOSPI, KOSDAQ
+	Rank      int       `json:"rank" db:"rank"`
+	StockCode string    `json:"stock_code" db:"stock_code"`
+	StockName string    `json:"stock_name" db:"stock_name"`
+
+	// 공통 가격 정보
+	CurrentPrice  *float64 `json:"current_price,omitempty" db:"current_price"`
+	ChangeRate    *float64 `json:"change_rate,omitempty" db:"change_rate"`
+	Volume        *int64   `json:"volume,omitempty" db:"volume"`
+	TradingValue  *int64   `json:"trading_value,omitempty" db:"trading_value"`
+	HighPrice     *float64 `json:"high_price,omitempty" db:"high_price"`
+	LowPrice      *float64 `json:"low_price,omitempty" db:"low_price"`
+
+	// 카테고리별 특화 데이터
+	ForeignNetValue  *int64   `json:"foreign_net_value,omitempty" db:"foreign_net_value"`
+	InstNetValue     *int64   `json:"inst_net_value,omitempty" db:"inst_net_value"`
+	VolumeSurgeRate  *float64 `json:"volume_surge_rate,omitempty" db:"volume_surge_rate"`
+	High52Week       *float64 `json:"high_52week,omitempty" db:"high_52week"`
+	MarketCap        *int64   `json:"market_cap,omitempty" db:"market_cap"`
+
+	CollectedAt time.Time `json:"collected_at" db:"collected_at"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+}

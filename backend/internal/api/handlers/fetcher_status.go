@@ -214,11 +214,10 @@ func (h *FetcherStatusHandler) GetFetchLogs(w http.ResponseWriter, r *http.Reque
 				records_updated,
 				status,
 				error_message,
-				started_at,
-				finished_at,
+				started_at::text as started_at,
+				finished_at::text as finished_at,
 				duration_ms
 			FROM data.fetch_logs
-			WHERE status = 'success'
 			ORDER BY target_table, started_at DESC
 		)
 		SELECT * FROM latest_logs

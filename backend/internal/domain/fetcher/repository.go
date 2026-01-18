@@ -179,3 +179,22 @@ type DartClient interface {
 	// 연결 확인
 	HealthCheck(ctx context.Context) error
 }
+
+// =============================================================================
+// Ranking Repository
+// =============================================================================
+
+// RankingRepository 순위 저장소 (data.stock_rankings)
+type RankingRepository interface {
+	// SaveBatch 순위 데이터 배치 저장 (기존 데이터 삭제 후 저장)
+	SaveBatch(ctx context.Context, category, market string, rankings []*RankingStock) error
+
+	// GetLatest 최신 순위 조회
+	GetLatest(ctx context.Context, category, market string, limit int) ([]*RankingStock, error)
+
+	// GetLatestCollectedAt 최신 수집 시각 조회
+	GetLatestCollectedAt(ctx context.Context, category, market string) (*time.Time, error)
+
+	// DeleteOld 오래된 순위 데이터 삭제 (1일 이상 된 데이터)
+	DeleteOld(ctx context.Context, olderThan time.Time) (int64, error)
+}
