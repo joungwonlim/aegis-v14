@@ -150,7 +150,7 @@ func (h *StockRankingsHandler) GetTopByTradingValue(w http.ResponseWriter, r *ht
 				trade_date,
 				close_price as current_price,
 				volume,
-				trading_value
+				(close_price * volume) as trading_value
 			FROM data.daily_prices
 			WHERE trade_date >= NOW() - INTERVAL '30 days'
 			ORDER BY stock_code, trade_date DESC
@@ -162,7 +162,7 @@ func (h *StockRankingsHandler) GetTopByTradingValue(w http.ResponseWriter, r *ht
 			s.market,
 			lp.current_price,
 			lp.volume,
-			lp.trading_value,
+			lp.trading_value::bigint,
 			lp.trade_date as updated_at
 		FROM data.stocks s
 		JOIN latest_prices lp ON s.code = lp.stock_code
@@ -170,7 +170,7 @@ func (h *StockRankingsHandler) GetTopByTradingValue(w http.ResponseWriter, r *ht
 		  AND s.market NOT IN ('ETF', 'ETN')
 		  AND s.name NOT LIKE '%%스팩%%'
 		  AND s.name NOT LIKE '%%SPAC%%'
-		  AND lp.trading_value > 0
+		  AND lp.volume > 0
 		  %s
 		ORDER BY lp.trading_value DESC
 		LIMIT $1
@@ -423,7 +423,8 @@ func (h *StockRankingsHandler) GetTopForeignNetBuy(w http.ResponseWriter, r *htt
 				trade_date,
 				foreign_net_value
 			FROM data.investor_flow
-			WHERE trade_date >= NOW() - INTERVAL '30 days'
+			WHERE trade_date >= NOW() - INTERVAL '365 days'
+			  AND foreign_net_value > 0
 			ORDER BY stock_code, trade_date DESC
 		),
 		latest_prices AS (
@@ -435,7 +436,7 @@ func (h *StockRankingsHandler) GetTopForeignNetBuy(w http.ResponseWriter, r *htt
 			ORDER BY stock_code, trade_date DESC
 		)
 		SELECT
-			ROW_NUMBER() OVER (ORDER BY ABS(lf.foreign_net_value) DESC) as rank,
+			ROW_NUMBER() OVER (ORDER BY lf.foreign_net_value DESC) as rank,
 			s.code as stock_code,
 			s.name as stock_name,
 			s.market,
@@ -449,9 +450,8 @@ func (h *StockRankingsHandler) GetTopForeignNetBuy(w http.ResponseWriter, r *htt
 		  AND s.market NOT IN ('ETF', 'ETN')
 		  AND s.name NOT LIKE '%%스팩%%'
 		  AND s.name NOT LIKE '%%SPAC%%'
-		  AND lf.foreign_net_value != 0
 		  %s
-		ORDER BY ABS(lf.foreign_net_value) DESC
+		ORDER BY lf.foreign_net_value DESC
 		LIMIT $1
 	`, marketFilter)
 
@@ -513,7 +513,8 @@ func (h *StockRankingsHandler) GetTopInstNetBuy(w http.ResponseWriter, r *http.R
 				trade_date,
 				inst_net_value
 			FROM data.investor_flow
-			WHERE trade_date >= NOW() - INTERVAL '30 days'
+			WHERE trade_date >= NOW() - INTERVAL '365 days'
+			  AND inst_net_value > 0
 			ORDER BY stock_code, trade_date DESC
 		),
 		latest_prices AS (
@@ -525,7 +526,7 @@ func (h *StockRankingsHandler) GetTopInstNetBuy(w http.ResponseWriter, r *http.R
 			ORDER BY stock_code, trade_date DESC
 		)
 		SELECT
-			ROW_NUMBER() OVER (ORDER BY ABS(lf.inst_net_value) DESC) as rank,
+			ROW_NUMBER() OVER (ORDER BY lf.inst_net_value DESC) as rank,
 			s.code as stock_code,
 			s.name as stock_name,
 			s.market,
@@ -539,9 +540,8 @@ func (h *StockRankingsHandler) GetTopInstNetBuy(w http.ResponseWriter, r *http.R
 		  AND s.market NOT IN ('ETF', 'ETN')
 		  AND s.name NOT LIKE '%%스팩%%'
 		  AND s.name NOT LIKE '%%SPAC%%'
-		  AND lf.inst_net_value != 0
 		  %s
-		ORDER BY ABS(lf.inst_net_value) DESC
+		ORDER BY lf.inst_net_value DESC
 		LIMIT $1
 	`, marketFilter)
 
@@ -695,34 +695,43 @@ func (h *StockRankingsHandler) GetTopBy52WeekHigh(w http.ResponseWriter, r *http
 	}
 
 	query := fmt.Sprintf(`
-		WITH stock_52week AS (
+		WITH latest_prices AS (
+			SELECT DISTINCT ON (stock_code)
+				stock_code,
+				trade_date,
+				close_price as current_price
+			FROM data.daily_prices
+			WHERE trade_date >= NOW() - INTERVAL '30 days'
+			ORDER BY stock_code, trade_date DESC
+		),
+		stock_52week_high AS (
 			SELECT
 				stock_code,
-				MAX(high_price) as high_52week,
-				MAX(CASE WHEN trade_date = (SELECT MAX(trade_date) FROM data.daily_prices WHERE stock_code = dp.stock_code) THEN close_price END) as current_price,
-				MAX(CASE WHEN trade_date = (SELECT MAX(trade_date) FROM data.daily_prices WHERE stock_code = dp.stock_code) THEN trade_date END) as trade_date
-			FROM data.daily_prices dp
+				MAX(high_price) as high_52week
+			FROM data.daily_prices
 			WHERE trade_date >= NOW() - INTERVAL '52 weeks'
 			GROUP BY stock_code
 		)
 		SELECT
-			ROW_NUMBER() OVER (ORDER BY s52.current_price DESC) as rank,
+			ROW_NUMBER() OVER (ORDER BY (lp.current_price / s52.high_52week) DESC) as rank,
 			s.code as stock_code,
 			s.name as stock_name,
 			s.market,
-			s52.current_price,
+			lp.current_price,
 			s52.high_52week,
-			((s52.current_price - s52.high_52week) / s52.high_52week * 100) as change_from_high,
-			s52.trade_date as updated_at
+			((lp.current_price - s52.high_52week) / s52.high_52week * 100) as change_from_high,
+			lp.trade_date as updated_at
 		FROM data.stocks s
-		JOIN stock_52week s52 ON s.code = s52.stock_code
+		JOIN stock_52week_high s52 ON s.code = s52.stock_code
+		JOIN latest_prices lp ON s.code = lp.stock_code
 		WHERE s.status = 'active'
 		  AND s.market NOT IN ('ETF', 'ETN')
 		  AND s.name NOT LIKE '%%스팩%%'
 		  AND s.name NOT LIKE '%%SPAC%%'
-		  AND s52.current_price >= s52.high_52week * 0.99
+		  AND s52.high_52week > 0
+		  AND lp.current_price > 0
 		  %s
-		ORDER BY s52.current_price DESC
+		ORDER BY (lp.current_price / s52.high_52week) DESC
 		LIMIT $1
 	`, marketFilter)
 

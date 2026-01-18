@@ -21,7 +21,6 @@ const RANKING_CATEGORIES = [
   { key: 'volume_surge' as RankingCategory, label: '거래량 급증', icon: Zap },
   { key: 'trading_value' as RankingCategory, label: '거래대금 상위', icon: DollarSign },
   { key: 'gainers' as RankingCategory, label: '상승', icon: TrendingUp },
-  { key: 'losers' as RankingCategory, label: '하락', icon: TrendingDown },
   { key: 'foreign_net_buy' as RankingCategory, label: '외국인 순매수', icon: Users },
   { key: 'inst_net_buy' as RankingCategory, label: '기관 순매수', icon: Building },
   { key: 'high_52week' as RankingCategory, label: '52주 최고', icon: Award },
