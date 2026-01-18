@@ -193,9 +193,14 @@ func (c *WebSocketClient) Subscribe(symbol string) error {
 	}
 
 	c.connMu.RLock()
-	err := c.conn.WriteJSON(msg)
+	conn := c.conn
 	c.connMu.RUnlock()
 
+	if conn == nil {
+		return fmt.Errorf("websocket not connected")
+	}
+
+	err := conn.WriteJSON(msg)
 	if err != nil {
 		return fmt.Errorf("send subscribe message: %w", err)
 	}
@@ -231,9 +236,14 @@ func (c *WebSocketClient) Unsubscribe(symbol string) error {
 	}
 
 	c.connMu.RLock()
-	err := c.conn.WriteJSON(msg)
+	conn := c.conn
 	c.connMu.RUnlock()
 
+	if conn == nil {
+		return fmt.Errorf("websocket not connected")
+	}
+
+	err := conn.WriteJSON(msg)
 	if err != nil {
 		return fmt.Errorf("send unsubscribe message: %w", err)
 	}
@@ -276,9 +286,14 @@ func (c *WebSocketClient) SubscribeExecution(accountNo string) error {
 	}
 
 	c.connMu.RLock()
-	err := c.conn.WriteJSON(msg)
+	conn := c.conn
 	c.connMu.RUnlock()
 
+	if conn == nil {
+		return fmt.Errorf("websocket not connected")
+	}
+
+	err := conn.WriteJSON(msg)
 	if err != nil {
 		return fmt.Errorf("send execution subscribe message: %w", err)
 	}

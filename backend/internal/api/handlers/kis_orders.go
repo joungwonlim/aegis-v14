@@ -36,7 +36,7 @@ func NewKISOrdersHandler(kisAdapter execution.KISAdapter, accountID string) *KIS
 	return &KISOrdersHandler{
 		kisAdapter:    kisAdapter,
 		accountID:     accountID,
-		cacheDuration: 5 * time.Second, // Cache for 5 seconds to avoid rate limit
+		cacheDuration: 30 * time.Second, // Cache for 30 seconds to reduce KIS REST API calls
 	}
 }
 

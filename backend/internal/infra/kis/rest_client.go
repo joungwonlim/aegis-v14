@@ -329,16 +329,29 @@ func (c *RESTClient) GetFilledOrders(ctx context.Context, accountNo string, acco
 	return c.getOrders(ctx, accountNo, accountProductCode, "01") // 01: 체결
 }
 
+// GetFilledOrdersByDateRange fetches filled orders within a date range (기간별 체결 주문 조회)
+func (c *RESTClient) GetFilledOrdersByDateRange(ctx context.Context, accountNo string, accountProductCode string, startDate, endDate time.Time) ([]OrderOutput, error) {
+	return c.getOrdersByDateRange(ctx, accountNo, accountProductCode, "01", startDate, endDate)
+}
+
 // getOrders fetches orders with filter (ccldDvsn: 00-전체, 01-체결, 02-미체결)
 func (c *RESTClient) getOrders(ctx context.Context, accountNo string, accountProductCode string, ccldDvsn string) ([]OrderOutput, error) {
+	// 오늘 날짜
+	today := time.Now()
+	return c.getOrdersByDateRange(ctx, accountNo, accountProductCode, ccldDvsn, today, today)
+}
+
+// getOrdersByDateRange fetches orders with filter and date range
+func (c *RESTClient) getOrdersByDateRange(ctx context.Context, accountNo string, accountProductCode string, ccldDvsn string, startDate, endDate time.Time) ([]OrderOutput, error) {
 	// Get access token
 	token, err := c.auth.GetAccessToken(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
-	// 오늘 날짜
-	today := time.Now().Format("20060102")
+	// Format dates
+	startDateStr := startDate.Format("20060102")
+	endDateStr := endDate.Format("20060102")
 
 	// Build request URL (주문체결내역 조회)
 	url := fmt.Sprintf("%s/uapi/domestic-stock/v1/trading/inquire-daily-ccld", c.baseURL)
@@ -352,8 +365,8 @@ func (c *RESTClient) getOrders(ctx context.Context, accountNo string, accountPro
 	q := req.URL.Query()
 	q.Add("CANO", accountNo)
 	q.Add("ACNT_PRDT_CD", accountProductCode)
-	q.Add("INQR_STRT_DT", today)
-	q.Add("INQR_END_DT", today)
+	q.Add("INQR_STRT_DT", startDateStr)
+	q.Add("INQR_END_DT", endDateStr)
 	q.Add("SLL_BUY_DVSN_CD", "00")  // 00: 전체
 	q.Add("INQR_DVSN", "00")        // 00: 역순
 	q.Add("PDNO", "")               // 종목코드 (빈값: 전체)
