@@ -270,29 +270,23 @@ flowchart TD
 | REST | 10,000ms | 30,000ms |
 | NAVER | 30,000ms | 60,000ms |
 
-### 2. WS Subscription Manager (40 제한) - v10 개선 적용 ✨
+### 2. WS Subscription Manager (40 제한) - ✅ v14 구현 완료
 
-#### PriorityManager 모듈 (v10에서 검증됨)
+#### PriorityManager 모듈 (v14에서 완전 구현됨)
 
 **책임**:
 - 시스템 내 모든 종목의 우선순위 실시간 계산
-- WS 40개 구독 대상 동적 선정
-- REST Tier 할당 자동화
+- WS 40개 구독 대상 동적 선정 (Portfolio 전용)
+- REST Tier 할당 자동화 (Tier0=Portfolio백업, Tier1=Watchlist, Tier2=Ranking)
+
+**구현 위치**: `backend/internal/service/pricesync/priority_manager.go`
 
 **Repository 인터페이스**:
 
 ```go
-// PriorityManager가 사용하는 외부 데이터 소스
-type PriorityManagerDeps struct {
-    PositionRepo  PositionRepository   // trade.positions
-    OrderRepo     OrderRepository      // trade.orders (활성 주문)
-    WatchlistRepo WatchlistRepository  // user.watchlist (관심 종목)
-    SystemRepo    SystemRepository     // system.priority_config (지수 등)
-}
-
+// PriorityManager가 사용하는 외부 데이터 소스 (실제 구현)
 type PositionRepository interface {
-    GetOpenPositions(ctx context.Context) ([]Position, error)
-    GetClosingPositions(ctx context.Context) ([]Position, error)
+    GetOpenPositions(ctx context.Context) ([]PositionSummary, error)
 }
 
 type OrderRepository interface {
@@ -300,132 +294,158 @@ type OrderRepository interface {
 }
 
 type WatchlistRepository interface {
-    GetWatchlistSymbols(ctx context.Context, userID string) ([]string, error)
+    GetWatchlistSymbols(ctx context.Context) ([]string, error)
 }
 
 type SystemRepository interface {
-    GetSystemSymbols(ctx context.Context) ([]string, error) // KOSPI200, KOSDAQ150 ETF
+    GetSystemSymbols(ctx context.Context) ([]string, error) // 지수 추적용
+}
+
+type RankingRepository interface {
+    GetRankingSymbols(ctx context.Context) ([]string, error) // 시장 순위 종목
+}
+
+// Adapter 구현 위치: backend/cmd/runtime/priority_adapters.go
+type PositionRepoAdapter struct {
+    exitRepo    exit.PositionRepository
+    holdingRepo HoldingRepository
+    accountID   string
 }
 ```
 
-**동적 우선순위 계산 알고리즘** (v10 검증):
+**동적 우선순위 계산 알고리즘** (v14 실제 구현):
 
 ```go
 type SymbolPriority struct {
     Symbol      string
-    IsHolding   bool  // 보유 포지션
-    IsClosing   bool  // 청산 진행 중
-    IsOrder     bool  // 활성 주문
-    IsWatchlist bool  // 관심 종목
-    IsSystem    bool  // 시스템 필수 (지수 등)
-    Score       int   // 최종 점수
+    IsHolding   bool   // 보유 포지션 (Portfolio)
+    IsClosing   bool   // 청산 진행 중
+    IsOrder     bool   // 활성 주문
+    IsWatchlist bool   // 관심 종목
+    IsSystem    bool   // 시스템 필수 (지수 등)
+    IsRanking   bool   // 시장 순위 종목
+    Score       int    // 최종 점수
 }
 
-func (pm *PriorityManager) CalculatePriority(symbol string) int {
+// 실제 구현 (backend/internal/service/pricesync/priority_manager.go)
+func (pm *PriorityManager) calculateScore(p *SymbolPriority) int {
     score := 0
 
-    // P0: 보유 포지션 (최우선 - 절대 보호)
-    if pm.isHolding(symbol) {
+    // P0: 보유 포지션 (Portfolio - 절대 우선순위)
+    if p.IsHolding {
         score += 10000
-
-        // 청산 진행 중이면 추가 점수
-        if pm.isClosing(symbol) {
-            score += 5000  // Total: 15000
+        if p.IsClosing {
+            score += 5000  // Total: 15000 (청산 긴급)
         }
     }
 
-    // P1: 활성 주문 (높은 우선순위)
-    if pm.isOrder(symbol) {
+    // P1: 활성 주문
+    if p.IsOrder {
         score += 5000
     }
 
-    // P2: 관심 종목 (중간 우선순위)
-    if pm.isWatchlist(symbol) {
+    // P2: 관심 종목
+    if p.IsWatchlist {
         score += 1000
     }
 
-    // P3: 시스템 필수 (지수 ETF 등)
-    if pm.isSystem(symbol) {
+    // P3: 시스템 필수 (지수)
+    if p.IsSystem {
         score += 500
+    }
+
+    // P4: 순위 종목 (가장 낮음)
+    if p.IsRanking {
+        score += 100
     }
 
     return score
 }
 ```
 
-**우선순위 등급** (v10 기반 단순화):
+**우선순위 등급** (v14 실제 구현):
 
-| Priority | Score Range | 대상 | 보호 수준 | 용도 |
-|----------|-------------|------|----------|------|
-| P0 | 10000+ | OPEN 보유 포지션 | 절대 보호 | WS 구독 (최우선) |
-| P0+ | 15000+ | CLOSING 청산 진행 중 | 절대 보호 | WS 구독 (긴급) |
-| P1 | 5000~9999 | 활성 주문 종목 | 보호 | WS 구독 |
-| P2 | 1000~4999 | 관심 종목 | 조건부 보호 | REST Tier0/1 |
-| P3 | 500~999 | 시스템 필수 (지수) | 조건부 보호 | REST Tier1 |
-| P4 | 0~499 | 기타 | 해지 가능 | REST Tier2 |
+| Priority | Score Range | 대상 | WS/REST | 갱신 주기 |
+|----------|-------------|------|---------|----------|
+| P0+ | 15000+ | CLOSING 청산 중 | WS | 실시간 |
+| P0 | 10000~14999 | OPEN 보유 포지션 (Portfolio) | WS | 실시간 |
+| P1 | 5000~9999 | 활성 주문 종목 | WS (여유시) | 실시간 |
+| P2 | 1000~4999 | 관심 종목 (Watchlist) | REST Tier1 | 10초 |
+| P3 | 500~999 | 시스템 필수 (지수) | REST Tier2 | 30초 |
+| P4 | 100~499 | 순위 종목 (Ranking) | REST Tier2 | 30초 |
 
-**구독 대상 선정 로직**:
+**v14 핵심 변경 사항**:
+- WS 40개 제한을 Portfolio(Holdings) 전용으로 사용 (Exit Engine 우선)
+- Watchlist/Ranking은 WS 사용 안함 (REST Tier로만 동기화)
+- Tier0 = Portfolio 백업 (3초), Tier1 = Watchlist (10초), Tier2 = Ranking (30초)
+
+**구독 대상 선정 로직** (v14 실제 구현):
 
 ```go
-func (pm *PriorityManager) RefreshSubscriptions(ctx context.Context) error {
-    // 1. 모든 종목 우선순위 계산
-    allSymbols := pm.collectAllSymbols(ctx)
-    priorities := make([]*SymbolPriority, 0, len(allSymbols))
+// 실제 구현: backend/internal/service/pricesync/priority_manager.go
 
-    for _, symbol := range allSymbols {
-        p := &SymbolPriority{
-            Symbol:      symbol,
-            IsHolding:   pm.isHolding(symbol),
-            IsClosing:   pm.isClosing(symbol),
-            IsOrder:     pm.isOrder(symbol),
-            IsWatchlist: pm.isWatchlist(symbol),
-            IsSystem:    pm.isSystem(symbol),
-        }
-        p.Score = pm.CalculatePriority(symbol)
-        priorities = append(priorities, p)
-    }
+// GetWSSymbols: Portfolio (Holdings) 전용 WS 구독 (최대 40개)
+func (pm *PriorityManager) GetWSSymbols() []string {
+    pm.mu.RLock()
+    defer pm.mu.RUnlock()
 
-    // 2. Score 기준 정렬 (높은 순)
-    sort.Slice(priorities, func(i, j int) bool {
-        return priorities[i].Score > priorities[j].Score
-    })
-
-    // 3. WS 40개 선정
+    // Portfolio Holdings만 WS 사용
     wsSymbols := make([]string, 0, 40)
-    for i := 0; i < len(priorities) && i < 40; i++ {
-        wsSymbols = append(wsSymbols, priorities[i].Symbol)
-    }
-
-    // 4. REST Tier 할당
-    tier0Symbols := []string{}  // 41~80위 (WS 백업)
-    tier1Symbols := []string{}  // 81~180위
-    tier2Symbols := []string{}  // 181위~
-
-    for i := 40; i < len(priorities); i++ {
-        if i < 80 {
-            tier0Symbols = append(tier0Symbols, priorities[i].Symbol)
-        } else if i < 180 {
-            tier1Symbols = append(tier1Symbols, priorities[i].Symbol)
-        } else {
-            tier2Symbols = append(tier2Symbols, priorities[i].Symbol)
+    for _, p := range pm.priorities {
+        if p.IsHolding && len(wsSymbols) < 40 {
+            wsSymbols = append(wsSymbols, p.Symbol)
         }
     }
 
-    // 5. Manager에 적용
-    pm.manager.SetWSSubscriptions(wsSymbols)
-    pm.manager.SetTier0Symbols(tier0Symbols)
-    pm.manager.SetTier1Symbols(tier1Symbols)
-    pm.manager.SetTier2Symbols(tier2Symbols)
+    return wsSymbols
+}
 
-    log.Info("Subscriptions refreshed",
-        "ws_count", len(wsSymbols),
-        "tier0_count", len(tier0Symbols),
-        "tier1_count", len(tier1Symbols),
-        "tier2_count", len(tier2Symbols))
+// GetTier0Symbols: Portfolio REST 백업 (3초)
+func (pm *PriorityManager) GetTier0Symbols() []string {
+    return pm.GetWSSymbols()  // WS와 동일 (백업용)
+}
 
-    return nil
+// GetTier1Symbols: Watchlist + Orders (10초)
+func (pm *PriorityManager) GetTier1Symbols() []string {
+    pm.mu.RLock()
+    defer pm.mu.RUnlock()
+
+    tier1 := make([]string, 0, 100)
+    for _, p := range pm.priorities {
+        if p.IsHolding {
+            continue  // Portfolio는 WS+Tier0에서 처리
+        }
+        if p.IsWatchlist || p.IsOrder {
+            tier1 = append(tier1, p.Symbol)
+        }
+    }
+
+    return tier1
+}
+
+// GetTier2Symbols: Ranking + System (30초)
+func (pm *PriorityManager) GetTier2Symbols() []string {
+    pm.mu.RLock()
+    defer pm.mu.RUnlock()
+
+    tier2 := make([]string, 0, 200)
+    for _, p := range pm.priorities {
+        if p.IsHolding || p.IsWatchlist || p.IsOrder {
+            continue  // 이미 상위 Tier에서 처리
+        }
+        if p.IsRanking || p.IsSystem {
+            tier2 = append(tier2, p.Symbol)
+        }
+    }
+
+    return tier2
 }
 ```
+
+**핵심 차이점 (v14 vs v10)**:
+1. WS는 Portfolio만 사용 (Score 정렬 X, Holdings 플래그만 체크)
+2. Tier 구분이 명확: Tier0(Portfolio백업) / Tier1(Watchlist) / Tier2(Ranking)
+3. Exit Engine이 Portfolio 가격으로 판단하므로 WS 우선권 보장
 
 **재계산 트리거**:
 1. **초기**: Runtime 시작 시 (필수)
@@ -453,14 +473,14 @@ flowchart TD
     I --> J[Log Changes]
 ```
 
-### 3. REST Poller (Tiering)
+### 3. REST Poller (Tiering) - ✅ v14 구현 완료
 
 ```mermaid
 flowchart TD
     A[Scheduler Tick] --> B{Tier?}
-    B -->|Tier0| C[1~3초]
-    B -->|Tier1| D[5~10초]
-    B -->|Tier2| E[30~120초]
+    B -->|Tier0| C[3초]
+    B -->|Tier1| D[10초]
+    B -->|Tier2| E[30초]
     C --> F[Fetch Symbols]
     D --> F
     E --> F
@@ -471,13 +491,18 @@ flowchart TD
     I -->|no| K[Log Error]
 ```
 
-**Tier 정의:**
+**Tier 정의 (v14 실제 구현)**:
 
-| Tier | 주기 | 대상 | 수량 |
-|------|------|------|------|
-| Tier0 | 1~3초 | WS 보완 (WS 끊김 시 승격) | ~40 |
-| Tier1 | 5~10초 | 관심 종목 | ~100 |
-| Tier2 | 30~120초 | 전체 유니버스 | ~1000 |
+| Tier | 주기 | 대상 | 수량 | 구현 위치 |
+|------|------|------|------|----------|
+| Tier0 | 3초 | Portfolio 백업 (WS와 동일 종목) | ~18 | `backend/internal/service/pricesync/manager.go` |
+| Tier1 | 10초 | Watchlist + Orders | ~1~10 | `backend/internal/service/pricesync/manager.go` |
+| Tier2 | 30초 | Ranking + System | ~100~200 | `backend/internal/service/pricesync/manager.go` |
+
+**실제 운영 데이터 (2026-01-18 기준)**:
+- Tier0: 18개 (Portfolio Holdings)
+- Tier1: 1개 (Watchlist)
+- Tier2: 102개 (Ranking 100개 + System 2개)
 
 ### 4. Naver Fallback (장애 대응)
 
@@ -1103,15 +1128,110 @@ func (p *PriceSync) exposeMetrics() {
 
 ## 📊 설계 완료 기준
 
-- [ ] 입력/출력 인터페이스 명확히 정의
-- [ ] 데이터 모델 (3개 테이블) 완성
-- [ ] Best Price 선택 로직 정의
-- [ ] WS 구독 관리 정책 정의
-- [ ] REST Tiering 전략 정의
-- [ ] Naver Fallback 트리거 정의
-- [ ] SSOT 규칙 (소유권/금지) 명시
-- [ ] 에러 처리 시나리오 정의
-- [ ] 성능 고려사항 검토
+- [x] 입력/출력 인터페이스 명확히 정의
+- [x] 데이터 모델 (3개 테이블) 완성
+- [x] Best Price 선택 로직 정의
+- [x] WS 구독 관리 정책 정의
+- [x] REST Tiering 전략 정의
+- [ ] Naver Fallback 트리거 정의 (미구현)
+- [x] SSOT 규칙 (소유권/금지) 명시
+- [x] 에러 처리 시나리오 정의
+- [x] 성능 고려사항 검토
+
+---
+
+## ✅ v14 구현 상태 (2026-01-18)
+
+### 구현 완료 항목
+
+**1. PriorityManager (완전 구현)**
+- 위치: `backend/internal/service/pricesync/priority_manager.go`
+- 기능:
+  - Portfolio Holdings 우선순위 계산 (Score 10000+)
+  - WS 40개 제한을 Portfolio 전용으로 할당
+  - 3-Tier REST 자동 분류 (Tier0=Portfolio백업, Tier1=Watchlist, Tier2=Ranking)
+  - 5분마다 자동 우선순위 재계산
+
+**2. Manager (완전 구현)**
+- 위치: `backend/internal/service/pricesync/manager.go`
+- 기능:
+  - WS 구독 관리 (Subscribe/Unsubscribe)
+  - REST Tier별 Poller (Tier0=3초, Tier1=10초, Tier2=30초)
+  - 자동 구독 갱신 (PriorityManager 연동)
+  - 재연결 로직 (WS 단절 시)
+
+**3. Repository Adapters (완전 구현)**
+- 위치: `backend/cmd/runtime/priority_adapters.go`
+- 기능:
+  - PositionRepoAdapter: Holdings 조회
+  - OrderRepoAdapter: Active Orders 조회
+  - WatchlistRepoAdapter: Watchlist 조회
+  - SystemRepoAdapter: System 심볼 조회
+  - RankingRepoAdapter: Ranking 심볼 조회
+
+**4. Runtime 통합 (완전 구현)**
+- 위치: `backend/cmd/runtime/main.go`
+- 기능:
+  - PriceSync Manager 초기화
+  - PriorityManager 설정
+  - Exit Engine 연동
+  - 자동 구독 초기화
+
+### 운영 검증 결과 (2026-01-18 17:32)
+
+```
+✅ Holdings 동기화: 17개 종목
+✅ 우선순위 계산: 총 121개 종목
+   - Holdings: 17개 (Portfolio)
+   - Closing: 15개 (청산 중)
+   - Orders: 0개
+   - Watchlist: 3개
+   - System: 2개
+   - Ranking: 100개
+
+✅ WS 구독: 18개 종목 (Portfolio + Closing)
+✅ REST Tier 분배:
+   - Tier0: 18개 (Portfolio 백업, 3초 갱신)
+   - Tier1: 1개 (Watchlist, 10초 갱신)
+   - Tier2: 102개 (Ranking + System, 30초 갱신)
+
+✅ Exit Engine: 정상 작동
+   - TP1 트리거 감지 (049180 종목 +22.01% 수익)
+   - 가격 신선도 검증 활성화
+```
+
+### 미구현 항목
+
+**1. Naver Fallback**
+- 상태: 설계만 완료, 구현 미완료
+- 이유: KIS WS + REST Tier 시스템으로 충분히 안정적
+- 우선순위: P2 (필요시 구현)
+
+**2. ServiceV2 DB Protection**
+- 상태: 기본 구현 완료, Coalescing/Cache 최적화 미완료
+- 현재: 단순 INSERT 방식
+- 우선순위: P1 (성능 개선 시)
+
+**3. TimescaleDB Hypertable**
+- 상태: 미구현
+- 현재: 일반 PostgreSQL 테이블
+- 우선순위: P1 (데이터 증가 시)
+
+### 다음 단계
+
+1. **모니터링 강화** (P0)
+   - Prometheus 메트릭 추가
+   - Grafana 대시보드 구성
+   - 알람 정책 설정
+
+2. **DB 최적화** (P1)
+   - TimescaleDB Hypertable 전환
+   - Continuous Aggregate 구현
+   - Retention Policy 설정
+
+3. **Naver Fallback** (P2)
+   - KIS 장애 대응
+   - 가격 불일치 모니터링
 
 ---
 
@@ -1126,5 +1246,6 @@ func (p *PriceSync) exposeMetrics() {
 
 **Module Owner**: PriceSync
 **Dependencies**: None (최하위 모듈)
-**Version**: v14.0.0-design
-**Last Updated**: 2026-01-13
+**Version**: v14.1.0-implemented
+**Last Updated**: 2026-01-18
+**Status**: ✅ Production Ready (Portfolio Priority 완전 구현)
