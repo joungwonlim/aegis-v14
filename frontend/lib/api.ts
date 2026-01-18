@@ -1124,6 +1124,30 @@ export async function getFetchLogs(): Promise<FetchLogsResponse> {
   return await response.json()
 }
 
+export interface ScheduleInfo {
+  collector_type: string
+  display_name: string
+  interval: string
+  interval_sec: number
+}
+
+export interface SchedulesResponse {
+  schedules: ScheduleInfo[]
+}
+
+export async function getSchedules(): Promise<SchedulesResponse> {
+  const response = await fetch(`${API_BASE_URL}/v1/fetcher/schedules`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get schedules: ${response.statusText}`)
+  }
+
+  return await response.json()
+}
+
 // =====================================
 // Stock Rankings API
 // =====================================
@@ -1137,6 +1161,8 @@ export interface RankingStock {
   change_rate?: number
   volume?: number
   trading_value?: number
+  high_price?: number
+  low_price?: number
   market_cap?: number
   foreign_net_value?: number
   inst_net_value?: number

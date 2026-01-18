@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { StockSymbol } from '@/components/stock-symbol'
+import { ChangeIndicator } from '@/components/ui/change-indicator'
 import type { StockInfo, StockDetailTab } from './types'
 import { useStockPrice } from './hooks/use-stock-price'
 import { ChartTab } from './tabs/chart-tab'
@@ -134,7 +135,21 @@ export function StockDetailSheet({
               {/* 종목정보 */}
               <div>
                 <div className="font-semibold text-lg">{stock.symbolName || stock.symbol}</div>
-                <div className="text-sm text-muted-foreground">{stock.symbol}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">{stock.symbol}</span>
+                  {priceInfo && (
+                    <>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="font-mono font-medium">
+                        {priceInfo.currentPrice.toLocaleString()}원
+                      </span>
+                      <ChangeIndicator
+                        changePrice={priceInfo.changePrice}
+                        changeRate={priceInfo.changeRate}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 

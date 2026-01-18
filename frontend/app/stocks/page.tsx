@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { RefreshCw, Search, Loader2, Database, ChevronLeft, ChevronRight, Activity, DollarSign, TrendingUp, TrendingDown, Users, Building, Zap, Award, BarChart3 } from 'lucide-react'
 import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail } from '@/components/stock-detail-sheet'
+import { ChangeIndicator } from '@/components/ui/change-indicator'
 import { useHoldings } from '@/hooks/useRuntimeData'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -24,7 +25,6 @@ const RANKING_CATEGORIES = [
   { key: 'foreign_net_buy' as RankingCategory, label: '외국인 순매수', icon: Users },
   { key: 'inst_net_buy' as RankingCategory, label: '기관 순매수', icon: Building },
   { key: 'high_52week' as RankingCategory, label: '52주 최고', icon: Award },
-  { key: 'market_cap' as RankingCategory, label: '시가총액', icon: BarChart3 },
 ]
 
 export default function StocksPage() {
@@ -92,7 +92,7 @@ export default function StocksPage() {
   }
 
   // 종목 클릭
-  const handleStockClick = (stock: Stock) => {
+  const handleStockClick = (stock: { stock_code: string; stock_name: string }) => {
     openStockDetail({
       symbol: stock.stock_code,
       symbolName: stock.stock_name,
@@ -104,11 +104,10 @@ export default function StocksPage() {
     return value.toLocaleString('ko-KR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
   }
 
-  const formatPercent = (value: number | undefined | null) => {
-    if (value === undefined || value === null) return <span className="text-muted-foreground">-</span>
-    const color = value >= 0 ? '#EA5455' : '#2196F3'
-    const sign = value > 0 ? '+' : ''
-    return <span style={{ color }}>{sign}{value.toFixed(2)}%</span>
+  // 전일대비 가격 계산: changePrice ≈ currentPrice * changeRate / (100 + changeRate)
+  const calculateChangePrice = (currentPrice: number | undefined | null, changeRate: number | undefined | null) => {
+    if (!currentPrice || !changeRate || changeRate === 0) return undefined
+    return Math.round(currentPrice * changeRate / (100 + changeRate))
   }
 
   // 페이지 이동
@@ -297,12 +296,16 @@ export default function StocksPage() {
                     <TableHead>종목명</TableHead>
                     <TableHead className="text-right">현재가</TableHead>
                     <TableHead className="text-right">전일대비</TableHead>
-                    {selectedCategory === 'all' && <TableHead>업종</TableHead>}
-                    {selectedCategory === 'volume' && <TableHead className="text-right">거래량</TableHead>}
-                    {selectedCategory === 'volume_surge' && <TableHead className="text-right">거래량 증가율</TableHead>}
-                    {selectedCategory === 'trading_value' && <TableHead className="text-right">거래대금</TableHead>}
-                    {selectedCategory === 'high_52week' && <TableHead className="text-right">52주 최고가</TableHead>}
-                    {selectedCategory === 'market_cap' && <TableHead className="text-right">시가총액</TableHead>}
+                    {selectedCategory === 'all' ? (
+                      <TableHead>업종</TableHead>
+                    ) : (
+                      <>
+                        <TableHead className="text-right">거래량</TableHead>
+                        <TableHead className="text-right">거래대금</TableHead>
+                        <TableHead className="text-right">고가</TableHead>
+                        <TableHead className="text-right">저가</TableHead>
+                      </>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -357,38 +360,31 @@ export default function StocksPage() {
                             {formatNumber(stock.current_price, 0)}
                           </TableCell>
                           <TableCell className="text-right font-mono">
-                            {formatPercent(stock.change_rate)}
+                            <ChangeIndicator
+                              changePrice={calculateChangePrice(stock.current_price, stock.change_rate)}
+                              changeRate={stock.change_rate ?? undefined}
+                            />
                           </TableCell>
-                          {selectedCategory === 'all' && (
+                          {selectedCategory === 'all' ? (
                             <TableCell className="text-sm text-muted-foreground truncate max-w-xs">
                               {stock.sector || '-'}
                             </TableCell>
-                          )}
-                          {selectedCategory === 'volume' && rankingStock && (
-                            <TableCell className="text-right font-mono">
-                              {formatNumber(rankingStock.volume)}
-                            </TableCell>
-                          )}
-                          {selectedCategory === 'volume_surge' && rankingStock && (
-                            <TableCell className="text-right font-mono font-medium text-red-600">
-                              +{rankingStock.volume_surge_rate?.toFixed(2)}%
-                            </TableCell>
-                          )}
-                          {selectedCategory === 'trading_value' && rankingStock && (
-                            <TableCell className="text-right font-mono">
-                              {formatNumber(rankingStock.trading_value)}
-                            </TableCell>
-                          )}
-                          {selectedCategory === 'high_52week' && rankingStock && (
-                            <TableCell className="text-right font-mono">
-                              {formatNumber(rankingStock.high_52week, 0)}
-                            </TableCell>
-                          )}
-                          {selectedCategory === 'market_cap' && rankingStock && (
-                            <TableCell className="text-right font-mono">
-                              {formatNumber(rankingStock.market_cap)}
-                            </TableCell>
-                          )}
+                          ) : rankingStock ? (
+                            <>
+                              <TableCell className="text-right font-mono">
+                                {formatNumber(rankingStock.volume)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatNumber(rankingStock.trading_value)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatNumber(rankingStock.high_price, 0)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatNumber(rankingStock.low_price, 0)}
+                              </TableCell>
+                            </>
+                          ) : null}
                         </TableRow>
                       )
                     })

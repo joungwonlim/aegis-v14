@@ -98,7 +98,8 @@ export function useFills() {
 }
 
 /**
- * KIS 미체결 주문 조회 (1초마다 자동 갱신)
+ * KIS 미체결 주문 조회 (30초마다 자동 갱신)
+ * Note: Backend 캐싱(30초)과 함께 KIS REST API 호출량 최소화
  */
 export function useKISUnfilledOrders() {
   return useQuery({
@@ -107,14 +108,15 @@ export function useKISUnfilledOrders() {
       const result = await getKISUnfilledOrders()
       return result || []
     },
-    staleTime: 500,
-    refetchInterval: 1000,
+    staleTime: 15000, // 15초
+    refetchInterval: 30000, // 30초마다 갱신 (KIS rate limit 대응)
     placeholderData: (previousData) => previousData,
   })
 }
 
 /**
- * KIS 체결 주문 조회 (1초마다 자동 갱신)
+ * KIS 체결 주문 조회 (30초마다 자동 갱신)
+ * Note: Backend 캐싱(30초)과 함께 KIS REST API 호출량 최소화
  */
 export function useKISFilledOrders() {
   return useQuery({
@@ -123,8 +125,8 @@ export function useKISFilledOrders() {
       const result = await getKISFilledOrders()
       return result || []
     },
-    staleTime: 500,
-    refetchInterval: 1000,
+    staleTime: 15000, // 15초
+    refetchInterval: 30000, // 30초마다 갱신 (KIS rate limit 대응)
     placeholderData: (previousData) => previousData,
   })
 }

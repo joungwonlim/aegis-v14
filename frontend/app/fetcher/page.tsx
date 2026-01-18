@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Activity, Database, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
-import { getTableStats, getFetchLogs } from '@/lib/api'
+import { getTableStats, getFetchLogs, getSchedules } from '@/lib/api'
 
 interface FetcherStatus {
   active: boolean
@@ -30,8 +30,15 @@ export default function FetcherPage() {
     refetchInterval: 60000, // 1분마다 갱신
   })
 
+  const { data: schedulesData, isLoading: schedulesLoading } = useQuery({
+    queryKey: ['schedules'],
+    queryFn: getSchedules,
+    refetchInterval: 60000, // 1분마다 갱신
+  })
+
   const tableStats = tableStatsData?.tables || []
   const fetchLogs = fetchLogsData?.logs || []
+  const schedules = schedulesData?.schedules || []
 
   // Create a map of table name to latest fetch log
   const fetchLogMap = new Map(
@@ -215,19 +222,83 @@ export default function FetcherPage() {
         </CardContent>
       </Card>
 
-      {/* 스케줄 정보 (Placeholder) */}
+      {/* 스케줄 정보 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Clock className="h-5 w-5" />
             스케줄 정보
           </CardTitle>
-          <CardDescription>데이터 수집 스케줄 현황 (구현 예정)</CardDescription>
+          <CardDescription>데이터 수집 스케줄 현황</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-sm text-muted-foreground">
-            스케줄 상태 표시 기능은 추후 구현 예정입니다.
-          </div>
+          {schedulesLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>수집기</TableHead>
+                  <TableHead className="text-center">수집 간격</TableHead>
+                  <TableHead className="text-right">마지막 수집</TableHead>
+                  <TableHead className="text-right">다음 수집 예정</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {schedules.map((schedule) => {
+                  const log = fetchLogMap.get(schedule.collector_type)
+                  const lastRunTime = log ? new Date(log.started_at).getTime() : null
+                  const nextRunTime = lastRunTime ? lastRunTime + (schedule.interval_sec * 1000) : null
+
+                  return (
+                    <TableRow key={schedule.collector_type}>
+                      <TableCell>
+                        <div className="font-medium">{schedule.display_name}</div>
+                        <div className="text-xs text-muted-foreground font-mono">
+                          {schedule.collector_type}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className="font-mono">
+                          {schedule.interval}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {log ? (
+                          <>
+                            <div className="text-sm">{formatRelativeTime(log.started_at)}</div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {formatTimestamp(log.started_at)}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">-</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {nextRunTime ? (
+                          <>
+                            <div className="text-sm">
+                              {nextRunTime > Date.now()
+                                ? `${Math.floor((nextRunTime - Date.now()) / 60000)}분 후`
+                                : '곧 실행'}
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {formatTimestamp(new Date(nextRunTime).toISOString())}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">-</div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
