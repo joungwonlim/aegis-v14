@@ -826,6 +826,84 @@ func (w *KISWebSocket) monitorConnection(ctx context.Context) {
 }
 ```
 
+**⚠️ WS 재연결 Broken Pipe 대응 (2026-01-18 구현)**
+
+**문제 상황**:
+- 재연결 중 subscription restore 시 broken pipe 연쇄 발생
+- 에러 무시하고 계속 진행 → 다음 subscription도 실패 반복
+
+**해결 전략** (v14 실제 구현):
+
+```go
+// backend/internal/infra/kis/websocket_client.go:619-708
+func (c *WebSocketClient) reconnect() error {
+    // ... 연결 생성 로직 ...
+
+    // ✅ Restore subscriptions with error handling
+    restoredCount := 0
+    restoreFailed := false
+    for _, symbol := range symbols {
+        msg := map[string]interface{}{...}
+
+        if err := conn.WriteJSON(msg); err != nil {
+            log.Warn().Err(err).Str("symbol", symbol).Msg("[WS] Failed to restore subscription")
+            // ✅ Broken pipe 감지 → 즉시 중단
+            restoreFailed = true
+            break
+        } else {
+            restoredCount++
+        }
+        time.Sleep(200 * time.Millisecond)  // Rate limit 방지
+    }
+
+    // ✅ Restore 실패 시 연결 폐기 후 재시도
+    if restoreFailed {
+        c.connMu.Lock()
+        if c.conn != nil {
+            c.conn.Close()
+            c.conn = nil
+        }
+        c.isActive = false
+        c.connMu.Unlock()
+
+        log.Warn().Msg("[WS] Restore failed, retrying...")
+        time.Sleep(backoff)
+        backoff = minDuration(backoff*2, maxBackoff)
+        continue  // 다음 재연결 attempt로
+    }
+
+    // ✅ Execution subscription도 동일하게 처리
+    if execSubscribed && execAccountNo != "" {
+        execMsg := map[string]interface{}{...}
+
+        if err := conn.WriteJSON(execMsg); err != nil {
+            // ✅ 실패 시 즉시 재시도
+            c.connMu.Lock()
+            if c.conn != nil {
+                c.conn.Close()
+                c.conn = nil
+            }
+            c.isActive = false
+            c.connMu.Unlock()
+
+            log.Warn().Msg("[WS] Execution restore failed, retrying...")
+            time.Sleep(backoff)
+            backoff = minDuration(backoff*2, maxBackoff)
+            continue
+        }
+    }
+
+    // ✅ 모든 restore 성공 → 연결 완료
+    return nil
+}
+```
+
+**핵심 개선 사항**:
+1. **에러 즉시 감지**: WriteJSON 실패 시 루프 중단
+2. **연결 폐기**: 실패한 연결은 즉시 Close 후 nil 설정
+3. **재시도 보장**: backoff 적용 후 다음 attempt로 이동
+4. **Execution 동일 처리**: 체결 통보 구독도 같은 로직 적용
+
 **KIS REST API Rate Limit:**
 
 ```go
@@ -1177,6 +1255,16 @@ func (p *PriceSync) exposeMetrics() {
   - Exit Engine 연동
   - 자동 구독 초기화
 
+**5. WS 재연결 안정화 (2026-01-18 개선)** ✅
+- 위치: `backend/internal/infra/kis/websocket_client.go`
+- 기능:
+  - **Broken pipe 감지 및 즉시 재시도**: restore subscription 실패 시 연결 폐기 후 재시도
+  - **Execution subscription 복구 안정화**: 체결 통보 구독도 동일한 에러 처리
+  - **Exponential backoff**: 2초 → 4초 → 8초 (최대 60초)
+- 해결 문제:
+  - ❌ (Before) WS 재연결 중 broken pipe 연쇄 발생
+  - ✅ (After) 에러 발생 시 즉시 중단 → 재시도 → 안정적 복구
+
 ### 운영 검증 결과 (2026-01-18 17:32)
 
 ```
@@ -1246,6 +1334,6 @@ func (p *PriceSync) exposeMetrics() {
 
 **Module Owner**: PriceSync
 **Dependencies**: None (최하위 모듈)
-**Version**: v14.1.0-implemented
-**Last Updated**: 2026-01-18
-**Status**: ✅ Production Ready (Portfolio Priority 완전 구현)
+**Version**: v14.1.1-stabilized
+**Last Updated**: 2026-01-18 (WS 재연결 안정화)
+**Status**: ✅ Production Ready (Portfolio Priority + WS Stability)
