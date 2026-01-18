@@ -138,23 +138,29 @@ export function StockDetailSheet({
               </div>
 
               {/* 종목정보 */}
-              <div>
-                {/* 종목명 · 종목코드 · 시장 */}
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-lg">{stock.symbolName || stock.symbol}</span>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-sm text-muted-foreground">{stock.symbol}</span>
+              <div className="space-y-0.5">
+                {/* 라인 1: 종목명 */}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-base">{stock.symbolName || stock.symbol}</span>
+                  {holding && (
+                    <span className="text-red-500">•</span>
+                  )}
+                </div>
+
+                {/* 라인 2: 종목코드 · 시장 */}
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>{stock.symbol}</span>
                   {stock.market && (
                     <>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="text-sm text-muted-foreground">{stock.market}</span>
+                      <span>·</span>
+                      <span>{stock.market}</span>
                     </>
                   )}
                 </div>
 
-                {/* 현재가 · 전일대비 */}
+                {/* 라인 3: 현재가 · 전일대비 */}
                 {priceInfo && (
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-2">
                     <span className="font-mono font-medium text-base">
                       {priceInfo.currentPrice.toLocaleString()}
                     </span>
