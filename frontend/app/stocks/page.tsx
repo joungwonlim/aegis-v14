@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { RefreshCw, Search, Loader2, Database, ChevronLeft, ChevronRight, Activity, DollarSign, TrendingUp, TrendingDown, Users, Building } from 'lucide-react'
+import { RefreshCw, Search, Loader2, Database, ChevronLeft, ChevronRight, Activity, DollarSign, TrendingUp, TrendingDown, Users, Building, Zap, Award, BarChart3 } from 'lucide-react'
 import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail } from '@/components/stock-detail-sheet'
 import { useHoldings } from '@/hooks/useRuntimeData'
@@ -18,11 +18,14 @@ import { cn } from '@/lib/utils'
 const RANKING_CATEGORIES = [
   { key: 'all' as const, label: '전체', icon: Database },
   { key: 'volume' as RankingCategory, label: '거래량 상위', icon: Activity },
+  { key: 'volume_surge' as RankingCategory, label: '거래량 급증', icon: Zap },
   { key: 'trading_value' as RankingCategory, label: '거래대금 상위', icon: DollarSign },
-  { key: 'gainers' as RankingCategory, label: '상승률 상위', icon: TrendingUp },
-  { key: 'losers' as RankingCategory, label: '하락률 상위', icon: TrendingDown },
+  { key: 'gainers' as RankingCategory, label: '상승', icon: TrendingUp },
+  { key: 'losers' as RankingCategory, label: '하락', icon: TrendingDown },
   { key: 'foreign_net_buy' as RankingCategory, label: '외국인 순매수', icon: Users },
   { key: 'inst_net_buy' as RankingCategory, label: '기관 순매수', icon: Building },
+  { key: 'high_52week' as RankingCategory, label: '52주 최고', icon: Award },
+  { key: 'market_cap' as RankingCategory, label: '시가총액', icon: BarChart3 },
 ]
 
 export default function StocksPage() {
@@ -299,7 +302,10 @@ export default function StocksPage() {
                     <TableHead className="text-right">전일대비</TableHead>
                     {selectedCategory === 'all' && <TableHead>업종</TableHead>}
                     {selectedCategory === 'volume' && <TableHead className="text-right">거래량</TableHead>}
+                    {selectedCategory === 'volume_surge' && <TableHead className="text-right">거래량 증가율</TableHead>}
                     {selectedCategory === 'trading_value' && <TableHead className="text-right">거래대금</TableHead>}
+                    {selectedCategory === 'high_52week' && <TableHead className="text-right">52주 최고가</TableHead>}
+                    {selectedCategory === 'market_cap' && <TableHead className="text-right">시가총액</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -366,9 +372,24 @@ export default function StocksPage() {
                               {formatNumber(rankingStock.volume)}
                             </TableCell>
                           )}
+                          {selectedCategory === 'volume_surge' && rankingStock && (
+                            <TableCell className="text-right font-mono font-medium text-red-600">
+                              +{rankingStock.volume_surge_rate?.toFixed(2)}%
+                            </TableCell>
+                          )}
                           {selectedCategory === 'trading_value' && rankingStock && (
                             <TableCell className="text-right font-mono">
                               {formatNumber(rankingStock.trading_value)}
+                            </TableCell>
+                          )}
+                          {selectedCategory === 'high_52week' && rankingStock && (
+                            <TableCell className="text-right font-mono">
+                              {formatNumber(rankingStock.high_52week, 0)}
+                            </TableCell>
+                          )}
+                          {selectedCategory === 'market_cap' && rankingStock && (
+                            <TableCell className="text-right font-mono">
+                              {formatNumber(rankingStock.market_cap)}
                             </TableCell>
                           )}
                         </TableRow>

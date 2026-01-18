@@ -1140,6 +1140,8 @@ export interface RankingStock {
   market_cap?: number
   foreign_net_value?: number
   inst_net_value?: number
+  volume_surge_rate?: number
+  high_52week?: number
 }
 
 export interface RankingResponse {
@@ -1149,7 +1151,7 @@ export interface RankingResponse {
   total_count: number
 }
 
-export type RankingCategory = 'volume' | 'trading_value' | 'gainers' | 'losers' | 'foreign_net_buy' | 'inst_net_buy'
+export type RankingCategory = 'volume' | 'trading_value' | 'gainers' | 'losers' | 'foreign_net_buy' | 'inst_net_buy' | 'volume_surge' | 'high_52week' | 'market_cap'
 export type MarketFilter = 'ALL' | 'KOSPI' | 'KOSDAQ'
 
 export async function getStockRanking(category: RankingCategory, limit = 20, market: MarketFilter = 'ALL'): Promise<RankingResponse> {
@@ -1160,6 +1162,9 @@ export async function getStockRanking(category: RankingCategory, limit = 20, mar
     losers: 'losers',
     foreign_net_buy: 'foreign-net-buy',
     inst_net_buy: 'inst-net-buy',
+    volume_surge: 'volume-surge',
+    high_52week: 'high-52week',
+    market_cap: 'market-cap',
   }
 
   const endpoint = categoryMap[category]
