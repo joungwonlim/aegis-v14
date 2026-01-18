@@ -8,7 +8,8 @@ import (
 
 // RegisterRankingRoutes registers stock ranking routes
 func RegisterRankingRoutes(router *mux.Router, dbPool *postgres.Pool) {
-	handler := handlers.NewStockRankingsHandler(dbPool.Pool)
+	rankingRepo := postgres.NewRankingRepository(dbPool.Pool)
+	handler := handlers.NewStockRankingsHandler(dbPool.Pool, rankingRepo)
 
 	// v1 API
 	v1 := router.PathPrefix("/api/v1/rankings").Subrouter()
