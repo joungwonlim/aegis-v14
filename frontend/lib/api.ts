@@ -1079,6 +1079,25 @@ export interface TableStatsResponse {
   tables: TableStat[]
 }
 
+export interface FetchLog {
+  id: number
+  job_type: string
+  source: string
+  target_table: string
+  records_fetched: number
+  records_inserted: number
+  records_updated: number
+  status: string
+  error_message?: string
+  started_at: string
+  finished_at?: string
+  duration_ms: number
+}
+
+export interface FetchLogsResponse {
+  logs: FetchLog[]
+}
+
 export async function getTableStats(): Promise<TableStatsResponse> {
   const response = await fetch(`${API_BASE_URL}/v1/fetcher/tables/stats`, {
     method: 'GET',
@@ -1087,6 +1106,75 @@ export async function getTableStats(): Promise<TableStatsResponse> {
 
   if (!response.ok) {
     throw new Error(`Failed to get table stats: ${response.statusText}`)
+  }
+
+  return await response.json()
+}
+
+export async function getFetchLogs(): Promise<FetchLogsResponse> {
+  const response = await fetch(`${API_BASE_URL}/v1/fetcher/execution-logs`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get fetch logs: ${response.statusText}`)
+  }
+
+  return await response.json()
+}
+
+// =====================================
+// Stock Rankings API
+// =====================================
+
+export interface RankingStock {
+  rank: number
+  stock_code: string
+  stock_name: string
+  market: string
+  current_price?: number
+  change_rate?: number
+  volume?: number
+  trading_value?: number
+  market_cap?: number
+  foreign_net_value?: number
+  inst_net_value?: number
+}
+
+export interface RankingResponse {
+  category: string
+  updated_at: string
+  stocks: RankingStock[]
+  total_count: number
+}
+
+export type RankingCategory = 'volume' | 'trading_value' | 'gainers' | 'losers' | 'foreign_net_buy' | 'inst_net_buy'
+export type MarketFilter = 'ALL' | 'KOSPI' | 'KOSDAQ'
+
+export async function getStockRanking(category: RankingCategory, limit = 20, market: MarketFilter = 'ALL'): Promise<RankingResponse> {
+  const categoryMap = {
+    volume: 'volume',
+    trading_value: 'trading-value',
+    gainers: 'gainers',
+    losers: 'losers',
+    foreign_net_buy: 'foreign-net-buy',
+    inst_net_buy: 'inst-net-buy',
+  }
+
+  const endpoint = categoryMap[category]
+  const params = new URLSearchParams({ limit: limit.toString() })
+  if (market !== 'ALL') {
+    params.append('market', market)
+  }
+
+  const response = await fetch(`${API_BASE_URL}/v1/rankings/${endpoint}?${params.toString()}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get ${category} ranking: ${response.statusText}`)
   }
 
   return await response.json()

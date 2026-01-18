@@ -2,38 +2,72 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { listStocks, type Stock, type ListStocksResponse } from '@/lib/api'
+import { listStocks, getStockRanking, type Stock, type ListStocksResponse, type RankingCategory, type MarketFilter } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { RefreshCw, Search, Loader2, Database, ChevronLeft, ChevronRight } from 'lucide-react'
+import { RefreshCw, Search, Loader2, Database, ChevronLeft, ChevronRight, Activity, DollarSign, TrendingUp, TrendingDown, Users, Building } from 'lucide-react'
 import { StockSymbol } from '@/components/stock-symbol'
 import { StockDetailSheet, useStockDetail } from '@/components/stock-detail-sheet'
 import { useHoldings } from '@/hooks/useRuntimeData'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
+const RANKING_CATEGORIES = [
+  { key: 'all' as const, label: '전체', icon: Database },
+  { key: 'volume' as RankingCategory, label: '거래량 상위', icon: Activity },
+  { key: 'trading_value' as RankingCategory, label: '거래대금 상위', icon: DollarSign },
+  { key: 'gainers' as RankingCategory, label: '상승률 상위', icon: TrendingUp },
+  { key: 'losers' as RankingCategory, label: '하락률 상위', icon: TrendingDown },
+  { key: 'foreign_net_buy' as RankingCategory, label: '외국인 순매수', icon: Users },
+  { key: 'inst_net_buy' as RankingCategory, label: '기관 순매수', icon: Building },
+]
+
 export default function StocksPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(1)
+  const [selectedCategory, setSelectedCategory] = useState<'all' | RankingCategory>('all')
+  const [selectedMarket, setSelectedMarket] = useState<MarketFilter>('ALL')
   const limit = 100
 
-  // 데이터 조회
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ['stocks', searchQuery, page],
+  // 데이터 조회 (전체 또는 순위)
+  const { data: stocksData, isLoading: isLoadingStocks, refetch: refetchStocks } = useQuery({
+    queryKey: ['stocks', searchQuery, page, selectedMarket],
     queryFn: async () => {
       return listStocks({
         search: searchQuery.trim() || undefined,
         page,
         limit,
+        market: selectedMarket !== 'ALL' ? selectedMarket : undefined,
       })
     },
+    enabled: selectedCategory === 'all',
   })
 
-  const stocks = data?.stocks || []
-  const pagination = data?.pagination
+  const { data: rankingData, isLoading: isLoadingRanking, refetch: refetchRanking } = useQuery({
+    queryKey: ['stock-ranking', selectedCategory, selectedMarket],
+    queryFn: async () => {
+      if (selectedCategory === 'all') return null
+      return getStockRanking(selectedCategory, 100, selectedMarket)
+    },
+    enabled: selectedCategory !== 'all',
+  })
+
+  // 표시할 데이터 결정
+  const isLoading = selectedCategory === 'all' ? isLoadingStocks : isLoadingRanking
+  const stocks = selectedCategory === 'all'
+    ? (stocksData?.stocks || [])
+    : (rankingData?.stocks.map(s => ({
+        stock_code: s.stock_code,
+        stock_name: s.stock_name,
+        market: s.market,
+        current_price: s.current_price,
+        change_rate: s.change_rate,
+        sector: undefined,
+      })) || [])
+  const pagination = selectedCategory === 'all' ? stocksData?.pagination : undefined
 
   const { data: holdings = [] } = useHoldings()
 
@@ -41,8 +75,18 @@ export default function StocksPage() {
   const { selectedStock, isOpen: isStockDetailOpen, openStockDetail, handleOpenChange } = useStockDetail()
 
   const handleRefresh = () => {
-    refetch()
+    if (selectedCategory === 'all') {
+      refetchStocks()
+    } else {
+      refetchRanking()
+    }
     toast.success('새로고침 완료')
+  }
+
+  const handleCategoryChange = (category: 'all' | RankingCategory) => {
+    setSelectedCategory(category)
+    setPage(1)
+    setSearchQuery('')
   }
 
   // 종목 클릭
@@ -135,8 +179,57 @@ export default function StocksPage() {
         )}
       </div>
 
+      {/* Market Filter Tabs */}
+      <div className="flex gap-2 items-center">
+        <span className="text-sm font-medium text-muted-foreground">시장:</span>
+        <div className="flex gap-2">
+          {(['ALL', 'KOSPI', 'KOSDAQ'] as MarketFilter[]).map((market) => {
+            const isSelected = selectedMarket === market
+            const label = market === 'ALL' ? '전체' : market
+            return (
+              <Button
+                key={market}
+                variant={isSelected ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedMarket(market)}
+                className={cn(
+                  'transition-all',
+                  isSelected && 'shadow-md'
+                )}
+              >
+                {label}
+              </Button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Category Tabs */}
+      <div className="flex gap-2 flex-wrap">
+        {RANKING_CATEGORIES.map((cat) => {
+          const Icon = cat.icon
+          const isSelected = selectedCategory === cat.key
+          return (
+            <Button
+              key={cat.key}
+              variant={isSelected ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleCategoryChange(cat.key)}
+              className={cn(
+                'transition-all',
+                isSelected && 'shadow-md'
+              )}
+            >
+              <Icon className="h-4 w-4 mr-2" />
+              {cat.label}
+            </Button>
+          )
+        })}
+      </div>
+
       {/* Search & Actions */}
-      <div className="flex gap-2">
+      {selectedCategory === 'all' && (
+        <div className="flex gap-2">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -154,23 +247,40 @@ export default function StocksPage() {
           새로고침
         </Button>
       </div>
+      )}
 
       {/* Stocks Table */}
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
-              <CardTitle>종목 목록</CardTitle>
+              <CardTitle>
+                {RANKING_CATEGORIES.find(c => c.key === selectedCategory)?.label || '종목 목록'}
+              </CardTitle>
               <CardDescription>
-                {searchQuery && pagination
-                  ? `검색 결과: "${searchQuery}" - ${pagination.total_count.toLocaleString()}개 (페이지 ${pagination.current_page} / ${pagination.total_pages})`
-                  : searchQuery
-                  ? `검색 결과: "${searchQuery}"`
-                  : pagination
-                  ? `페이지 ${pagination.current_page} / ${pagination.total_pages}`
-                  : '전체 종목'}
+                {selectedCategory === 'all' ? (
+                  searchQuery && pagination
+                    ? `검색 결과: "${searchQuery}" - ${pagination.total_count.toLocaleString()}개 (페이지 ${pagination.current_page} / ${pagination.total_pages})`
+                    : searchQuery
+                    ? `검색 결과: "${searchQuery}"`
+                    : pagination
+                    ? `페이지 ${pagination.current_page} / ${pagination.total_pages}`
+                    : '전체 종목'
+                ) : (
+                  `${stocks.length}개 종목`
+                )}
               </CardDescription>
             </div>
+            {selectedCategory !== 'all' && rankingData?.updated_at && (
+              <Badge variant="outline" className="text-xs">
+                마지막 갱신: {new Date(rankingData.updated_at).toLocaleString('ko-KR', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Badge>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -183,11 +293,13 @@ export default function StocksPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12">순번</TableHead>
+                    <TableHead className="w-12">순위</TableHead>
                     <TableHead>종목명</TableHead>
                     <TableHead className="text-right">현재가</TableHead>
                     <TableHead className="text-right">전일대비</TableHead>
-                    <TableHead>업종</TableHead>
+                    {selectedCategory === 'all' && <TableHead>업종</TableHead>}
+                    {selectedCategory === 'volume' && <TableHead className="text-right">거래량</TableHead>}
+                    {selectedCategory === 'trading_value' && <TableHead className="text-right">거래대금</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -203,14 +315,30 @@ export default function StocksPage() {
                       const globalIndex = pagination
                         ? (pagination.current_page - 1) * pagination.limit + index + 1
                         : index + 1
+                      const rankingStock = selectedCategory !== 'all' && rankingData ? rankingData.stocks[index] : null
+
                       return (
                         <TableRow
                           key={stock.stock_code}
                           className="cursor-pointer hover:bg-accent"
                           onClick={() => handleStockClick(stock)}
                         >
-                          <TableCell className="text-center text-muted-foreground">
-                            {globalIndex}
+                          <TableCell className="text-center">
+                            {selectedCategory !== 'all' && rankingStock ? (
+                              <Badge
+                                variant={rankingStock.rank <= 3 ? 'default' : 'outline'}
+                                className={cn(
+                                  'min-w-[2rem] justify-center',
+                                  rankingStock.rank === 1 && 'bg-yellow-500 hover:bg-yellow-600',
+                                  rankingStock.rank === 2 && 'bg-gray-400 hover:bg-gray-500',
+                                  rankingStock.rank === 3 && 'bg-orange-600 hover:bg-orange-700'
+                                )}
+                              >
+                                {rankingStock.rank}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">{globalIndex}</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <StockSymbol
@@ -228,9 +356,21 @@ export default function StocksPage() {
                           <TableCell className="text-right font-mono">
                             {formatPercent(stock.change_rate)}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground truncate max-w-xs">
-                            {stock.sector || '-'}
-                          </TableCell>
+                          {selectedCategory === 'all' && (
+                            <TableCell className="text-sm text-muted-foreground truncate max-w-xs">
+                              {stock.sector || '-'}
+                            </TableCell>
+                          )}
+                          {selectedCategory === 'volume' && rankingStock && (
+                            <TableCell className="text-right font-mono">
+                              {formatNumber(rankingStock.volume)}
+                            </TableCell>
+                          )}
+                          {selectedCategory === 'trading_value' && rankingStock && (
+                            <TableCell className="text-right font-mono">
+                              {formatNumber(rankingStock.trading_value)}
+                            </TableCell>
+                          )}
                         </TableRow>
                       )
                     })
@@ -238,8 +378,8 @@ export default function StocksPage() {
                 </TableBody>
               </Table>
 
-              {/* Pagination */}
-              {pagination && pagination.total_pages > 1 && (
+              {/* Pagination (전체 탭에만 표시) */}
+              {selectedCategory === 'all' && pagination && pagination.total_pages > 1 && (
                 <div className="flex items-center justify-between mt-4">
                   <div className="text-sm text-muted-foreground">
                     {pagination.total_count.toLocaleString()}개 중{' '}
