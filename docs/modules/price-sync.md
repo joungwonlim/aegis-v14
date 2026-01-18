@@ -30,7 +30,7 @@
 ✅ **데이터:**
 - `market.prices_ticks` - 원본 가격 이벤트
 - `market.prices_best` - 심볼별 최선가 캐시
-- `market.freshness` - 심볼별 신선도 메타
+- `market.freshness` - 심볼별 신선도 메타 
 
 ✅ **로직:**
 - Best Price 선택 알고리즘

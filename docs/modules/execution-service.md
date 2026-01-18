@@ -533,15 +533,52 @@ func (s *ExecutionService) HandleWsFillEvent(ctx context.Context, event WsFillEv
 
 ```mermaid
 flowchart TD
-    A[Every 3~5초] --> B[KIS REST: 체결 조회 since cursor]
-    B --> C[For each fill]
-    C --> D[Upsert fill UNIQUE by exec_id]
-    D --> E[Update orders.filled_qty]
-    E --> F[Derive order status]
-    F --> G[Update cursor on commit]
+    A[Every 10~30초] --> B{Rate Limit OK?}
+    B -->|No| C[Skip + Backoff]
+    B -->|Yes| D[KIS REST: 체결 조회 since cursor]
+    D --> E{Success?}
+    E -->|EGW00201| F[Exponential Backoff]
+    E -->|Yes| G[For each fill]
+    F --> H[Reset to base interval]
+    G --> I[Upsert fill UNIQUE by exec_id]
+    I --> J[Update orders.filled_qty]
+    J --> K[Derive order status]
+    K --> L[Update cursor on commit]
+    L --> H
 ```
 
 **KIS API**: `GET /uapi/domestic-stock/v1/trading/inquire-ccnl` (체결 내역)
+
+**⚠️ Rate Limit 대응 (EGW00201: 초당 거래건수 초과)**
+
+**문제 상황**:
+- Fills sync가 너무 자주 실행되어 KIS API rate limit 초과
+- EGW00201 에러 발생 시 즉시 재시도 → 연쇄 실패 → WS 재연결 지연
+
+**해결 전략**:
+
+| 항목 | 설정 | 설명 |
+|------|------|------|
+| **기본 주기** | 10~30초 | v10의 3초는 과도 (rate limit 유발) |
+| **활성 주문 존재** | 10초 | 체결 발생 가능성 높음 |
+| **활성 주문 없음** | 30초 | API 부하 감소 |
+| **EGW00201 발생** | 1~3초 sleep + backoff | 즉시 재시도 금지 |
+| **연속 실패 (3회)** | Circuit Open (10~30초) | 폭주 차단 |
+
+**Exponential Backoff**:
+
+```
+성공: base interval (10~30초)
+1회 실패: 1s + jitter(0~300ms)
+2회 실패: 2s + jitter
+3회 실패: 4s + jitter
+4회 실패: 8s + jitter (최대 30s cap)
+성공 복귀: base interval로 복귀
+```
+
+**Singleflight 보호**:
+- 동시 여러 goroutine이 Fills sync 호출 방지
+- 단일 워커만 실행, 나머지는 대기/스킵
 
 **Cursor 관리 (정확히 한 번 처리)**:
 

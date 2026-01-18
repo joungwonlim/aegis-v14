@@ -13,7 +13,12 @@ const (
 	intentMonitorInterval = 2 * time.Second  // Intent monitor 주기 (1~3초 권장)
 	reconcileInterval     = 30 * time.Second // Reconciliation 주기 (10~30초 권장, 토큰 부담 완화)
 	holdingsSyncInterval  = 30 * time.Second // Holdings sync 주기 (10~30초 권장, 토큰 부담 완화)
-	fillsSyncInterval     = 3 * time.Second  // Fills sync 주기 (3~5초 권장)
+	fillsSyncInterval     = 10 * time.Second // Fills sync 주기 (10~30초 권장, rate limit 대응)
+
+	// Fills sync backoff (EGW00201 대응)
+	fillsSyncBaseBackoff = 1 * time.Second
+	fillsSyncMaxBackoff  = 30 * time.Second
+	fillsSyncMaxRetries  = 5
 )
 
 // Service is the Execution Engine service
@@ -38,6 +43,10 @@ type Service struct {
 
 	// State
 	prevHoldings []*execution.Holding // Previous holdings snapshot for ExitEvent detection
+
+	// Fills sync backoff state (rate limit 대응)
+	fillsSyncFailCount   int
+	fillsSyncNextAllowed time.Time
 }
 
 // NewService creates a new Execution service
@@ -145,7 +154,7 @@ func (s *Service) holdingsSyncLoop() {
 	}
 }
 
-// fillsSyncLoop syncs fills from KIS
+// fillsSyncLoop syncs fills from KIS with backoff on rate limit
 func (s *Service) fillsSyncLoop() {
 	ticker := time.NewTicker(fillsSyncInterval)
 	defer ticker.Stop()
@@ -153,8 +162,51 @@ func (s *Service) fillsSyncLoop() {
 	for {
 		select {
 		case <-ticker.C:
+			// Check if we're in backoff period (rate limit)
+			if time.Now().Before(s.fillsSyncNextAllowed) {
+				remaining := time.Until(s.fillsSyncNextAllowed)
+				log.Warn().
+					Dur("remaining", remaining).
+					Int("fail_count", s.fillsSyncFailCount).
+					Msg("Fills sync skipped (in backoff)")
+				continue
+			}
+
+			// Attempt sync
 			if err := s.syncFills(s.ctx); err != nil {
-				log.Error().Err(err).Msg("Fills sync failed")
+				s.fillsSyncFailCount++
+
+				// Check if EGW00201 (rate limit)
+				isRateLimit := isEGW00201Error(err)
+
+				// Calculate backoff duration (exponential with cap)
+				backoff := fillsSyncBaseBackoff
+				for i := 1; i < s.fillsSyncFailCount && i < fillsSyncMaxRetries; i++ {
+					backoff *= 2
+				}
+				if backoff > fillsSyncMaxBackoff {
+					backoff = fillsSyncMaxBackoff
+				}
+
+				// Set next allowed time
+				s.fillsSyncNextAllowed = time.Now().Add(backoff)
+
+				log.Error().
+					Err(err).
+					Bool("rate_limit", isRateLimit).
+					Int("fail_count", s.fillsSyncFailCount).
+					Dur("backoff", backoff).
+					Time("next_allowed", s.fillsSyncNextAllowed).
+					Msg("Fills sync failed")
+			} else {
+				// Success - reset backoff state
+				if s.fillsSyncFailCount > 0 {
+					log.Info().
+						Int("prev_fail_count", s.fillsSyncFailCount).
+						Msg("Fills sync recovered")
+					s.fillsSyncFailCount = 0
+					s.fillsSyncNextAllowed = time.Time{}
+				}
 			}
 
 		case <-s.ctx.Done():
@@ -162,4 +214,29 @@ func (s *Service) fillsSyncLoop() {
 			return
 		}
 	}
+}
+
+// isEGW00201Error checks if error is EGW00201 (rate limit)
+func isEGW00201Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return contains(errStr, "EGW00201") || contains(errStr, "초당 거래건수를 초과")
+}
+
+// contains checks if haystack contains needle (case-sensitive)
+func contains(haystack, needle string) bool {
+	return len(needle) > 0 && len(haystack) >= len(needle) &&
+		(haystack == needle || len(haystack) > len(needle) &&
+		findSubstring(haystack, needle))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

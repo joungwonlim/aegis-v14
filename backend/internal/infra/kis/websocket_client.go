@@ -618,6 +618,7 @@ func (c *WebSocketClient) reconnect() error {
 
 		// Restore subscriptions
 		restoredCount := 0
+		restoreFailed := false
 		for _, symbol := range symbols {
 			// Send subscribe message directly (don't update subscriptions map)
 			msg := map[string]interface{}{
@@ -637,12 +638,31 @@ func (c *WebSocketClient) reconnect() error {
 
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Warn().Err(err).Str("symbol", symbol).Msg("[WS] Failed to restore subscription")
+				// ✅ Broken pipe or connection error -> abort this attempt and retry
+				restoreFailed = true
+				break
 			} else {
 				restoredCount++
 			}
 
 			// ✅ Increased delay between subscriptions (50ms → 200ms) to reduce server load
 			time.Sleep(200 * time.Millisecond)
+		}
+
+		// ✅ If restore failed, close this connection and retry
+		if restoreFailed {
+			c.connMu.Lock()
+			if c.conn != nil {
+				c.conn.Close()
+				c.conn = nil
+			}
+			c.isActive = false
+			c.connMu.Unlock()
+
+			log.Warn().Msg("[WS] Restore failed, retrying...")
+			time.Sleep(backoff)
+			backoff = minDuration(backoff*2, maxBackoff)
+			continue
 		}
 
 		// Restore execution subscription if it was active
@@ -669,6 +689,19 @@ func (c *WebSocketClient) reconnect() error {
 
 			if err := conn.WriteJSON(execMsg); err != nil {
 				log.Warn().Err(err).Msg("[WS] Failed to restore execution subscription")
+				// ✅ Broken pipe -> abort and retry
+				c.connMu.Lock()
+				if c.conn != nil {
+					c.conn.Close()
+					c.conn = nil
+				}
+				c.isActive = false
+				c.connMu.Unlock()
+
+				log.Warn().Msg("[WS] Execution restore failed, retrying...")
+				time.Sleep(backoff)
+				backoff = minDuration(backoff*2, maxBackoff)
+				continue
 			} else {
 				log.Info().Str("account_no", trKey).Msg("[WS] Restored execution subscription")
 			}
